@@ -1,7 +1,6 @@
 # crt
-./crt
+crt
 
 # python residue
 __pycache__
 .venv
-
