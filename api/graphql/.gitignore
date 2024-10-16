@@ -1,0 +1,9 @@
+# cloned graphw00f repo
+graphw00f
+
+# private folders for dev
+introspection_results
+fingerprint_results
+
+# private files for dev
+graphql.txt

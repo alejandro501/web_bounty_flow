@@ -1,0 +1,3 @@
+https://domain.com/graphql
+https://graphql.domain.com
+https://gql.domain.com
