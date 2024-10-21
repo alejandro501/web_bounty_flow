@@ -33,7 +33,7 @@ enumerate_subdomains() {
     done <wildcards.txt
 
     echo "Probing live subdomains..."
-    cat temp_subdomains.txt | httprobe -c 50 --prefer-https | anew live_subdomains.txt | sort
+    cat subdomains.txt | httprobe -c 50 --prefer-https | anew live_subdomains.txt | sort
 
     echo "Subdomain enumeration completed."
     echo "Results saved in live_subdomains.txt."
@@ -41,7 +41,3 @@ enumerate_subdomains() {
     # cleanup
     rm temp_subdomains.txt
 }
-
-# function calls
-./enumerate_subdomains.sh
-./toxicache.sh

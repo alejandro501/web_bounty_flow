@@ -28,6 +28,9 @@ fingerprint_with_grapw00f() {
 main() {
     INPUT_FILE="${1:-graphql.txt}"
 
+    # clear trailing slashes from endpoints
+    sed -i 's|/*$||' "$INPUT_FILE"
+
     while read -r endpoint; do
         if [ -n "$endpoint" ]; then
             fingerprint_with_grapw00f "$endpoint"
@@ -36,3 +39,4 @@ main() {
 }
 
 main "$@"
+

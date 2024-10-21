@@ -23,7 +23,7 @@ def main():
 
     hop_by_hop_checker.run_checks_in_threads(subdomains, proxies, verify=args.ca if args.ca else False, max_workers=args.threads)
 
-    sort_subdomains.sort_subdomains(args.file)  
+    sort_subdomains.sort_subdomains(args.file)
 
 if __name__ == "__main__":
     main()
