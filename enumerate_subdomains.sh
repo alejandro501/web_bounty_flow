@@ -1,5 +1,19 @@
 #!/bin/bash
 
+# Parse command-line arguments
+USE_TOR=false
+
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --tor) USE_TOR=true ;;
+        *) echo "Usage: $0 [--tor]"; exit 1 ;;
+    esac
+    shift
+done
+
+source ./setup_tor.sh
+setup_tor "$USE_TOR"
+
 enumerate_subdomains() {
     if ! command -v subfinder &>/dev/null; then
         echo "Subfinder is not installed. Please install it first."
@@ -38,6 +52,9 @@ enumerate_subdomains() {
     echo "Subdomain enumeration completed."
     echo "Results saved in live_subdomains.txt."
 
-    # cleanup
+    # Cleanup
     rm temp_subdomains.txt
 }
+
+# Call the function
+enumerate_subdomains

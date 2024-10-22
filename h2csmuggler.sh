@@ -6,21 +6,26 @@ DEFAULT_OUTPUT="h2csmuggler.log"
 
 # Function to display usage
 usage() {
-    echo "Usage: $0 [--input <input_file>] [--output <output_file>]"
+    echo "Usage: $0 [--input <input_file>] [--output <output_file>] [--tor]"
     echo "  --input  Specify the input file (default: $DEFAULT_INPUT)"
     echo "  --output Specify the output file (default: $DEFAULT_OUTPUT)"
+    echo "  --tor    Run through Tor"
     exit 1
 }
 
 # Parse command-line arguments
+USE_TOR=false
+
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --input)
-            INPUT="$2";
+            INPUT="$2"
             shift ;;
         --output)
-            OUTPUT="$2";
+            OUTPUT="$2"
             shift ;;
+        --tor)
+            USE_TOR=true ;;
         *)
             usage ;;
     esac
@@ -30,6 +35,9 @@ done
 # Set input and output to defaults if not specified
 INPUT="${INPUT:-$DEFAULT_INPUT}"
 OUTPUT="${OUTPUT:-$DEFAULT_OUTPUT}"
+
+source ./setup_tor.sh
+setup_tor "$USE_TOR"
 
 # Check if the input file exists
 if [[ ! -f "$INPUT" ]]; then
