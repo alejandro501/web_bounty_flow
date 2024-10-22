@@ -1,6 +1,6 @@
 # steps with scripts
 
-## main
+## grapql
 
 ./gql.flow.sh # --input graphql.txt
 
