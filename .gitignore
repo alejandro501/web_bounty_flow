@@ -5,6 +5,9 @@ notes
 # crt
 crt
 
+# wip stuff
+data
+
 # python residue
 __pycache__
 .venv
