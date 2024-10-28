@@ -25,17 +25,14 @@ check_tool "subfinder"
 check_tool "httprobe"
 check_tool "anew"
 
-# Ensure necessary file exists
-if [ ! -f wildcards.txt ]; then
-    echo "The wildcards.txt file does not exist."
-    exit 1
-fi
+check_tool "enumerate_subdomains"
+check_tool "sort_http"
 
-echo "Starting subdomain enumeration..."
-./enumerate_subdomains.sh
+# Starting subdomain enumeration...
+enumerate_subdomains -I wildcards
 
 echo "Sorting subdomains by status code..."
-python sort_subdomains.py
+sort_http -I subdomains
 
 echo "Running hop-by-hop checker..."
 python hop_by_hop_checker.py
