@@ -1,10 +1,4 @@
-#Site contents Copyright IG Group
-
-User-agent: *
-
 #Level 1: Content directories
-Disallow: https://www.ig.com/appform/
-Disallow: https://www.ig.com/content/
 Disallow: https://www.ig.com/statistics/
 Disallow: https://www.ig.com/pricestream/
 Disallow: https://www.ig.com/css/
