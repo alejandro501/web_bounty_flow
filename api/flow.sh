@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # global variables
-TARGET_ORGANIZATION=''
+ORGANIZATION=''
 ORGANIZATION_LIST=''
 
 usage() {
@@ -19,7 +19,7 @@ usage() {
 get_params() {
     while [[ "$#" -gt 0 ]]; do
         case $1 in
-            -oR|--org) TARGET_ORGANIZATION="$2"; shift ;;
+            -oR|--org) ORGANIZATION="$2"; shift ;;
             -oL|--org-list) ORGANIZATION_LIST="$2"; shift ;;
             -H|--help) usage; exit 0 ;;
             *) echo "Unknown parameter: $1"; exit 1 ;;
@@ -29,17 +29,19 @@ get_params() {
 }
 
 # generate dork links - google github shodan
-dorking() {
-    if [[ -n "$TARGET_ORGANIZATION" ]]; then
-        generate_dork_links -oR "$TARGET_ORGANIZATION" --api
+passive_recon() {
+    if [[ -n "$ORGANIZATION" ]]; then
+        generate_dork_links -oR "$ORGANIZATION" --api
+        ./amass.sh -oR "$ORGANIZATION" 
     elif [[ -n "$ORGANIZATION_LIST" ]]; then
-        generate_dork_links -L "$TARGET_ORGANIZATION_LIST" --api
+        generate_dork_links -L "$ORGANIZATION_LIST" --api
+        ./amass.sh -L "$ORGANIZATION_LIST" 
     fi
 }
 
 main() {
     get_params "$@"
-    dorking
+    passive_recon
 }
 
 main "$@"

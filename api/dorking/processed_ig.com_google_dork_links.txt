@@ -1,0 +1,7 @@
+https://www.google.com/search?q=%22inurl%3A%22%2Fapi%2F%22+%22password%22%22+site%3Aig.com&num=100
+https://www.google.com/search?q=%22inurl%3A%22%2Fapi%2F%22+%22private+key%22%22+site%3Aig.com&num=100
+https://www.google.com/search?q=%22ext%3Aenv+intext%3A%22api_key%22%22+site%3Aig.com&num=100
+https://www.google.com/search?q=%22inurl%3A%22%2Fapi%2F%22+intitle%3A%22index+of%22%22+site%3Aig.com&num=100
+https://www.google.com/search?q=%22inurl%3A%22%2Fapi%2F%22+intext%3A%22credentials%22%22+site%3Aig.com&num=100
+https://www.google.com/search?q=%22inurl%3A%22%2Fapi%2F%22+%22apikey%3D%22%22+site%3Aig.com&num=100
+https://www.google.com/search?q=%22inurl%3A%22%2Fapi%2Fkeys%22%22+site%3Aig.com&num=100

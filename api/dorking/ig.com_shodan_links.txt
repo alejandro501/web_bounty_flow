@@ -1,1 +1,4 @@
-
+https://www.shodan.io/search?query=%22content-type: application/json"+hostname:"ig.com"
+https://www.shodan.io/search?query=%22content-type: application/xml"+hostname:"ig.com"
+https://www.shodan.io/search?query=%22200 OK"+hostname:"ig.com"
+https://www.shodan.io/search?query=%22wp-json"+hostname:"ig.com"
