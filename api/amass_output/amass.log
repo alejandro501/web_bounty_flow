@@ -1,128 +1,128 @@
-09:12:53.861215 GitLab: check callback failed for the configuration
-09:12:53.861264 DNSRepo: check callback failed for the configuration
-09:12:53.861278 Deepinfo: check callback failed for the configuration
-09:12:53.861291 CIRCL: check callback failed for the configuration
-09:12:53.861328 IPinfo: check callback failed for the configuration
-09:12:53.861340 Censys: check callback failed for the configuration
-09:12:53.861349 GitHub: check callback failed for the configuration
-09:12:53.861354 IntelX: check callback failed for the configuration
-09:12:53.861361 CertCentral: check callback failed for the configuration
-09:12:53.861292 Detectify: check callback failed for the configuration
-09:12:53.861376 FullHunt: check callback failed for the configuration
-09:12:53.861382 ThreatBook: check callback failed for the configuration
-09:12:53.861398 Yandex: check callback failed for the configuration
-09:12:53.861404 Chaos: check callback failed for the configuration
-09:12:53.861419 WhoisXMLAPI: check callback failed for the configuration
-09:12:53.861413 ZETAlytics: check callback failed for the configuration
-09:12:53.861429 VirusTotal: check callback failed for the configuration
-09:12:53.861441 Pastebin: check callback failed for the configuration
-09:12:53.861360 ZoomEye: check callback failed for the configuration
-09:12:53.861450 BufferOver: check callback failed for the configuration
-09:12:53.861457 BigDataCloud: check callback failed for the configuration
-09:12:53.861402 Netlas: check callback failed for the configuration
-09:12:53.861481 Quake: check callback failed for the configuration
-09:12:53.861340 FOFA: check callback failed for the configuration
-09:12:53.861243 ASNLookup: check callback failed for the configuration
-09:12:53.861271 DNSlytics: check callback failed for the configuration
-09:12:53.861510 BuiltWith: check callback failed for the configuration
-09:12:53.861275 SecurityTrails: check callback failed for the configuration
-09:12:53.861272 Hunter: check callback failed for the configuration
-09:12:53.861292 IPdata: check callback failed for the configuration
-09:12:53.861322 Shodan: check callback failed for the configuration
-09:12:53.861341 Spamhaus: check callback failed for the configuration
-09:12:53.861221 C99: check callback failed for the configuration
-09:12:53.861376 DNSDB: check callback failed for the configuration
-09:12:53.861232 360PassiveDNS: check callback failed for the configuration
-09:12:53.861376 FacebookCT: check callback failed for the configuration
-09:12:53.861413 ONYPHE: check callback failed for the configuration
-09:12:53.861413 BinaryEdge: check callback failed for the configuration
-09:12:53.861430 PassiveTotal: check callback failed for the configuration
-09:12:53.861445 BeVigil: check callback failed for the configuration
-09:12:53.861460 Ahrefs: check callback failed for the configuration
-09:12:53.861465 PublicWWW: check callback failed for the configuration
-09:12:53.861463 PentestTools: check callback failed for the configuration
-09:12:53.861500 SOCRadar: check callback failed for the configuration
-09:12:53.874738 Querying Digitorus for ig.com subdomains
-09:12:53.874804 Querying AnubisDB for ig.com subdomains
-09:12:53.874822 Querying Bing for ig.com subdomains
-09:12:53.874741 Querying Greynoise for ig.com subdomains
-09:12:53.874841 Querying CertSpotter for ig.com subdomains
-09:12:53.874851 Querying Mnemonic for ig.com subdomains
-09:12:53.874863 Querying HyperStat for ig.com subdomains
-09:12:53.874877 Querying DNSDumpster for ig.com subdomains
-09:12:53.874823 Querying Searchcode for ig.com subdomains
-09:12:53.874953 Querying Brute Forcing for ig.com subdomains
-09:12:53.874863 Querying Searx for ig.com subdomains
-09:12:53.874757 Querying Gists for ig.com subdomains
-09:12:53.874760 Querying LeakIX for ig.com subdomains
-09:12:53.874764 Querying Ask for ig.com subdomains
-09:12:53.874765 Querying DNSHistory for ig.com subdomains
-09:12:53.874767 Querying CommonCrawl for ig.com subdomains
-09:12:53.874770 Querying SubdomainCenter for ig.com subdomains
-09:12:53.874771 Querying Baidu for ig.com subdomains
-09:12:53.874767 Querying GrepApp for ig.com subdomains
-09:12:53.874773 Querying Google for ig.com subdomains
-09:12:53.874774 Querying Active DNS for ig.com subdomains
-09:12:53.874798 Querying DuckDuckGo for ig.com subdomains
-09:12:53.874800 Querying Crtsh for ig.com subdomains
-09:12:53.874801 Querying RapidDNS for ig.com subdomains
-09:12:53.874802 Querying Active Crawl for ig.com subdomains
-09:12:53.874803 Querying HackerOne for ig.com subdomains
-09:12:53.874804 Querying SiteDossier for ig.com subdomains
-09:12:53.874807 Querying Riddler for ig.com subdomains
-09:12:53.874813 Querying Pulsedive for ig.com subdomains
-09:12:53.874824 Querying Synapsint for ig.com subdomains
-09:12:53.874830 Querying Maltiverse for ig.com subdomains
-09:12:53.874827 Querying Wayback for ig.com subdomains
-09:12:53.874836 Querying HackerTarget for ig.com subdomains
-09:12:53.874838 Querying DNSSpy for ig.com subdomains
-09:12:53.874844 Querying URLScan for ig.com subdomains
-09:12:53.874847 Querying UKWebArchive for ig.com subdomains
-09:12:53.874842 Querying HAW for ig.com subdomains
-09:12:53.874849 Querying DNS SRV for ig.com subdomains
-09:12:53.874844 Querying AbuseIPDB for ig.com subdomains
-09:12:53.874848 Querying Sublist3rAPI for ig.com subdomains
-09:12:53.874853 Querying Yahoo for ig.com subdomains
-09:12:53.874855 Querying ThreatMiner for ig.com subdomains
-09:12:53.874855 Querying Arquivo for ig.com subdomains
-09:12:53.874876 Querying AlienVault for ig.com subdomains
-09:12:53.874751 Querying PKey for ig.com subdomains
-09:12:55.122097 AbuseIPDB: get_ip request to service returned with status code: 403 Forbidden
-09:12:55.293213 Riddler: scrape: Get "https://riddler.io/search/exportcsv?q=pld:ig.com": dial tcp: lookup riddler.io on 127.0.0.53:53: no such host
-09:12:55.508172 Greynoise: vertical request to service returned with status: 404 Not Found
-09:12:56.782423 DNSHistory: vertical request to service returned with status code: 403 Forbidden
-09:12:56.865188 Gists: vertical request to service returned with status code: 429 Too Many Requests
-09:12:57.003776 Pulsedive: vertical request to service returned with status: 429 Too Many Requests
-09:12:57.284887 Sublist3rAPI: failed to decode the JSON response
-09:12:59.328520 Arquivo: vertical request to service returned with status code: 400 Bad Request
-09:13:00.966304 DNS wildcard detected: Resolver 8.8.8.8:53: *.tryinvision.com
-09:13:01.683246 Searx: scrape: Post "https://anon.sx/search": dial tcp: lookup anon.sx on 127.0.0.53:53: no such host
-09:13:04.875952 CommonCrawl: vertical request to service failed: Get "https://index.commoncrawl.org/collinfo.json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
-09:13:06.875583 Crtsh: vertical request to service failed: Get "https://crt.sh/?q=ig.com&output=json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
-09:13:07.875791 HAW: vertical request to service failed: Get "https://haw.nsk.hr/proxy.php?subject=keywords&start=undefined&q=ig.com": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
-09:13:17.544382 DNS wildcard detected: Resolver 8.8.8.8:53: *.webshell.tradedtu.ig.com
-09:13:33.836262 DNS wildcard detected: Resolver 8.8.8.8:53: *.googlehosted.com
-09:13:34.709447 ig-com.mail.protection.outlook.com. was dropped after failing to resolve 6 times on the untrusted DNS task
-09:13:36.505056 BGPTools: failed to resolve the whois server address: the query was unsuccessful for bgp.tools
-09:13:44.478881 TeamCymru: failed to resolve the TXT record for AS16509.asn.cymru.com: the query was unsuccessful for AS16509.asn.cymru.com
-09:14:16.432408 dtu-dealing.mobile.ig.com. was dropped after failing to resolve 11 times on the untrusted DNS task
-09:15:30.897428 igtwfx-dtu.ig.com. was dropped after failing to resolve 20 times on the untrusted DNS task
-09:15:34.616645 api.caaprd.ig.com. was dropped after failing to resolve 21 times on the untrusted DNS task
-09:15:47.315818 sentiment.api.caaprd.ig.com. was dropped after failing to resolve 22 times on the untrusted DNS task
-09:15:50.031579 etp.ig.com. was dropped after failing to resolve 22 times on the untrusted DNS task
-09:15:55.609601 uat.screener.ig.com. was dropped after failing to resolve 23 times on the untrusted DNS task
-09:19:55.065511 caaprd.ig.com. was dropped after failing to resolve 31 times on the untrusted DNS task
-09:32:28.536506 83.41.30.193.in-addr.arpa. was dropped after failing to resolve 10 times on the untrusted DNS task
-10:02:26.844172 DNS wildcard detected: Resolver 8.8.8.8:53: *.stspg-customer.com
-10:05:12.934295 ShadowServer: failed to resolve the TXT record for 118.48.37.23.origin.asn.shadowserver.org: the query was unsuccessful for 118.48.37.23.origin.asn.shadowserver.org
-10:05:14.444561 TeamCymru: failed to resolve the TXT record for AS16625.asn.cymru.com: the query was unsuccessful for AS16625.asn.cymru.com
-10:07:21.257421 DNS wildcard detected: Resolver 8.8.8.8:53: *.unbouncepages.com
-10:07:31.669071 DNS wildcard detected: Resolver 8.8.8.8:53: *.live-iginvestments-anonymous.eu-west-1.elasticbeanstalk.com
-10:07:32.742118 DNS wildcard detected: Resolver 8.8.8.8:53: *.net-iginvestments-anonymous.eu-west-1.elasticbeanstalk.com
-10:20:11.222958 HackerTarget: failed to decode the JSON response
-10:20:24.932351 TeamCymru: failed to resolve the TXT record for e.9.7.6.6.5.8.b.0.0.0.0.0.0.0.0.1.1.0.0.0.0.7.1.0.f.6.2.2.0.a.2.origin6.asn.cymru.com: the query was unsuccessful for e.9.7.6.6.5.8.b.0.0.0.0.0.0.0.0.1.1.0.0.0.0.7.1.0.f.6.2.2.0.a.2.origin6.asn.cymru.com
-10:21:57.353388 TeamCymru: failed to resolve the TXT record for 1.a.3.9.0.c.3.2.e.f.1.4.0.1.0.0.0.0.6.d.1.5.2.2.0.0.0.9.0.0.6.2.origin6.asn.cymru.com: the query was unsuccessful for 1.a.3.9.0.c.3.2.e.f.1.4.0.1.0.0.0.0.6.d.1.5.2.2.0.0.0.9.0.0.6.2.origin6.asn.cymru.com
-10:29:29.117365 DNS wildcard detected: Resolver 8.8.8.8:53: *.ig-campaign-production.netlify.app
-10:36:09.959123 HackerTarget: failed to decode the JSON response
-10:36:11.746663 DNS wildcard detected: Resolver 8.8.8.8:53: *.web-iginvestments-anonymous.eu-west-1.elasticbeanstalk.com
-10:42:52.460918 DNS wildcard detected: Resolver 8.8.8.8:53: *.sc.omtrdc.net
+20:43:57.094941 ZoomEye: check callback failed for the configuration
+20:43:57.094987 GitHub: check callback failed for the configuration
+20:43:57.095006 GitLab: check callback failed for the configuration
+20:43:57.095033 BuiltWith: check callback failed for the configuration
+20:43:57.095047 VirusTotal: check callback failed for the configuration
+20:43:57.095062 SecurityTrails: check callback failed for the configuration
+20:43:57.095078 Hunter: check callback failed for the configuration
+20:43:57.095052 ZETAlytics: check callback failed for the configuration
+20:43:57.095091 SOCRadar: check callback failed for the configuration
+20:43:57.095092 ThreatBook: check callback failed for the configuration
+20:43:57.095115 IntelX: check callback failed for the configuration
+20:43:57.095131 CertCentral: check callback failed for the configuration
+20:43:57.095138 BigDataCloud: check callback failed for the configuration
+20:43:57.095151 C99: check callback failed for the configuration
+20:43:57.095158 CIRCL: check callback failed for the configuration
+20:43:57.095164 DNSRepo: check callback failed for the configuration
+20:43:57.095063 Yandex: check callback failed for the configuration
+20:43:57.095180 Chaos: check callback failed for the configuration
+20:43:57.095166 Deepinfo: check callback failed for the configuration
+20:43:57.095154 PentestTools: check callback failed for the configuration
+20:43:57.095043 WhoisXMLAPI: check callback failed for the configuration
+20:43:57.095213 Spamhaus: check callback failed for the configuration
+20:43:57.094989 Quake: check callback failed for the configuration
+20:43:57.095091 Netlas: check callback failed for the configuration
+20:43:57.094964 FOFA: check callback failed for the configuration
+20:43:57.094969 ASNLookup: check callback failed for the configuration
+20:43:57.094971 FacebookCT: check callback failed for the configuration
+20:43:57.094978 FullHunt: check callback failed for the configuration
+20:43:57.094941 PublicWWW: check callback failed for the configuration
+20:43:57.094958 360PassiveDNS: check callback failed for the configuration
+20:43:57.095098 IPdata: check callback failed for the configuration
+20:43:57.095099 Ahrefs: check callback failed for the configuration
+20:43:57.095103 ONYPHE: check callback failed for the configuration
+20:43:57.095106 IPinfo: check callback failed for the configuration
+20:43:57.095107 BinaryEdge: check callback failed for the configuration
+20:43:57.095120 PassiveTotal: check callback failed for the configuration
+20:43:57.095127 BeVigil: check callback failed for the configuration
+20:43:57.095129 Pastebin: check callback failed for the configuration
+20:43:57.095142 DNSDB: check callback failed for the configuration
+20:43:57.095158 Shodan: check callback failed for the configuration
+20:43:57.095171 Censys: check callback failed for the configuration
+20:43:57.095175 DNSlytics: check callback failed for the configuration
+20:43:57.095176 BufferOver: check callback failed for the configuration
+20:43:57.095180 Detectify: check callback failed for the configuration
+20:43:57.108565 Querying HackerOne for ig.com subdomains
+20:43:57.108606 Querying Bing for ig.com subdomains
+20:43:57.108639 Querying SiteDossier for ig.com subdomains
+20:43:57.108645 Querying Baidu for ig.com subdomains
+20:43:57.108655 Querying DuckDuckGo for ig.com subdomains
+20:43:57.108683 Querying Arquivo for ig.com subdomains
+20:43:57.108689 Querying HackerTarget for ig.com subdomains
+20:43:57.108702 Querying Greynoise for ig.com subdomains
+20:43:57.108702 Querying Searx for ig.com subdomains
+20:43:57.108645 Querying Mnemonic for ig.com subdomains
+20:43:57.108700 Querying AnubisDB for ig.com subdomains
+20:43:57.108641 Querying SubdomainCenter for ig.com subdomains
+20:43:57.108642 Querying HAW for ig.com subdomains
+20:43:57.108643 Querying Crtsh for ig.com subdomains
+20:43:57.108646 Querying DNSHistory for ig.com subdomains
+20:43:57.108645 Querying DNS SRV for ig.com subdomains
+20:43:57.108648 Querying Pulsedive for ig.com subdomains
+20:43:57.108649 Querying ThreatMiner for ig.com subdomains
+20:43:57.108650 Querying UKWebArchive for ig.com subdomains
+20:43:57.108650 Querying AbuseIPDB for ig.com subdomains
+20:43:57.108652 Querying Yahoo for ig.com subdomains
+20:43:57.108640 Querying Synapsint for ig.com subdomains
+20:43:57.108653 Querying Active DNS for ig.com subdomains
+20:43:57.108653 Querying Digitorus for ig.com subdomains
+20:43:57.108656 Querying Maltiverse for ig.com subdomains
+20:43:57.108656 Querying PKey for ig.com subdomains
+20:43:57.108654 Querying LeakIX for ig.com subdomains
+20:43:57.108677 Querying Riddler for ig.com subdomains
+20:43:57.108683 Querying DNSDumpster for ig.com subdomains
+20:43:57.108684 Querying HyperStat for ig.com subdomains
+20:43:57.108680 Querying RapidDNS for ig.com subdomains
+20:43:57.108685 Querying Searchcode for ig.com subdomains
+20:43:57.108681 Querying Wayback for ig.com subdomains
+20:43:57.108686 Querying DNSSpy for ig.com subdomains
+20:43:57.108688 Querying Sublist3rAPI for ig.com subdomains
+20:43:57.108689 Querying AlienVault for ig.com subdomains
+20:43:57.108691 Querying URLScan for ig.com subdomains
+20:43:57.108693 Querying Google for ig.com subdomains
+20:43:57.108693 Querying Gists for ig.com subdomains
+20:43:57.108692 Querying CommonCrawl for ig.com subdomains
+20:43:57.108695 Querying Ask for ig.com subdomains
+20:43:57.108697 Querying Active Crawl for ig.com subdomains
+20:43:57.108702 Querying GrepApp for ig.com subdomains
+20:43:57.108704 Querying Brute Forcing for ig.com subdomains
+20:43:57.108704 Querying CertSpotter for ig.com subdomains
+20:43:58.239714 Riddler: scrape: Get "https://riddler.io/search/exportcsv?q=pld:ig.com": dial tcp: lookup riddler.io on 127.0.0.53:53: no such host
+20:43:58.480877 AbuseIPDB: get_ip request to service returned with status code: 403 Forbidden
+20:43:58.534278 Greynoise: vertical request to service returned with status: 404 Not Found
+20:43:59.470549 Gists: vertical request to service returned with status code: 429 Too Many Requests
+20:43:59.520313 DNSHistory: vertical request to service returned with status code: 403 Forbidden
+20:43:59.721052 Pulsedive: vertical request to service returned with status: 429 Too Many Requests
+20:44:00.811400 Sublist3rAPI: failed to decode the JSON response
+20:44:02.518436 Arquivo: vertical request to service returned with status code: 400 Bad Request
+20:44:08.111329 Maltiverse: failed to decode the JSON response
+20:44:09.110155 SubdomainCenter: scrape: Get "http://api.subdomain.center/?domain=ig.com": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+20:44:09.110167 CommonCrawl: scrape: Get "https://index.commoncrawl.org/CC-MAIN-2024-42-index?fl=url&output=json&url=%2A.ig.com": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+20:44:09.232394 Crtsh: vertical request to service returned with status code: 503 Service Unavailable
+20:44:11.109825 HAW: vertical request to service failed: Get "https://haw.nsk.hr/proxy.php?subject=keywords&start=undefined&q=ig.com": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+20:44:12.109778 RapidDNS: scrape: Get "https://rapiddns.io/subdomain/ig.com?full=1": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+20:44:19.111746 CommonCrawl: scrape: Get "https://index.commoncrawl.org/CC-MAIN-2024-38-index?fl=url&output=json&url=%2A.ig.com": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+20:44:27.054671 etp.ig.com. was dropped after failing to resolve 5 times on the untrusted DNS task
+20:44:28.692505 web-wtp022c.ig.com. was dropped after failing to resolve 6 times on the untrusted DNS task
+20:44:29.235978 DNS wildcard detected: Resolver 8.8.8.8:53: *.webshell.tradedtu.ig.com
+20:44:36.979467 ig-com.mail.protection.outlook.com. was dropped after failing to resolve 7 times on the untrusted DNS task
+20:44:39.114636 CommonCrawl: scrape: Get "https://index.commoncrawl.org/CC-MAIN-2024-30-index?fl=url&output=json&url=%2A.ig.com": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+20:45:05.478622 caaprd.ig.com. was dropped after failing to resolve 11 times on the untrusted DNS task
+20:45:35.222496 dtu-dealing.mobile.ig.com. was dropped after failing to resolve 12 times on the untrusted DNS task
+20:45:41.258033 igtwfx-dtu.ig.com. was dropped after failing to resolve 13 times on the untrusted DNS task
+20:47:04.330468 uat.screener.ig.com. was dropped after failing to resolve 23 times on the untrusted DNS task
+20:47:07.243619 78.118.107.194.in-addr.arpa. was dropped after failing to resolve 11 times on the untrusted DNS task
+20:47:12.556633 195.41.30.193.in-addr.arpa. was dropped after failing to resolve 15 times on the untrusted DNS task
+20:48:28.247412 ShadowServer: failed to resolve the A record for asn.shadowserver.org: the query was unsuccessful for asn.shadowserver.org
+20:48:34.079889 BGPTools: failed to resolve the whois server address: the query was unsuccessful for bgp.tools
+20:55:51.962301 TeamCymru: failed to resolve the TXT record for 32.199.245.18.origin.asn.cymru.com: the query was unsuccessful for 32.199.245.18.origin.asn.cymru.com
+21:02:54.252419 DNS wildcard detected: Resolver 8.8.8.8:53: *.stspg-customer.com
+21:13:24.746249 DNS wildcard detected: Resolver 8.8.8.8:53: *.tryinvision.com
+21:19:35.827008 ShadowServer: asn callback: <string>:56: cannot perform concat operation between string and nil
+stack traceback:
+	<string>:56: in function 'origin'
+	<string>:26: in main chunk
+	[G]: ?
+21:26:32.946434 DNS wildcard detected: Resolver 8.8.8.8:53: *.unbouncepages.com
+21:52:13.355945 DNS wildcard detected: Resolver 8.8.8.8:53: *.web-iginvestments-anonymous.eu-west-1.elasticbeanstalk.com
+21:59:48.153810 DNS wildcard detected: Resolver 8.8.8.8:53: *.net-iginvestments-anonymous.eu-west-1.elasticbeanstalk.com

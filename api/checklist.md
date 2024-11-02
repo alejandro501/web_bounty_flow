@@ -1,12 +1,12 @@
 # Testing Approach (see Chapter 0)
-- [ ] Determine approach: black box, gray box, or white box? (pages 4–6)
+- [x] Determine approach: black box, gray box, or white box? (pages 4–6)
 
 # Passive Reconnaissance (see Chapter 6)
-- [ ] Conduct attack surface discovery (pages 124–132)
-- [ ] Check for exposed secrets (pages 133–136)
+- [x] Conduct attack surface discovery (pages 124–132)
+- [x] Check for exposed secrets (pages 133–136)
 
 # Active Reconnaissance (see Chapter 6)
-- [ ] Scan for open ports and services (page 138)
+- [x] Scan for open ports and services (page 138)
 - [ ] Use the application as intended (page 137)
 - [ ] Inspect web application with DevTools (pages 139–142)
 - [ ] Search for API-related directories (pages 143–146)
