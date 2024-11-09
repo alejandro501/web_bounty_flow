@@ -1,33 +1,10 @@
 #!/bin/bash
 
-<<<<<<< HEAD
-# Global Variables
-TARGET_ORGANIZATION=''
-ORGANIZATION_LIST=''
-AMASS_OUTPUT_DIR='amass'
-WORDLIST_FILE='wordlist.txt' # not used, later todo
-SUBDOMAIN_FILE="$AMASS_OUTPUT_DIR/subdomains"
-VISUALIZATION_FILE="$AMASS_OUTPUT_DIR/visualization.html"
-USE_TOR=false
-
-usage() {
-    echo "Usage: $0 [OPTIONS]"
-    echo "
-    Input Feed:
-    -L,   --list <filename>           Specify a file containing a list of organizations (one per line).
-    -D,   --domain <domain>           Specify a single domain.
-
-    Optional:
-    -T,   --tor                       Use Tor for network requests.
-
-    Help:
-    -H,   --help                      Display this help message.
-=======
 target_organization=''
 organization_list=''
 amass_dir='amass'
 wordlist_file='wordlist.txt'
-subdomain_file="$amass_dir/subdomains"
+subdomain_file="$amass_dir/domains"
 visualization_file="$amass_dir/visualization.html"
 use_tor=false
 
@@ -44,25 +21,12 @@ usage() {
 
     Help:
     -h,   --help                      Display this help message.
->>>>>>> 9628b04 (new flow.sh, recon stuff)
     "
 }
 
 get_params() {
     while [[ "$#" -gt 0 ]]; do
         case $1 in
-<<<<<<< HEAD
-        -L | --list)
-            ORGANIZATION_LIST="$2"
-            shift
-            ;;
-        -D | --domain)
-            TARGET_ORGANIZATION="$2"
-            shift
-            ;;
-        -T | --tor) USE_TOR=true ;;
-        -H | --help)
-=======
         -ad | --amass-dir)
             amass_dir="$2"
             shift
@@ -77,7 +41,6 @@ get_params() {
             ;;
         -t | --tor) use_tor=true ;;
         -h | --help)
->>>>>>> 9628b04 (new flow.sh, recon stuff)
             usage
             exit 0
             ;;
@@ -134,27 +97,14 @@ amass_operations() {
 main() {
     get_params "$@"
 
-<<<<<<< HEAD
-    # Check if at least one of the parameters is provided
-    if [[ -z "$TARGET_ORGANIZATION" && -z "$ORGANIZATION_LIST" ]]; then
-=======
     if [[ -z "$target_organization" && -z "$organization_list" ]]; then
->>>>>>> 9628b04 (new flow.sh, recon stuff)
         usage
         exit 1
     fi
 
-<<<<<<< HEAD
-    # Execute Amass operations
     amass_operations
 }
 
-# Allow standalone execution
-=======
-    amass_operations
-}
-
->>>>>>> 9628b04 (new flow.sh, recon stuff)
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi

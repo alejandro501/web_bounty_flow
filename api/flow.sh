@@ -1,40 +1,13 @@
 #!/bin/bash
 
 # directories
-<<<<<<< HEAD
-=======
 AMASS_DIR='amass'
->>>>>>> 9628b04 (new flow.sh, recon stuff)
 ROBOTS_DIR='robots'
 NMAP_DIR='nmap'
 FUZZING_DIR='fuzzing'
 
 # arguments
 ORGANIZATION=''
-<<<<<<< HEAD
-ORGANIZATION_LIST=''
-SUBDOMAIN_OUTPUT='apidomains'
-### after amass finishes
-# [ ] put together subfinder and amass api hits
-# [ ] feed them to the amass scan
-USE_TOR=false
-
-# wordlists
-GOBUSTER_WORDLIST='wordlist.txt' # temporary individual
-
-usage() {
-    echo "Usage: $0 [OPTIONS]"
-    echo "
-    Input Feed:
-    -oR,  --organization <org>       Specify a single organization.
-    -oL,  --org-list <filename>      Specify a file containing a list of organizations (one per line).
-
-    Optional:
-    -T,   --tor                      Use Tor for network requests.
-
-    Help:
-    -H,   --help                     Display this help message.
-=======
 ORGANIZATION_LIST='wildcards'
 SUBDOMAIN_OUTPUT='apidomains'
 USE_TOR=false
@@ -60,25 +33,12 @@ usage() {
 
     Example Call:
     $0 -or example.com -ol wildcards -t
->>>>>>> 9628b04 (new flow.sh, recon stuff)
     "
 }
 
 get_params() {
     while [[ "$#" -gt 0 ]]; do
         case $1 in
-<<<<<<< HEAD
-        -oR | --organization)
-            ORGANIZATION="$2"
-            shift
-            ;;
-        -oL | --org-list)
-            ORGANIZATION_LIST="$2"
-            shift
-            ;;
-        -T | --tor) USE_TOR=true ;;
-        -H | --help)
-=======
         -org | --organization)
             ORGANIZATION="$2"
             shift
@@ -89,7 +49,6 @@ get_params() {
             ;;
         -t | --tor) USE_TOR=true ;;
         -h | --help)
->>>>>>> 9628b04 (new flow.sh, recon stuff)
             usage
             exit 0
             ;;
@@ -111,11 +70,6 @@ check_setup_tor() {
     fi
 }
 
-<<<<<<< HEAD
-robots() {
-    local orgs="$1"
-
-=======
 scan_network() {
     local orgs="$1"
 
@@ -133,20 +87,13 @@ scan_network() {
 
 robots() {
     local orgs="$1"
->>>>>>> 9628b04 (new flow.sh, recon stuff)
     mkdir -p "$ROBOTS_DIR"
     { cat "$SUBDOMAIN_OUTPUT" "$orgs"; } | sort -u | while IFS= read -r org; do
         clean_org=$(echo "$org" | sed -e 's|http[s]*://||' -e 's|www\.||')
         curl -s -o "$ROBOTS_DIR/$clean_org.robots.txt" "$org/robots.txt"
 
-<<<<<<< HEAD
-        # Extract urls to processed file
-        if [[ -f "$ROBOTS_DIR/$clean_org.robots.txt" ]]; then
-            cat "$ROBOTS_DIR/$clean_org.robots.txt" | grep -E '^(Disallow|Allow): ' | sed -E "s|^(Disallow|Allow): (.*)|https://$org\2|g" >"$ROBOTS_DIR/$clean_org.robots.urls.txt"
-=======
         if [[ -f "$ROBOTS_DIR/$clean_org.robots.txt" ]]; then
             cat "$ROBOTS_DIR/$clean_org.robots.txt" | grep -E '^(Disallow|Allow): ' | sed -E "s|^(Disallow|Allow): (.*)|https://$org\2|g" >"$ROBOTS_DIR/$clean_org.robots.urls"
->>>>>>> 9628b04 (new flow.sh, recon stuff)
         else
             echo "No robots.txt found for $org"
         fi
@@ -154,53 +101,19 @@ robots() {
 }
 
 passive_recon() {
-<<<<<<< HEAD
-    if [[ -n "$ORGANIZATION" ]]; then
-        generate_dork_links -oR "$ORGANIZATION" --api
-        subfinder -d "$ORGANIZATION" | grep api | httprobe --prefer-https | anew "$SUBDOMAIN_OUTPUT"
-        ./amass.sh -oR "$ORGANIZATION" --tor
-
-        # nmap service, version, and port enumeration
-        nmap -sC -sV "$ORGANIZATION" -oA nmap.scsv.log
-        nmap -p- "$ORGANIZATION" -oA nmap.allports.log
-=======
     mkdir -p "$NMAP_DIR"
 
     if [[ -n "$ORGANIZATION" ]]; then
         generate_dork_links -oR "$ORGANIZATION" --api
         subfinder -d "$ORGANIZATION" | grep api | httprobe --prefer-https | anew "$SUBDOMAIN_OUTPUT"
         ./amass.sh -oR "$ORGANIZATION" "$TOR_FLAG"
-        cat "$AMASS_DIR/subdomains" | anew "$SUBDOMAIN_OUTPUT"
+        cat "$AMASS_DIR/domains" | anew "$SUBDOMAIN_OUTPUT"
         scan_network <(echo "$ORGANIZATION")
->>>>>>> 9628b04 (new flow.sh, recon stuff)
         robots "$ORGANIZATION"
 
     elif [[ -n "$ORGANIZATION_LIST" ]]; then
         generate_dork_links -L "$ORGANIZATION_LIST" --api
         subfinder -dL "$ORGANIZATION_LIST" | grep api | httprobe --prefer-https | anew "$SUBDOMAIN_OUTPUT"
-<<<<<<< HEAD
-        ./amass.sh -L "$ORGANIZATION_LIST" --tor
-
-        # nmap service, version, and port enumeration
-        mkdir -p "$NMAP_DIR"
-        while IFS= read -r org; do
-            nmap -sC -sV "$org" -oA "$NMAP_DIR/${org}.scsv"
-            nmap -p- "$org" -oA "$NMAP_DIR/${org}_allports"
-        done <"$SUBDOMAIN_OUTPUT"
-        robots "$ORGANIZATION_LIST"
-    fi
-}
-
-fuzzing() {
-    mkdir -p "$FUZZING_DIR"
-    mkdir -p "${FUZZING_DIR}/gobuster"
-    mkdir -p "${FUZZING_DIR}/kiterunner"
-    while IFS= read -r url; do
-        echo "Running Gobuster for $url"
-        gobuster dir -u "$url" -w "$GOBUSTER_WORDLIST" -x 200,201,202,301 -b 302 -o "$FUZZING_DIR/gobuster/$(basename "$url").gobuster.txt"
-        kr scan "$url" -A apiroutes-240528 -o text | anew "$FUZZING_DIR/kiterunner/$(basename "$url").kiterunner.txt" # tryy
-    done <"$SUBDOMAIN_OUTPUT"
-=======
         ./amass.sh -L "$ORGANIZATION_LIST" "$TOR_FLAG"
         scan_network "$ORGANIZATION_LIST"
         scan_network "$SUBDOMAIN_OUTPUT"
@@ -247,21 +160,16 @@ fuzz_documentation() {
             awk -F',' 'NR>1 {print $2}' "$output_file" >>"${FUZZING_DIR}/doc_hits"
         fi
     done
->>>>>>> 9628b04 (new flow.sh, recon stuff)
 }
 
 main() {
     get_params "$@"
     check_setup_tor
     passive_recon
-<<<<<<< HEAD
-    fuzzing
-=======
     fuzz_directories
     fuzz_documentation
     # requires manual interaction, reverse engineer api using postman, extract collection, feed postman extract script
     # postman_extract_url -i postman_extract.json -o postman_extracted_api_urls --keyword api
->>>>>>> 9628b04 (new flow.sh, recon stuff)
 }
 
 main "$@"
