@@ -10,8 +10,7 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-source ./setup_tor.sh
-setup_tor "$USE_TOR"
+setup_tor
 
 # Check if necessary tools are installed
 check_tool() {
