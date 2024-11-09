@@ -15,7 +15,7 @@ USE_TOR=false
 # wordlists
 501_APIWILD='~/hack/resources/wordlists/501-api-wild.txt'
 SECLIST_API_LONGEST='~/hack/resources/wordlists/SecLists/Discovery/Web-Content/api/api-endpoints-res.txt'
-CUSTOM_PROJECT_SPECIFIC='custom-apifuzz.txt' # add individually crafted here if present
+CUSTOM_PROJECT_SPECIFIC='project-apifuzz.txt' # add individually crafted here if present
 APIDOCS='~/hack/resources/wordlists/api_docs_path'
 
 usage() {
