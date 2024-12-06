@@ -1,6 +1,3 @@
-# Testing Approach (see Chapter 0)
-- [ ] Determine approach: black box, gray box, or white box? (pages 4–6)
-
 # Passive Reconnaissance (see Chapter 6)
 - [ ] Conduct attack surface discovery (pages 124–132)
 - [ ] Check for exposed secrets (pages 133–136)
