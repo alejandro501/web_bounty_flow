@@ -8,6 +8,7 @@ FUZZING_DIR='fuzzing'
 
 # arguments
 ORGANIZATION=''
+ORGANIZATIONS='organizations'
 IPS='ips'
 WILDCARDS='wildcards'
 DOMAINS='domains'
@@ -111,6 +112,7 @@ robots() {
 }
 
 passive_recon() {
+    # Handle ORGANIZATION if provided
     if [[ -n "$ORGANIZATION" ]]; then
         generate_dork_links -oR "$ORGANIZATION" --api
         grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done # opens everything in the dorking dir
@@ -118,6 +120,7 @@ passive_recon() {
         scan_network "$DOMAINS"
     fi
 
+    # Handle WILDCARDS if provided
     if [[ -n "$WILDCARDS" && -s "$WILDCARDS" ]]; then
         generate_dork_links -L "$WILDCARDS" --api
         grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done # opens everything in the dorking dir
@@ -126,8 +129,21 @@ passive_recon() {
         subfinder -dL "$WILDCARDS" | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
         ./amass.sh -L "$WILDCARDS" "$TOR_FLAG"
         scan_network "$APIDOMAINS"
+    fi
+
+    # Handle DOMAINS independently if no WILDCARDS or others
+    if [[ -n "$DOMAINS" && -s "$DOMAINS" ]]; then
+        robots "$DOMAINS"
+        scan_network "$DOMAINS"
     else
-        echo "skipping operations that depend on the wildcards file, as it is empty or missing."
+        echo "DOMAINS is either missing or empty. Skipping domain-based operations."
+    fi
+
+    # Handle APIDOMAINS independently if available
+    if [[ -n "$APIDOMAINS" && -s "$APIDOMAINS" ]]; then
+        scan_network "$APIDOMAINS"
+    else
+        echo "APIDOMAINS is either missing or empty. Skipping API domain-based operations."
     fi
 }
 
@@ -158,16 +174,24 @@ fuzz_documentation() {
     mkdir -p "${FUZZING_DIR}/documentation"
     local targets=()
 
-    [[ -n "$ORGANIZATION" ]] && targets+=("$ORGANIZATION")
+    # Add entries from ORGANIZATIONS (if the file is not empty)
+    if [[ -s "$ORGANIZATIONS" ]]; then
+        while IFS= read -r org_line; do
+            [[ -n "$org_line" ]] && targets+=("$org_line")
+        done < "$ORGANIZATIONS"
+    fi
 
+    # Add entries from WILDCARDS if it exists
     if [[ -s "$WILDCARDS" ]]; then
         targets+=($(<"$WILDCARDS"))
     fi
 
+    # Add entries from APIDOMAINS if it exists
     if [[ -f "$APIDOMAINS" && -s "$APIDOMAINS" ]]; then
         targets+=($(<"$APIDOMAINS"))
     fi
 
+    # Perform fuzzing if there are valid targets
     if [[ ${#targets[@]} -gt 0 ]]; then
         for url in "${targets[@]}"; do
             [[ -z "$url" ]] && continue
@@ -185,12 +209,11 @@ fuzz_documentation() {
 }
 
 main() {
-    get_params "$@"
-    check_setup_tor
+    #get_params "$@"
+    #check_setup_tor
     passive_recon
-    fuzz_documentation
-    fuzz_directories
-    nmap
+    #fuzz_documentation
+    #fuzz_directories
     # manual: check shodan dork hits and add valid ip's to $IPS
     
 }
