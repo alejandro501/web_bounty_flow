@@ -1,2 +1,0 @@
-custom-wordlist-api.com
-project-specific.com

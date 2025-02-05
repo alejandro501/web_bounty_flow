@@ -1,9 +1,15 @@
 # Passive Reconnaissance (see Chapter 6)
 - [ ] Conduct attack surface discovery (pages 124–132)
+  - [ ] google dorking
+  - [ ] github dorking
+  - [ ] shodan dorking - add discovered endpoints to target list manually
+  - [ ] wayback machine
+  - [ ] ffuf
 - [ ] Check for exposed secrets (pages 133–136)
 
 # Active Reconnaissance (see Chapter 6)
 - [ ] Scan for open ports and services (page 138)
+  - [ ] nmap
 - [ ] Use the application as intended (page 137)
 - [ ] Inspect web application with DevTools (pages 139–142)
 - [ ] Search for API-related directories (pages 143–146)

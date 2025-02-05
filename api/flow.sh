@@ -115,7 +115,7 @@ passive_recon() {
     # Handle ORGANIZATION if provided
     if [[ -n "$ORGANIZATION" ]]; then
         generate_dork_links -oR "$ORGANIZATION" --api
-        grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done # opens everything in the dorking dir
+        # grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done # opens everything in the dorking dir
         robots "$DOMAINS"
         scan_network "$DOMAINS"
     fi
@@ -123,10 +123,11 @@ passive_recon() {
     # Handle WILDCARDS if provided
     if [[ -n "$WILDCARDS" && -s "$WILDCARDS" ]]; then
         generate_dork_links -L "$WILDCARDS" --api
-        grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done # opens everything in the dorking dir
+        # opens everything in the dorking dir... disbaled cause it's too much for the browser
+        # grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done
         robots "$WILDCARDS"
         robots "$APIDOMAINS"
-        subfinder -dL "$WILDCARDS" | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
+        subfinder -dL "$WILDCARDS" | httprobe --prefer-https | anew "$DOMAINS" | grep api | anew "$APIDOMAINS"
         ./amass.sh -L "$WILDCARDS" "$TOR_FLAG"
         scan_network "$APIDOMAINS"
     fi
@@ -210,10 +211,10 @@ fuzz_documentation() {
 
 main() {
     #get_params "$@"
-    #check_setup_tor
+    check_setup_tor
     passive_recon
-    #fuzz_documentation
-    #fuzz_directories
+    fuzz_documentation
+    fuzz_directories
     # manual: check shodan dork hits and add valid ip's to $IPS
     
 }
