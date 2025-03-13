@@ -1,24 +1,12 @@
 #!/bin/bash
 
-# directories
-AMASS_DIR='amass'
-ROBOTS_DIR='robots'
-NMAP_DIR='nmap'
-FUZZING_DIR='fuzzing'
-
-# arguments
-ORGANIZATION=''
-ORGANIZATIONS='organizations'
-IPS='ips'
-WILDCARDS='wildcards'
-DOMAINS='domains'
-APIDOMAINS='apidomains'
-
-# wordlists
-API_WILD_501="${HOME}/hack/resources/wordlists/api-wild-501.txt"
-SECLIST_API_LONGEST="${HOME}/hack/resources/wordlists/SecLists/Discovery/Web-Content/api/api-endpoints-res.txt"
-CUSTOM_PROJECT_SPECIFIC='project-apifuzz.txt'
-APIDOCS="${HOME}/hack/resources/wordlists/api_docs_path"
+# Source the configuration file
+if [[ -f "flow.conf" ]]; then
+    source "flow.conf"
+else
+    echo "Error: flow.conf not found. Please create the configuration file."
+    exit 1
+fi
 
 usage() {
     echo "Usage: $0 [options]"
@@ -102,7 +90,6 @@ passive_recon() {
     if [[ -n "$ORGANIZATION" ]]; then
         generate_dork_links -oR "$ORGANIZATION" --api
         robots "$DOMAINS"
-        scan_network "$DOMAINS"
     fi
 
     # Handle WILDCARDS if provided
@@ -111,23 +98,13 @@ passive_recon() {
         robots "$WILDCARDS"
         robots "$APIDOMAINS"
         subfinder -dL "$WILDCARDS" | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
-        ./amass.sh -L "$WILDCARDS"
-        scan_network "$APIDOMAINS"
     fi
 
     # Handle DOMAINS independently if no WILDCARDS or others
     if [[ -n "$DOMAINS" && -s "$DOMAINS" ]]; then
         robots "$DOMAINS"
-        scan_network "$DOMAINS"
     else
         echo "DOMAINS is either missing or empty. Skipping domain-based operations."
-    fi
-
-    # Handle APIDOMAINS independently if available
-    if [[ -n "$APIDOMAINS" && -s "$APIDOMAINS" ]]; then
-        scan_network "$APIDOMAINS"
-    else
-        echo "APIDOMAINS is either missing or empty. Skipping API domain-based operations."
     fi
 }
 
@@ -198,6 +175,17 @@ main() {
     fuzz_documentation
     fuzz_directories
     # manual: check shodan dork hits and add valid ip's to $IPS
+
+    # Perform network scan as the final step
+    if [[ -n "$DOMAINS" && -s "$DOMAINS" ]]; then
+        scan_network "$DOMAINS"
+    elif [[ -n "$APIDOMAINS" && -s "$APIDOMAINS" ]]; then
+        scan_network "$APIDOMAINS"
+    elif [[ -n "$WILDCARDS" && -s "$WILDCARDS" ]]; then
+        scan_network "$WILDCARDS"
+    else
+        echo "No valid targets found for network scanning."
+    fi
 }
 
 main "$@"
