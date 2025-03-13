@@ -156,13 +156,28 @@ robots() {
     { cat "$APIDOMAINS" "$orgs"; } | sort -u | while IFS= read -r org; do
         [[ -z "$org" ]] && continue
         clean_org=$(echo "$org" | sed -e 's#http[s]*://##' -e 's#www\.##')
-        curl -s -m 10 -o "$ROBOTS_DIR/$clean_org.robots.txt" "$org/robots.txt"
+        robots_file="$ROBOTS_DIR/$clean_org.robots.txt"
+        urls_file="$ROBOTS_DIR/$clean_org.robots.urls"
 
-        if [[ -f "$ROBOTS_DIR/$clean_org.robots.txt" ]]; then
-            grep -E '^(Disallow): ' "$ROBOTS_DIR/$clean_org.robots.txt" | sed -E "s#^(Disallow|Allow): (.*)#https://$org\2#g" >"$ROBOTS_DIR/$clean_org.robots.urls"
+        curl -s -m 10 -o "$robots_file" "$org/robots.txt"
+
+        if [[ -f "$robots_file" ]]; then
+            grep -E '^(Disallow|Allow): ' "$robots_file" | sed -E "s#^(Disallow|Allow): (.*)#https://$org\2#g" >"$urls_file"
+
+            # Append to _hits.txt
+            cat "$urls_file" >>"$HITS_FILE"
+
             echo "robots.txt found for $org"
+
+            # Check for Sitemap and add to _sitemaps.txt
+            grep -E '^Sitemap: ' "$robots_file" | awk '{print $2}' >>"$SITEMAPS_FILE"
         fi
     done
+
+    # Source _hits.txt into flow.conf
+    if [[ -f "$HITS_FILE" ]]; then
+        cat "$HITS_FILE" >>flow.conf
+    fi
 }
 
 passive_recon() {
