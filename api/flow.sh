@@ -67,6 +67,86 @@ scan_network() {
     done <"$orgs"
 }
 
+process_gnmap() {
+    if [[ "$ENABLE_NMAP_SUMMARY" != true ]]; then
+        echo "[++] Nmap summary processing is disabled. Skipping."
+        return
+    fi
+
+    echo "[+] Processing .gnmap files in $NMAP_DIR..."
+
+    # Ensure the NMAP_DIR exists
+    mkdir -p "$NMAP_DIR"
+
+    # Create empty output files
+    >"$SUMMARY_FILE"
+    >"$POINTERS_FILE"
+    >"$SERVICES_FILE"
+    >"$SEARCHSPLOIT_RESULTS"
+
+    # Process each .gnmap file in the NMAP_DIR
+    for gnmap_file in "$NMAP_DIR"/*.gnmap; do
+        [[ ! -f "$gnmap_file" ]] && continue
+        echo "[++] Processing $gnmap_file..."
+
+        # Extract target domain and host
+        target_domain=$(grep -oP 'Nmap .* scan initiated .* as: nmap .* \K[^ ]+' "$gnmap_file")
+        host=$(grep -oP 'Host: \K[^ ]+' "$gnmap_file")
+        echo "-------
+Target: $target_domain
+Host: $host" >>"$SUMMARY_FILE"
+
+        # Extract open ports and services
+        open_ports=$(grep -oP '\d+/open' "$gnmap_file" | cut -d'/' -f1 | tr '\n' ',' | sed 's/,$/\n/')
+        services=$(grep -oP '\d+/open/[^/]+//[^/]+//[^/]+' "$gnmap_file" | sed 's#//# #g')
+
+        # Write open ports and services to the summary file
+        echo "Open ports: $open_ports" >>"$SUMMARY_FILE"
+        echo "Services:" >>"$SUMMARY_FILE"
+        echo "$services" >>"$SUMMARY_FILE"
+
+        # Check for interesting services/ports
+        interesting_found=false
+        while IFS= read -r service_line; do
+            port=$(echo "$service_line" | awk '{print $1}' | cut -d'/' -f1)
+            service=$(echo "$service_line" | awk '{print $2}')
+            version=$(echo "$service_line" | awk '{print $3}')
+
+            if [[ " ${INTERESTING_SERVICES[*]} " =~ " ${service} " ]] || [[ " ${INTERESTING_PORTS[*]} " =~ " ${port} " ]]; then
+                if [[ "$interesting_found" == false ]]; then
+                    echo "Interesting services found on $host ($target_domain):" >>"$POINTERS_FILE"
+                    interesting_found=true
+                fi
+                echo "$service_line" >>"$POINTERS_FILE"
+            fi
+        done <<<"$services"
+
+        # Extract services for searchsploit
+        grep -oP '\d+/open/[^/]+//[^/]+//[^/]+' "$gnmap_file" | awk -F'//' '{print $2, $3}' >>"$SERVICES_FILE"
+    done
+
+    # Sort and deduplicate services
+    sort -u "$SERVICES_FILE" -o "$SERVICES_FILE"
+
+    # Run searchsploit on discovered services
+    if [[ -s "$SERVICES_FILE" ]]; then
+        echo "[++] Running searchsploit on services..."
+        while IFS= read -r service; do
+            echo "Searching for exploits for: $service" >>"$SEARCHSPLOIT_RESULTS"
+            searchsploit "$service" >>"$SEARCHSPLOIT_RESULTS"
+            echo "-----------------------------" >>"$SEARCHSPLOIT_RESULTS"
+        done <"$SERVICES_FILE"
+    else
+        echo "[++] No services found for searchsploit."
+    fi
+
+    echo "[+] Nmap summary processing complete. Results saved to:"
+    echo "- $SUMMARY_FILE"
+    echo "- $POINTERS_FILE"
+    echo "- $SERVICES_FILE"
+    echo "- $SEARCHSPLOIT_RESULTS"
+}
+
 robots() {
     local orgs="$1"
     echo "fetching robots.txt for $orgs..."
@@ -79,7 +159,7 @@ robots() {
         curl -s -m 10 -o "$ROBOTS_DIR/$clean_org.robots.txt" "$org/robots.txt"
 
         if [[ -f "$ROBOTS_DIR/$clean_org.robots.txt" ]]; then
-            grep -E '^(Disallow|Allow): ' "$ROBOTS_DIR/$clean_org.robots.txt" | sed -E "s#^(Disallow|Allow): (.*)#https://$org\2#g" >"$ROBOTS_DIR/$clean_org.robots.urls"
+            grep -E '^(Disallow): ' "$ROBOTS_DIR/$clean_org.robots.txt" | sed -E "s#^(Disallow|Allow): (.*)#https://$org\2#g" >"$ROBOTS_DIR/$clean_org.robots.urls"
             echo "robots.txt found for $org"
         fi
     done
@@ -98,6 +178,7 @@ passive_recon() {
         robots "$WILDCARDS"
         robots "$APIDOMAINS"
         subfinder -dL "$WILDCARDS" | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
+        ./amass.sh -L "$WILDCARDS"
     fi
 
     # Handle DOMAINS independently if no WILDCARDS or others
@@ -186,6 +267,9 @@ main() {
     else
         echo "No valid targets found for network scanning."
     fi
+
+    # Process Nmap results
+    process_gnmap
 }
 
 main "$@"
