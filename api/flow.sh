@@ -13,7 +13,6 @@ IPS='ips'
 WILDCARDS='wildcards'
 DOMAINS='domains'
 APIDOMAINS='apidomains'
-USE_TOR=false
 
 # wordlists
 API_WILD_501="${HOME}/hack/resources/wordlists/api-wild-501.txt"
@@ -27,9 +26,6 @@ usage() {
     Input Feed:
     -org,  --organization <org>       specify a single organization.
     -ol,  --org-list <filename>      specify a file containing a list of organizations (one per line).
-
-    Optional:
-    -t,   --tor                      use tor for network requests.
 
     Help:
     -h,   --help                     display this help message.
@@ -50,7 +46,6 @@ get_params() {
             WILDCARDS="$2"
             shift
             ;;
-        -t | --tor) USE_TOR=true ;;
         -h | --help)
             usage
             exit 0
@@ -62,15 +57,6 @@ get_params() {
         esac
         shift
     done
-}
-
-check_setup_tor() {
-    if $USE_TOR; then
-        setup_tor
-        TOR_FLAG="--tor"
-    else
-        TOR_FLAG=""
-    fi
 }
 
 scan_network() {
@@ -102,7 +88,7 @@ robots() {
     { cat "$APIDOMAINS" "$orgs"; } | sort -u | while IFS= read -r org; do
         [[ -z "$org" ]] && continue
         clean_org=$(echo "$org" | sed -e 's#http[s]*://##' -e 's#www\.##')
-        curl -s -o "$ROBOTS_DIR/$clean_org.robots.txt" "$org/robots.txt"
+        curl -s -m 10 -o "$ROBOTS_DIR/$clean_org.robots.txt" "$org/robots.txt"
 
         if [[ -f "$ROBOTS_DIR/$clean_org.robots.txt" ]]; then
             grep -E '^(Disallow|Allow): ' "$ROBOTS_DIR/$clean_org.robots.txt" | sed -E "s#^(Disallow|Allow): (.*)#https://$org\2#g" >"$ROBOTS_DIR/$clean_org.robots.urls"
@@ -115,7 +101,6 @@ passive_recon() {
     # Handle ORGANIZATION if provided
     if [[ -n "$ORGANIZATION" ]]; then
         generate_dork_links -oR "$ORGANIZATION" --api
-        grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done # opens everything in the dorking dir
         robots "$DOMAINS"
         scan_network "$DOMAINS"
     fi
@@ -123,11 +108,10 @@ passive_recon() {
     # Handle WILDCARDS if provided
     if [[ -n "$WILDCARDS" && -s "$WILDCARDS" ]]; then
         generate_dork_links -L "$WILDCARDS" --api
-        grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done # opens everything in the dorking dir
         robots "$WILDCARDS"
         robots "$APIDOMAINS"
         subfinder -dL "$WILDCARDS" | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
-        ./amass.sh -L "$WILDCARDS" "$TOR_FLAG"
+        ./amass.sh -L "$WILDCARDS"
         scan_network "$APIDOMAINS"
     fi
 
@@ -178,7 +162,7 @@ fuzz_documentation() {
     if [[ -s "$ORGANIZATIONS" ]]; then
         while IFS= read -r org_line; do
             [[ -n "$org_line" ]] && targets+=("$org_line")
-        done < "$ORGANIZATIONS"
+        done <"$ORGANIZATIONS"
     fi
 
     # Add entries from WILDCARDS if it exists
@@ -210,12 +194,10 @@ fuzz_documentation() {
 
 main() {
     get_params "$@"
-    check_setup_tor
     passive_recon
     fuzz_documentation
     fuzz_directories
     # manual: check shodan dork hits and add valid ip's to $IPS
-    
 }
 
 main "$@"
