@@ -1,28 +1,44 @@
 #!/bin/bash
 
-# Load configuration
-if [[ -f "flow.conf" ]]; then
-    source "flow.conf"
-else
-    echo "Error: flow.conf not found. Please create the configuration file."
-    exit 1
-fi
+# directories
+AMASS_DIR='amass'
+ROBOTS_DIR='robots'
+NMAP_DIR='nmap'
+FUZZING_DIR='fuzzing'
 
-# Display usage instructions
+# arguments
+ORGANIZATION=''
+ORGANIZATIONS='organizations'
+IPS='ips'
+WILDCARDS='wildcards'
+DOMAINS='domains'
+APIDOMAINS='apidomains'
+USE_TOR=false
+
+# wordlists
+API_WILD_501="${HOME}/hack/resources/wordlists/api-wild-501.txt"
+SECLIST_API_LONGEST="${HOME}/hack/resources/wordlists/SecLists/Discovery/Web-Content/api/api-endpoints-res.txt"
+CUSTOM_PROJECT_SPECIFIC='project-apifuzz.txt'
+APIDOCS="${HOME}/hack/resources/wordlists/api_docs_path"
+
 usage() {
     echo "Usage: $0 [options]"
     echo "
-    Options:
+    Input Feed:
     -org,  --organization <org>       specify a single organization.
-    -ol,  --org-list <filename>      specify a file containing a list of organizations.
+    -ol,  --org-list <filename>      specify a file containing a list of organizations (one per line).
+
+    Optional:
+    -t,   --tor                      use tor for network requests.
+
+    Help:
     -h,   --help                     display this help message.
 
-    Example:
-    $0 -org example.com -ol wildcards
+    Example Call:
+    $0 -or example.com -ol wildcards -t
     "
 }
 
-# Parse command-line arguments
 get_params() {
     while [[ "$#" -gt 0 ]]; do
         case $1 in
@@ -34,12 +50,13 @@ get_params() {
             WILDCARDS="$2"
             shift
             ;;
+        -t | --tor) USE_TOR=true ;;
         -h | --help)
             usage
             exit 0
             ;;
         *)
-            echo "Unknown parameter: $1"
+            echo "unknown parameter: $1"
             exit 1
             ;;
         esac
@@ -47,79 +64,166 @@ get_params() {
     done
 }
 
-# Perform network scanning with nmap
+check_setup_tor() {
+    if $USE_TOR; then
+        setup_tor
+        TOR_FLAG="--tor"
+    else
+        TOR_FLAG=""
+    fi
+}
+
 scan_network() {
     local orgs="$1"
+
     mkdir -p "$NMAP_DIR"
+
     while IFS= read -r org; do
         [[ -z "$org" ]] && continue
-        clean_org=$(echo "$org" | sed -e 's#http[s]*://##' -e 's#www\.##' | tr -d '/:')
+        echo "Scanning $org with nmap"
+
+        clean_org=$(echo "$org" | sed -e 's#http[s]*://##' -e 's#www\.##')
+        clean_org=$(echo "$clean_org" | tr -d '/:')
+
+        touch "$NMAP_DIR/${clean_org}.scsv.log"
+        touch "$NMAP_DIR/${clean_org}.allports.log"
+
         nmap -sC -sV "$clean_org" -oA "$NMAP_DIR/${clean_org}.scsv.log"
         nmap -p- "$clean_org" -oA "$NMAP_DIR/${clean_org}.allports.log"
     done <"$orgs"
 }
 
-# Process .gnmap files for useful data
-process_gnmap() {
-    [[ "$ENABLE_NMAP_SUMMARY" != true ]] && return
-    mkdir -p "$NMAP_DIR"
-    >"$SUMMARY_FILE"
-    >"$POINTERS_FILE"
-    >"$SERVICES_FILE"
-    >"$SEARCHSPLOIT_RESULTS"
-    for gnmap_file in "$NMAP_DIR"/*.gnmap; do
-        [[ ! -f "$gnmap_file" ]] && continue
-        target_domain=$(grep -oP 'Nmap .* scan initiated .* as: nmap .* \K[^ ]+' "$gnmap_file")
-        host=$(grep -oP 'Host: \K[^ ]+' "$gnmap_file")
-        open_ports=$(grep -oP '\d+/open' "$gnmap_file" | cut -d'/' -f1 | tr '\n' ',')
-        services=$(grep -oP '\d+/open/[^/]+//[^/]+//[^/]+' "$gnmap_file" | sed 's#//# #g')
-        echo "Target: $target_domain\nHost: $host\nOpen ports: $open_ports\nServices:\n$services" >>"$SUMMARY_FILE"
-        while IFS= read -r service_line; do
-            port=$(echo "$service_line" | awk '{print $1}' | cut -d'/' -f1)
-            service=$(echo "$service_line" | awk '{print $2}')
-            [[ " ${INTERESTING_SERVICES[*]} " =~ " ${service} " || " ${INTERESTING_PORTS[*]} " =~ " ${port} " ]] && echo "$service_line" >>"$POINTERS_FILE"
-        done <<<"$services"
-        grep -oP '\d+/open/[^/]+//[^/]+//[^/]+' "$gnmap_file" | awk -F'//' '{print $2, $3}' >>"$SERVICES_FILE"
-    done
-    sort -u "$SERVICES_FILE" -o "$SERVICES_FILE"
-    [[ -s "$SERVICES_FILE" ]] && while IFS= read -r service; do
-        searchsploit "$service" >>"$SEARCHSPLOIT_RESULTS"
-    done <"$SERVICES_FILE"
-}
-
-# Fetch robots.txt from target domains
 robots() {
     local orgs="$1"
+    echo "fetching robots.txt for $orgs..."
+
     mkdir -p "$ROBOTS_DIR"
+
     { cat "$APIDOMAINS" "$orgs"; } | sort -u | while IFS= read -r org; do
         [[ -z "$org" ]] && continue
         clean_org=$(echo "$org" | sed -e 's#http[s]*://##' -e 's#www\.##')
-        curl -s -m 10 -o "$ROBOTS_DIR/$clean_org.robots.txt" "$org/robots.txt"
-        [[ -f "$ROBOTS_DIR/$clean_org.robots.txt" ]] && grep -E '^(Disallow|Allow): ' "$ROBOTS_DIR/$clean_org.robots.txt" | sed -E "s#^(Disallow|Allow): (.*)#https://$org\2#g" >"$ROBOTS_DIR/$clean_org.robots.urls"
+        curl -s -o "$ROBOTS_DIR/$clean_org.robots.txt" "$org/robots.txt"
+
+        if [[ -f "$ROBOTS_DIR/$clean_org.robots.txt" ]]; then
+            grep -E '^(Disallow|Allow): ' "$ROBOTS_DIR/$clean_org.robots.txt" | sed -E "s#^(Disallow|Allow): (.*)#https://$org\2#g" >"$ROBOTS_DIR/$clean_org.robots.urls"
+            echo "robots.txt found for $org"
+        fi
     done
 }
 
-# Perform passive reconnaissance
 passive_recon() {
-    [[ -n "$ORGANIZATION" ]] && generate_dork_links -oR "$ORGANIZATION" --api && robots "$DOMAINS"
-    [[ -n "$WILDCARDS" && -s "$WILDCARDS" ]] && generate_dork_links -L "$WILDCARDS" --api && robots "$WILDCARDS" "$APIDOMAINS"
-    [[ -n "$DOMAINS" && -s "$DOMAINS" ]] && robots "$DOMAINS"
+    # Handle ORGANIZATION if provided
+    if [[ -n "$ORGANIZATION" ]]; then
+        generate_dork_links -oR "$ORGANIZATION" --api
+        grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done # opens everything in the dorking dir
+        robots "$DOMAINS"
+        scan_network "$DOMAINS"
+    fi
+
+    # Handle WILDCARDS if provided
+    if [[ -n "$WILDCARDS" && -s "$WILDCARDS" ]]; then
+        generate_dork_links -L "$WILDCARDS" --api
+        grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done # opens everything in the dorking dir
+        robots "$WILDCARDS"
+        robots "$APIDOMAINS"
+        subfinder -dL "$WILDCARDS" | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
+        ./amass.sh -L "$WILDCARDS" "$TOR_FLAG"
+        scan_network "$APIDOMAINS"
+    fi
+
+    # Handle DOMAINS independently if no WILDCARDS or others
+    if [[ -n "$DOMAINS" && -s "$DOMAINS" ]]; then
+        robots "$DOMAINS"
+        scan_network "$DOMAINS"
+    else
+        echo "DOMAINS is either missing or empty. Skipping domain-based operations."
+    fi
+
+    # Handle APIDOMAINS independently if available
+    if [[ -n "$APIDOMAINS" && -s "$APIDOMAINS" ]]; then
+        scan_network "$APIDOMAINS"
+    else
+        echo "APIDOMAINS is either missing or empty. Skipping API domain-based operations."
+    fi
 }
 
-# Fuzz API endpoints
 fuzz_directories() {
-    mkdir -p "$FUZZING_DIR/ffuf"
+    mkdir -p "$FUZZING_DIR"
+    mkdir -p "${FUZZING_DIR}/${FFUF_DIR}"
+    mkdir -p "${FUZZING_DIR}/${FFUF_DIR}/${FUZZING_ENDPOINT_HITS_DIR}"
+    mkdir -p "${FUZZING_DIR}/${FFUF_DIR}/${FUZZING_ENDPOINT_NO_HITS_DIR}"
+
     cat "$API_WILD_501" "$SECLIST_API_LONGEST" "$CUSTOM_PROJECT_SPECIFIC" | anew >"$FUZZING_DIR/fuzzme"
+
+    if [[ -s "$APIDOMAINS" || -s "$WILDCARDS" ]]; then
+        (cat "$APIDOMAINS" "$WILDCARDS") | while IFS= read -r url; do
+            [[ -z "$url" ]] && continue
+            echo "Fuzzing for $url"
+
+            output_file="${FUZZING_DIR}/${FFUF_DIR}/$(basename "$url").csv"
+
+            ffuf -u "${url}/FUZZ" -w "$FUZZING_DIR/fuzzme" -mc 200,301 -p 0.2 -o "$output_file" -of csv
+
+            if grep -q "^[^,]\+," "$output_file"; then
+                awk -F',' 'NR>1 {print $2 > ("'"${FUZZING_DIR}/${FFUF_DIR}/${FUZZING_ENDPOINT_HITS_DIR}/"'" $1 ".txt")}' "$output_file"
+
+                awk -F',' 'NR>1 {print $2}' "$output_file" >>"${FUZZING_DIR}/${FFUF_DIR}/${FUZZING_ENDPOINT_HITS_DIR}/all_hits.txt"
+            else
+                mv "$output_file" "${FUZZING_DIR}/${FFUF_DIR}/${FUZZING_ENDPOINT_NO_HITS_DIR}/"
+            fi
+        done
+    else
+        echo "Skipping fuzzing as the apidomain output or wildcards file is empty."
+    fi
 }
 
-# Main function
+fuzz_documentation() {
+    mkdir -p "${FUZZING_DIR}/documentation"
+    local targets=()
+
+    # Add entries from ORGANIZATIONS (if the file is not empty)
+    if [[ -s "$ORGANIZATIONS" ]]; then
+        while IFS= read -r org_line; do
+            [[ -n "$org_line" ]] && targets+=("$org_line")
+        done <"$ORGANIZATIONS"
+    fi
+
+    # Add entries from WILDCARDS if it exists
+    if [[ -s "$WILDCARDS" ]]; then
+        targets+=($(<"$WILDCARDS"))
+    fi
+
+    # Add entries from APIDOMAINS if it exists
+    if [[ -f "$APIDOMAINS" && -s "$APIDOMAINS" ]]; then
+        targets+=($(<"$APIDOMAINS"))
+    fi
+
+    # Perform fuzzing if there are valid targets
+    if [[ ${#targets[@]} -gt 0 ]]; then
+        for url in "${targets[@]}"; do
+            [[ -z "$url" ]] && continue
+            clean_url=$(echo "$url" | sed -e 's#http[s]*://##' -e 's#www\.##' -e 's#/##g')
+            ffuf -u "${url}/FUZZ" -w "$APIDOCS" -mc 200,301 -o "${FUZZING_DIR}/documentation/${clean_url}.csv" -of csv
+
+            output_file="${FUZZING_DIR}/documentation/${clean_url}.csv"
+            if grep -q "^[^,]\+," "$output_file"; then
+                awk -F',' 'NR>1 {print $2}' "$output_file" >>"${FUZZING_DIR}/doc_hits"
+            fi
+        done
+    else
+        echo "skipping documentation fuzzing as there are no valid targets."
+    fi
+}
+
 main() {
     get_params "$@"
+    check_setup_tor
     passive_recon
+    fuzz_documentation
     fuzz_directories
-    [[ -n "$DOMAINS" && -s "$DOMAINS" ]] && scan_network "$DOMAINS"
-    [[ -n "$APIDOMAINS" && -s "$APIDOMAINS" ]] && scan_network "$APIDOMAINS"
-    process_gnmap
+    # manual: check shodan dork hits and add valid ip's to $IPS
+
 }
 
 main "$@"
+
