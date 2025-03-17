@@ -15,9 +15,6 @@ usage() {
     -org,  --organization <org>       specify a single organization.
     -ol,  --org-list <filename>      specify a file containing a list of organizations (one per line).
 
-    Optional:
-    -t,   --tor                      use tor for network requests.
-
     Help:
     -h,   --help                     display this help message.
 
@@ -37,7 +34,6 @@ get_params() {
             WILDCARDS="$2"
             shift
             ;;
-        -t | --tor) USE_TOR=true ;;
         -h | --help)
             usage
             exit 0
@@ -49,15 +45,6 @@ get_params() {
         esac
         shift
     done
-}
-
-check_setup_tor() {
-    if $USE_TOR; then
-        setup_tor
-        TOR_FLAG="--tor"
-    else
-        TOR_FLAG=""
-    fi
 }
 
 scan_network() {
@@ -127,7 +114,6 @@ passive_recon() {
         robots "$WILDCARDS"
         robots "$APIDOMAINS"
         subfinder -dL "$WILDCARDS" | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
-        ./amass.sh -L "$WILDCARDS" "$TOR_FLAG"
         scan_network "$APIDOMAINS"
     fi
 
@@ -217,7 +203,6 @@ fuzz_documentation() {
 
 main() {
     get_params "$@"
-    check_setup_tor
     passive_recon
     fuzz_documentation
     fuzz_directories
