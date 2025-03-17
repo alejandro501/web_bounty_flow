@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# Source the configuration file
 if [[ -f "flow.conf" ]]; then
     source "flow.conf"
 else
@@ -8,6 +7,7 @@ else
     exit 1
 fi
 
+# Displays usage information and examples for the script
 usage() {
     echo "Usage: $0 [options]"
     echo "
@@ -23,6 +23,7 @@ usage() {
     "
 }
 
+# Parses command-line parameters and sets variables accordingly
 get_params() {
     while [[ "$#" -gt 0 ]]; do
         case $1 in
@@ -47,9 +48,9 @@ get_params() {
     done
 }
 
+# Scans the network for the provided list of organizations using nmap
 scan_network() {
     local orgs="$1"
-
     mkdir -p "$NMAP_DIR"
 
     while IFS= read -r org; do
@@ -66,6 +67,8 @@ scan_network() {
         nmap -p- "$clean_org" -oA "$NMAP_DIR/${clean_org}.allports.log"
     done <"$orgs"
 }
+
+# Fetches and processes robots.txt files for the provided list of organizations
 robots() {
     local orgs="$1"
     echo "fetching robots.txt for $orgs..."
@@ -78,17 +81,14 @@ robots() {
         curl -s -m 10 -o "$ROBOTS_DIR/$clean_org.robots.txt" "$org/robots.txt"
 
         if [[ -f "$ROBOTS_DIR/$clean_org.robots.txt" ]]; then
-            # Extract Disallow/Allow URLs and add them to _hits.txt
             grep -E '^(Disallow): ' "$ROBOTS_DIR/$clean_org.robots.txt" | sed -E "s#^(Disallow): (.*)#https://$org\2#g" >"$ROBOTS_DIR/$clean_org.robots.urls"
             cat "$ROBOTS_DIR/$clean_org.robots.urls" >>"$ROBOTS_DIR/_hits.txt"
             echo "robots.txt found for $org"
 
-            # Source _hits.txt into flow.conf
             if [[ -f "$ROBOTS_DIR/_hits.txt" ]]; then
                 echo "source $ROBOTS_DIR/_hits.txt" >>"$ROBOTS_DIR/flow.conf"
             fi
 
-            # Check for sitemap in robots.txt and add it to _sitemaps.txt
             sitemap_url=$(grep -i '^Sitemap:' "$ROBOTS_DIR/$clean_org.robots.txt" | sed -E 's#^Sitemap:[[:space:]]*(.*)#\1#')
             if [[ -n "$sitemap_url" ]]; then
                 echo "$sitemap_url" >>"$ROBOTS_DIR/_sitemaps.txt"
@@ -98,26 +98,24 @@ robots() {
     done
 }
 
+# Performs passive reconnaissance based on provided organizations or domain lists
 passive_recon() {
-    # Handle ORGANIZATION if provided
     if [[ -n "$ORGANIZATION" ]]; then
         generate_dork_links -oR "$ORGANIZATION" --api
-        grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done # opens everything in the dorking dir
+        grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done
         robots "$DOMAINS"
         scan_network "$DOMAINS"
     fi
 
-    # Handle WILDCARDS if provided
     if [[ -n "$WILDCARDS" && -s "$WILDCARDS" ]]; then
         generate_dork_links -L "$WILDCARDS" --api
-        grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done # opens everything in the dorking dir
+        grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done
         robots "$WILDCARDS"
         robots "$APIDOMAINS"
         subfinder -dL "$WILDCARDS" | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
         scan_network "$APIDOMAINS"
     fi
 
-    # Handle DOMAINS independently if no WILDCARDS or others
     if [[ -n "$DOMAINS" && -s "$DOMAINS" ]]; then
         robots "$DOMAINS"
         scan_network "$DOMAINS"
@@ -125,7 +123,6 @@ passive_recon() {
         echo "DOMAINS is either missing or empty. Skipping domain-based operations."
     fi
 
-    # Handle APIDOMAINS independently if available
     if [[ -n "$APIDOMAINS" && -s "$APIDOMAINS" ]]; then
         scan_network "$APIDOMAINS"
     else
@@ -133,6 +130,7 @@ passive_recon() {
     fi
 }
 
+# Fuzzes directories on target URLs using ffuf
 fuzz_directories() {
     mkdir -p "$FUZZING_DIR"
     mkdir -p "${FUZZING_DIR}/${FFUF_DIR}"
@@ -152,7 +150,6 @@ fuzz_directories() {
 
             if grep -q "^[^,]\+," "$output_file"; then
                 awk -F',' 'NR>1 {print $2 > ("'"${FUZZING_DIR}/${FFUF_DIR}/${FUZZING_ENDPOINT_HITS_DIR}/"'" $1 ".txt")}' "$output_file"
-
                 awk -F',' 'NR>1 {print $2}' "$output_file" >>"${FUZZING_DIR}/${FFUF_DIR}/${FUZZING_ENDPOINT_HITS_DIR}/all_hits.txt"
             else
                 mv "$output_file" "${FUZZING_DIR}/${FFUF_DIR}/${FUZZING_ENDPOINT_NO_HITS_DIR}/"
@@ -163,28 +160,25 @@ fuzz_directories() {
     fi
 }
 
+# Fuzzes documentation endpoints on target URLs using ffuf
 fuzz_documentation() {
     mkdir -p "${FUZZING_DIR}/documentation"
     local targets=()
 
-    # Add entries from ORGANIZATIONS (if the file is not empty)
     if [[ -s "$ORGANIZATIONS" ]]; then
         while IFS= read -r org_line; do
             [[ -n "$org_line" ]] && targets+=("$org_line")
         done <"$ORGANIZATIONS"
     fi
 
-    # Add entries from WILDCARDS if it exists
     if [[ -s "$WILDCARDS" ]]; then
         targets+=($(<"$WILDCARDS"))
     fi
 
-    # Add entries from APIDOMAINS if it exists
     if [[ -f "$APIDOMAINS" && -s "$APIDOMAINS" ]]; then
         targets+=($(<"$APIDOMAINS"))
     fi
 
-    # Perform fuzzing if there are valid targets
     if [[ ${#targets[@]} -gt 0 ]]; then
         for url in "${targets[@]}"; do
             [[ -z "$url" ]] && continue
@@ -201,13 +195,12 @@ fuzz_documentation() {
     fi
 }
 
+# Main function to orchestrate the script's execution
 main() {
     get_params "$@"
     passive_recon
     fuzz_documentation
     fuzz_directories
-    # manual: check shodan dork hits and add valid ip's to $IPS
-
 }
 
 main "$@"
