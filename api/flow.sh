@@ -1,25 +1,12 @@
 #!/bin/bash
 
-# directories
-AMASS_DIR='amass'
-ROBOTS_DIR='robots'
-NMAP_DIR='nmap'
-FUZZING_DIR='fuzzing'
-
-# arguments
-ORGANIZATION=''
-ORGANIZATIONS='organizations'
-IPS='ips'
-WILDCARDS='wildcards'
-DOMAINS='domains'
-APIDOMAINS='apidomains'
-USE_TOR=false
-
-# wordlists
-API_WILD_501="${HOME}/hack/resources/wordlists/api-wild-501.txt"
-SECLIST_API_LONGEST="${HOME}/hack/resources/wordlists/SecLists/Discovery/Web-Content/api/api-endpoints-res.txt"
-CUSTOM_PROJECT_SPECIFIC='project-apifuzz.txt'
-APIDOCS="${HOME}/hack/resources/wordlists/api_docs_path"
+# Source the configuration file
+if [[ -f "flow.conf" ]]; then
+    source "flow.conf"
+else
+    echo "Error: flow.conf not found!"
+    exit 1
+fi
 
 usage() {
     echo "Usage: $0 [options]"
@@ -92,7 +79,6 @@ scan_network() {
         nmap -p- "$clean_org" -oA "$NMAP_DIR/${clean_org}.allports.log"
     done <"$orgs"
 }
-
 robots() {
     local orgs="$1"
     echo "fetching robots.txt for $orgs..."
@@ -102,11 +88,25 @@ robots() {
     { cat "$APIDOMAINS" "$orgs"; } | sort -u | while IFS= read -r org; do
         [[ -z "$org" ]] && continue
         clean_org=$(echo "$org" | sed -e 's#http[s]*://##' -e 's#www\.##')
-        curl -s -o "$ROBOTS_DIR/$clean_org.robots.txt" "$org/robots.txt"
+        curl -s -m 10 -o "$ROBOTS_DIR/$clean_org.robots.txt" "$org/robots.txt"
 
         if [[ -f "$ROBOTS_DIR/$clean_org.robots.txt" ]]; then
-            grep -E '^(Disallow|Allow): ' "$ROBOTS_DIR/$clean_org.robots.txt" | sed -E "s#^(Disallow|Allow): (.*)#https://$org\2#g" >"$ROBOTS_DIR/$clean_org.robots.urls"
+            # Extract Disallow/Allow URLs and add them to _hits.txt
+            grep -E '^(Disallow): ' "$ROBOTS_DIR/$clean_org.robots.txt" | sed -E "s#^(Disallow): (.*)#https://$org\2#g" >"$ROBOTS_DIR/$clean_org.robots.urls"
+            cat "$ROBOTS_DIR/$clean_org.robots.urls" >>"$ROBOTS_DIR/_hits.txt"
             echo "robots.txt found for $org"
+
+            # Source _hits.txt into flow.conf
+            if [[ -f "$ROBOTS_DIR/_hits.txt" ]]; then
+                echo "source $ROBOTS_DIR/_hits.txt" >>"$ROBOTS_DIR/flow.conf"
+            fi
+
+            # Check for sitemap in robots.txt and add it to _sitemaps.txt
+            sitemap_url=$(grep -i '^Sitemap:' "$ROBOTS_DIR/$clean_org.robots.txt" | sed -E 's#^Sitemap:[[:space:]]*(.*)#\1#')
+            if [[ -n "$sitemap_url" ]]; then
+                echo "$sitemap_url" >>"$ROBOTS_DIR/_sitemaps.txt"
+                echo "Sitemap found for $org: $sitemap_url"
+            fi
         fi
     done
 }
@@ -226,4 +226,3 @@ main() {
 }
 
 main "$@"
-
