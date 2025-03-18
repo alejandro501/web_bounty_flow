@@ -48,26 +48,6 @@ get_params() {
     done
 }
 
-# Scans the network for the provided list of organizations using nmap
-scan_network() {
-    local orgs="$1"
-    mkdir -p "$NMAP_DIR"
-
-    while IFS= read -r org; do
-        [[ -z "$org" ]] && continue
-        echo "Scanning $org with nmap"
-
-        clean_org=$(echo "$org" | sed -e 's#http[s]*://##' -e 's#www\.##')
-        clean_org=$(echo "$clean_org" | tr -d '/:')
-
-        touch "$NMAP_DIR/${clean_org}.scsv.log"
-        touch "$NMAP_DIR/${clean_org}.allports.log"
-
-        nmap -sC -sV "$clean_org" -oA "$NMAP_DIR/${clean_org}.scsv.log"
-        nmap -p- "$clean_org" -oA "$NMAP_DIR/${clean_org}.allports.log"
-    done <"$orgs"
-}
-
 # Fetches and processes robots.txt files for the provided list of organizations
 robots() {
     local orgs="$1"
@@ -98,13 +78,49 @@ robots() {
     done
 }
 
+# Scans the network for the provided list of organizations using nmap
+scan_network() {
+    local orgs="$1"
+    mkdir -p "$NMAP_DIR"
+
+    while IFS= read -r org; do
+        [[ -z "$org" ]] && continue
+        echo "Scanning $org with nmap"
+
+        clean_org=$(echo "$org" | sed -e 's#http[s]*://##' -e 's#www\.##')
+        clean_org=$(echo "$clean_org" | tr -d '/:')
+
+        touch "$NMAP_DIR/${clean_org}.scsv.log"
+        touch "$NMAP_DIR/${clean_org}.allports.log"
+
+        nmap -sC -sV "$clean_org" -oA "$NMAP_DIR/${clean_org}.scsv.log"
+        nmap -p- "$clean_org" -oA "$NMAP_DIR/${clean_org}.allports.log"
+    done <"$orgs"
+}
+
+# Calls scan_network if DOMAINS or APIDOMAINS is provided
+nmap() {
+    if [[ -n "$DOMAINS" && -s "$DOMAINS" ]]; then
+        echo "Scanning DOMAINS: $DOMAINS"
+        scan_network "$DOMAINS"
+    else
+        echo "DOMAINS is either missing or empty. Skipping domain-based scanning."
+    fi
+
+    if [[ -n "$APIDOMAINS" && -s "$APIDOMAINS" ]]; then
+        echo "Scanning APIDOMAINS: $APIDOMAINS"
+        scan_network "$APIDOMAINS"
+    else
+        echo "APIDOMAINS is either missing or empty. Skipping API domain-based scanning."
+    fi
+}
+
 # Performs passive reconnaissance based on provided organizations or domain lists
 passive_recon() {
     if [[ -n "$ORGANIZATION" ]]; then
         generate_dork_links -oR "$ORGANIZATION" --api
         grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done
         robots "$DOMAINS"
-        scan_network "$DOMAINS"
     fi
 
     if [[ -n "$WILDCARDS" && -s "$WILDCARDS" ]]; then
@@ -113,18 +129,16 @@ passive_recon() {
         robots "$WILDCARDS"
         robots "$APIDOMAINS"
         subfinder -dL "$WILDCARDS" | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
-        scan_network "$APIDOMAINS"
     fi
 
     if [[ -n "$DOMAINS" && -s "$DOMAINS" ]]; then
         robots "$DOMAINS"
-        scan_network "$DOMAINS"
     else
         echo "DOMAINS is either missing or empty. Skipping domain-based operations."
     fi
 
     if [[ -n "$APIDOMAINS" && -s "$APIDOMAINS" ]]; then
-        scan_network "$APIDOMAINS"
+        echo "APIDOMAINS is available for further processing."
     else
         echo "APIDOMAINS is either missing or empty. Skipping API domain-based operations."
     fi
@@ -201,6 +215,7 @@ main() {
     passive_recon
     fuzz_documentation
     fuzz_directories
+    nmap
 }
 
 main "$@"
