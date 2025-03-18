@@ -119,13 +119,11 @@ nmap() {
 passive_recon() {
     if [[ -n "$ORGANIZATION" ]]; then
         generate_dork_links -oR "$ORGANIZATION" --api
-        grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done
         robots "$DOMAINS"
     fi
 
     if [[ -n "$WILDCARDS" && -s "$WILDCARDS" ]]; then
         generate_dork_links -L "$WILDCARDS" --api
-        grep -h 'http' ./dorking/* | while IFS= read -r url; do xdg-open "$url"; done
         robots "$WILDCARDS"
         robots "$APIDOMAINS"
         subfinder -dL "$WILDCARDS" | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
