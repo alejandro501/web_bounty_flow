@@ -23,7 +23,6 @@ usage() {
     "
 }
 
-# Parses command-line parameters and sets variables accordingly
 get_params() {
     while [[ "$#" -gt 0 ]]; do
         case $1 in
@@ -48,31 +47,46 @@ get_params() {
     done
 }
 
-# Fetches and processes robots.txt files for the provided list of organizations
+# Fetches robots.txt files and extracts disallowed paths/sitemaps
 robots() {
     local orgs="$1"
     echo "fetching robots.txt for $orgs..."
 
-    mkdir -p "$ROBOTS_DIR"
+    mkdir -p "$ROBOTS_DIR/$ROBOTS_HITS_DIR"
+    mkdir -p "$ROBOTS_DIR/$ROBOTS_NO_HITS_DIR"
 
     { cat "$APIDOMAINS" "$orgs"; } | sort -u | while IFS= read -r org; do
         [[ -z "$org" ]] && continue
         clean_org=$(echo "$org" | sed -e 's#http[s]*://##' -e 's#www\.##')
-        curl -s -m 10 -o "$ROBOTS_DIR/$clean_org.robots.txt" "$org/robots.txt"
+        robots_url="$org/robots.txt"
+        robots_file="$ROBOTS_DIR/$clean_org.robots.txt"
+        robots_urls_file="$ROBOTS_DIR/$clean_org.robots.urls"
 
-        if [[ -f "$ROBOTS_DIR/$clean_org.robots.txt" ]]; then
-            grep -E '^(Disallow): ' "$ROBOTS_DIR/$clean_org.robots.txt" | sed -E "s#^(Disallow): (.*)#https://$org\2#g" >"$ROBOTS_DIR/$clean_org.robots.urls"
-            cat "$ROBOTS_DIR/$clean_org.robots.urls" >>"$ROBOTS_DIR/_hits.txt"
-            echo "robots.txt found for $org"
+        robots_content=$(curl -s -m 10 "$robots_url")
+        echo -e "$robots_url\n----------------------------------------------------------\n$robots_content" >"$robots_file"
 
-            if [[ -f "$ROBOTS_DIR/_hits.txt" ]]; then
-                echo "source $ROBOTS_DIR/_hits.txt" >>"$ROBOTS_DIR/flow.conf"
-            fi
+        if [[ -f "$robots_file" ]]; then
+            grep -E '^(Disallow): ' "$robots_file" | sed -E "s#^(Disallow): (.*)#https://$org\2#g" >"$robots_urls_file"
 
-            sitemap_url=$(grep -i '^Sitemap:' "$ROBOTS_DIR/$clean_org.robots.txt" | sed -E 's#^Sitemap:[[:space:]]*(.*)#\1#')
-            if [[ -n "$sitemap_url" ]]; then
-                echo "$sitemap_url" >>"$ROBOTS_DIR/_sitemaps.txt"
-                echo "Sitemap found for $org: $sitemap_url"
+            if [[ -s "$robots_urls_file" ]]; then
+                mv "$robots_file" "$ROBOTS_DIR/$ROBOTS_HITS_DIR/"
+                mv "$robots_urls_file" "$ROBOTS_DIR/$ROBOTS_HITS_DIR/"
+                cat "$ROBOTS_DIR/$ROBOTS_HITS_DIR/$clean_org.robots.urls" >>"$ROBOTS_DIR/_hits.txt"
+                echo "robots.txt found for $org (URLs found, moved to hits folder)"
+
+                if [[ -f "$ROBOTS_DIR/_hits.txt" ]]; then
+                    echo "source $ROBOTS_DIR/_hits.txt" >>"$ROBOTS_DIR/flow.conf"
+                fi
+
+                sitemap_url=$(grep -i '^Sitemap:' "$ROBOTS_DIR/$ROBOTS_HITS_DIR/$clean_org.robots.txt" | sed -E 's#^Sitemap:[[:space:]]*(.*)#\1#')
+                if [[ -n "$sitemap_url" ]]; then
+                    echo "$sitemap_url" >>"${ROBOTS_DIR}/${SITEMAPS_FILE}"
+                    echo "Sitemap found for $org: $sitemap_url"
+                fi
+            else
+                mv "$robots_file" "$ROBOTS_DIR/$ROBOTS_NO_HITS_DIR/"
+                mv "$robots_urls_file" "$ROBOTS_DIR/$ROBOTS_NO_HITS_DIR/"
+                echo "robots.txt found for $org (No URLs found, moved to no_hits folder)"
             fi
         fi
     done
@@ -80,7 +94,7 @@ robots() {
 
 # Scans the network for the provided list of organizations using nmap
 scan_network() {
-    local orgs="$1"
+    local orgs_file="$1"
     mkdir -p "$NMAP_DIR"
 
     while IFS= read -r org; do
@@ -95,10 +109,9 @@ scan_network() {
 
         nmap -sC -sV "$clean_org" -oA "$NMAP_DIR/${clean_org}.scsv.log"
         nmap -p- "$clean_org" -oA "$NMAP_DIR/${clean_org}.allports.log"
-    done <"$orgs"
+    done <"$orgs_file"
 }
 
-# Calls scan_network if DOMAINS or APIDOMAINS is provided
 nmap() {
     if [[ -n "$DOMAINS" && -s "$DOMAINS" ]]; then
         echo "Scanning DOMAINS: $DOMAINS"
@@ -115,7 +128,6 @@ nmap() {
     fi
 }
 
-# Performs passive reconnaissance based on provided organizations or domain lists
 passive_recon() {
     if [[ -n "$ORGANIZATION" ]]; then
         generate_dork_links -oR "$ORGANIZATION" --api
@@ -123,10 +135,11 @@ passive_recon() {
     fi
 
     if [[ -n "$WILDCARDS" && -s "$WILDCARDS" ]]; then
+        subfinder -dL "$WILDCARDS" | anew $DOMAINS | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
         generate_dork_links -L "$WILDCARDS" --api
         robots "$WILDCARDS"
+        robots "$DOMAINS"
         robots "$APIDOMAINS"
-        subfinder -dL "$WILDCARDS" | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
     fi
 
     if [[ -n "$DOMAINS" && -s "$DOMAINS" ]]; then
@@ -162,7 +175,7 @@ fuzz_directories() {
 
             if grep -q "^[^,]\+," "$output_file"; then
                 awk -F',' 'NR>1 {print $2 > ("'"${FUZZING_DIR}/${FFUF_DIR}/${FUZZING_ENDPOINT_HITS_DIR}/"'" $1 ".txt")}' "$output_file"
-                awk -F',' 'NR>1 {print $2}' "$output_file" >>"${FUZZING_DIR}/${FFUF_DIR}/${FUZZING_ENDPOINT_HITS_DIR}/all_hits.txt"
+                awk -F',' 'NR>1 {print $2}' "$output_file" >>"${FUZZING_DIR}/${FFUF_DIR}/${FUZZING_ENDPOINT_HITS_DIR}/${ALL_HITS_FILE}"
             else
                 mv "$output_file" "${FUZZING_DIR}/${FFUF_DIR}/${FUZZING_ENDPOINT_NO_HITS_DIR}/"
             fi
@@ -207,11 +220,10 @@ fuzz_documentation() {
     fi
 }
 
-# Main function to orchestrate the script's execution
 main() {
     get_params "$@"
-    passive_recon
-    fuzz_documentation
+    passive_recon # dorking, robots
+    fuzz_documentation # fuzzing for documentation with ffuf
     fuzz_directories
     nmap
 }
