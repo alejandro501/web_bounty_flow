@@ -114,12 +114,92 @@ scan_network() {
 
         clean_target=$(echo "$target" | sed -e 's#http[s]*://##' -e 's#www\.##' | tr -d '/:')
 
-        echo "Running basic scan..."
-        nmap -sC -sV "$clean_target" -oA "$NMAP_DIR/${clean_target}.scsv"
+        # Basic scan is currently disabled, you can choose to use it instead of verbose, or you can use both
+        # echo "Running basic scan..."
+        # nmap -sC -sV "$clean_target" -oA "$NMAP_DIR/${clean_target}.scsv"
 
         echo "Running full port scan..."
         nmap -p- "$clean_target" -oA "$NMAP_DIR/${clean_target}.allports"
     done <"$input_file" # THIS IS THE CRUCIAL FIX - reads file content
+}
+
+process_gnmap() {
+    if [[ "$ENABLE_NMAP_SUMMARY" != true ]]; then
+        echo "[++] Nmap summary processing is disabled. Skipping."
+        return
+    fi
+
+    echo "[+] Processing .gnmap files in $NMAP_DIR..."
+
+    mkdir -p "$NMAP_DIR"
+
+    # Create empty output files
+    >"$SUMMARY_FILE"
+    >"$POINTERS_FILE"
+    >"$SERVICES_FILE"
+    >"$SEARCHSPLOIT_RESULTS"
+
+    # Process each .gnmap file in the NMAP_DIR
+    for gnmap_file in "$NMAP_DIR"/*.gnmap; do
+        [[ ! -f "$gnmap_file" ]] && continue
+        echo "[++] Processing $gnmap_file..."
+
+        # Extract target domain and host
+        target_domain=$(grep -oP 'Nmap .* scan initiated .* as: nmap .* \K[^ ]+' "$gnmap_file")
+        host=$(grep -oP 'Host: \K[^ ]+' "$gnmap_file")
+        echo "-------
+Target: $target_domain
+Host: $host" >>"$SUMMARY_FILE"
+
+        # Extract open ports and services
+        open_ports=$(grep -oP '\d+/open' "$gnmap_file" | cut -d'/' -f1 | tr '\n' ',' | sed 's/,$/\n/')
+        services=$(grep -oP '\d+/open/[^/]+//[^/]+//[^/]+' "$gnmap_file" | sed 's#//# #g')
+
+        # Write open ports and services to the summary file
+        echo "Open ports: $open_ports" >>"$SUMMARY_FILE"
+        echo "Services:" >>"$SUMMARY_FILE"
+        echo "$services" >>"$SUMMARY_FILE"
+
+        # Check for interesting services/ports
+        interesting_found=false
+        while IFS= read -r service_line; do
+            port=$(echo "$service_line" | awk '{print $1}' | cut -d'/' -f1)
+            service=$(echo "$service_line" | awk '{print $2}')
+            version=$(echo "$service_line" | awk '{print $3}')
+
+            if [[ " ${INTERESTING_SERVICES[*]} " =~ " ${service} " ]] || [[ " ${INTERESTING_PORTS[*]} " =~ " ${port} " ]]; then
+                if [[ "$interesting_found" == false ]]; then
+                    echo "Interesting services found on $host ($target_domain):" >>"$POINTERS_FILE"
+                    interesting_found=true
+                fi
+                echo "$service_line" >>"$POINTERS_FILE"
+            fi
+        done <<<"$services"
+
+        # Extract services for searchsploit
+        grep -oP '\d+/open/[^/]+//[^/]+//[^/]+' "$gnmap_file" | awk -F'//' '{print $2, $3}' >>"$SERVICES_FILE"
+    done
+
+    # Sort and deduplicate services
+    sort -u "$SERVICES_FILE" -o "$SERVICES_FILE"
+
+    # Run searchsploit on discovered services
+    if [[ -s "$SERVICES_FILE" ]]; then
+        echo "[++] Running searchsploit on services..."
+        while IFS= read -r service; do
+            echo "Searching for exploits for: $service" >>"$SEARCHSPLOIT_RESULTS"
+            searchsploit "$service" >>"$SEARCHSPLOIT_RESULTS"
+            echo "-----------------------------" >>"$SEARCHSPLOIT_RESULTS"
+        done <"$SERVICES_FILE"
+    else
+        echo "[++] No services found for searchsploit."
+    fi
+
+    echo "[+] Nmap summary processing complete. Results saved to:"
+    echo "- $SUMMARY_FILE"
+    echo "- $POINTERS_FILE"
+    echo "- $SERVICES_FILE"
+    echo "- $SEARCHSPLOIT_RESULTS"
 }
 
 # Main scanning function
@@ -139,6 +219,8 @@ nmap_scan() {
     else
         echo "APIDOMAINS not specified or file empty. Skipping API scans."
     fi
+
+    process_gnmap
 }
 
 passive_recon() {
@@ -253,8 +335,9 @@ main() {
     passive_recon # dorking, robots
     fuzz_documentation # fuzzing for documentation with ffuf
     fuzz_directories
-    nmap # scan domains and apidomans
+    nmap_scan # scan domains and apidomans
     # scan_network $IPS # scan manually added ip's after shodan recon
+    # process_gnmap # run manually after new ip scans, it's also in default nmap_scan function
 }
 
 main "$@"
