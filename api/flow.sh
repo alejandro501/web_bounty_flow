@@ -92,51 +92,79 @@ robots() {
     done
 }
 
-# Scans the network for the provided list of organizations using nmap
+#!/bin/bash
+
+# Scans the network using targets from a given file
 scan_network() {
-    local orgs_file="$1"
+    local input_file="$1"
     mkdir -p "$NMAP_DIR"
 
-    while IFS= read -r org; do
-        [[ -z "$org" ]] && continue
-        echo "Scanning $org with nmap"
-
-        clean_org=$(echo "$org" | sed -e 's#http[s]*://##' -e 's#www\.##')
-        clean_org=$(echo "$clean_org" | tr -d '/:')
-
-        touch "$NMAP_DIR/${clean_org}.scsv.log"
-        touch "$NMAP_DIR/${clean_org}.allports.log"
-
-        nmap -sC -sV "$clean_org" -oA "$NMAP_DIR/${clean_org}.scsv.log"
-        nmap -p- "$clean_org" -oA "$NMAP_DIR/${clean_org}.allports.log"
-    done <"$orgs_file"
-}
-
-nmap() {
-    if [[ -n "$DOMAINS" && -s "$DOMAINS" ]]; then
-        echo "Scanning DOMAINS: $DOMAINS"
-        scan_network "$DOMAINS"
-    else
-        echo "DOMAINS is either missing or empty. Skipping domain-based scanning."
+    if [[ ! -f "$input_file" || ! -r "$input_file" ]]; then
+        echo "Error: Input file '$input_file' not found or not readable!"
+        return 1
     fi
 
+    echo "Reading targets from: $input_file"
+
+    while IFS= read -r target || [[ -n "$target" ]]; do
+        target=$(echo "$target" | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        [[ -z "$target" ]] && continue
+
+        echo "Scanning target: $target"
+
+        clean_target=$(echo "$target" | sed -e 's#http[s]*://##' -e 's#www\.##' | tr -d '/:')
+
+        echo "Running basic scan..."
+        nmap -sC -sV "$clean_target" -oA "$NMAP_DIR/${clean_target}.scsv"
+
+        echo "Running full port scan..."
+        nmap -p- "$clean_target" -oA "$NMAP_DIR/${clean_target}.allports"
+    done <"$input_file" # THIS IS THE CRUCIAL FIX - reads file content
+}
+
+# Main scanning function
+nmap_scan() {
+    # Domain scanning
+    if [[ -n "$DOMAINS" && -s "$DOMAINS" ]]; then
+        echo "=== Starting Domain Scans ==="
+        scan_network "$DOMAINS"
+    else
+        echo "DOMAINS not specified or file empty. Skipping domain scans."
+    fi
+
+    # API Domain scanning
     if [[ -n "$APIDOMAINS" && -s "$APIDOMAINS" ]]; then
-        echo "Scanning APIDOMAINS: $APIDOMAINS"
+        echo "=== Starting API Domain Scans ==="
         scan_network "$APIDOMAINS"
     else
-        echo "APIDOMAINS is either missing or empty. Skipping API domain-based scanning."
+        echo "APIDOMAINS not specified or file empty. Skipping API scans."
     fi
 }
 
 passive_recon() {
-    if [[ -n "$ORGANIZATION" ]]; then
-        generate_dork_links -oR "$ORGANIZATION" --api
-        robots "$DOMAINS"
+    # if organization file is filled
+    if [[ -n "$ORGANIZATIONS" && -s "$ORGANIZATIONS" ]]; then
+        generate_dork_links -oR "$ORGANIZATIONS" --api
     fi
 
     if [[ -n "$WILDCARDS" && -s "$WILDCARDS" ]]; then
-        subfinder -dL "$WILDCARDS" | anew $DOMAINS | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
+        subfinder -dL "$WILDCARDS" | anew $DOMAINS
+
+        # after subfinder remove domains that are present in the out-of-scope file
+        sed -i -f <(sed 's/.*/\/&\/d/' "$OUT_OF_SCOPE_DOMAINS") "$DOMAINS"
+
+        cat $DOMAINS | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
+
         generate_dork_links -L "$WILDCARDS" --api
+        generate_dork_links -L "$DOMAINS" --api
+        generate_dork_links -L "$APIDOMAINS" --api
+
+        # distribute dork links into corresponding folders
+        mkdir -p $DORKING_DIR/shodan && find . -maxdepth 1 -type f -name "*shodan*" -exec mv {} $DORKING_DIR/shodan/ \;
+        mkdir -p $DORKING_DIR/github && find . -maxdepth 1 -type f -name "*github*" -exec mv {} $DORKING_DIR/github/ \;
+        mkdir -p $DORKING_DIR/google && find . -maxdepth 1 -type f -name "*google*" -exec mv {} $DORKING_DIR/google/ \;
+        mkdir -p $DORKING_DIR/wayback && find . -maxdepth 1 -type f -name "*wayback*" -exec mv {} $DORKING_DIR/wayback/ \;
+
         robots "$WILDCARDS"
         robots "$DOMAINS"
         robots "$APIDOMAINS"
@@ -225,7 +253,8 @@ main() {
     passive_recon # dorking, robots
     fuzz_documentation # fuzzing for documentation with ffuf
     fuzz_directories
-    nmap
+    nmap # scan domains and apidomans
+    # scan_network $IPS # scan manually added ip's after shodan recon
 }
 
 main "$@"
