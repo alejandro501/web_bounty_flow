@@ -8,3 +8,9 @@ crt
 # python residue
 __pycache__
 .venv
+
+# dorking tokens
+dorking/github/github_token.txt
+
+# ffuf
+ffuf/github/github_token.txt
