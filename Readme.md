@@ -5,6 +5,14 @@ This Bash script automates reconnaissance tasks for penetration testing and secu
 
 ---
 
+## Configuration
+The tool uses `flow.conf` for configuration settings. Key files:
+- `domains`: Target domains
+- `scope`: In-scope targets
+- `out-of-scope`: Excluded targets
+- `wildcards`: Wildcard domains
+- `organizations`: Target organizations
+
 ## Features
 - **Passive Reconnaissance**: Scans organizations/domains, generates dork links, and extracts endpoints.
 - **Robots.txt Analysis**: Fetches and processes `robots.txt` files for potential disallowed paths.
@@ -22,16 +30,14 @@ This Bash script automates reconnaissance tasks for penetration testing and secu
 
 ### Options
 - **Input Feed**:
-  - `-org, --organization <org>`: Specify a single organization to target.
-  - `-ol, --org-list <filename>`: Specify a file containing a list of organizations.
-- **Optional**:
-  - `-t, --tor`: Enable Tor for anonymous network requests.
+  - `-org, --organization <org>`: Target a single organization
+  - `-ol, --org-list <filename>`: Process multiple organizations from a file
 - **Help**:
-  - `-h, --help`: Display the help message.
+  - `-h, --help`: Display help message
 
 ### Example
 ```bash
-./flow.sh -org example.com -ol wildcards.txt -t
+./flow.sh -org example.com -ol wildcards
 ```
 
 ---
@@ -48,10 +54,47 @@ This Bash script automates reconnaissance tasks for penetration testing and secu
 
 ---
 
-## Output
-The script generates outputs in structured directories:
-- **Nmap scans**: Results saved in the `nmap` directory.
-- **Robots.txt files**: Stored in `robots`.
-- **Fuzzing results**: Saved in `fuzzing/ffuf`.
+## Output Structure
+- **Dorking Results**: Organized by platform in `dorking/`
+- **Fuzzing Results**: Stored in `fuzzing/ffuf/`
+- **Robots Analysis**: Parsed results in `robots/`
+  - `_hits.txt`: Valid findings
+  - Separate directories for hits/no-hits
+
+## Features in Detail
+
+### Passive Reconnaissance
+1. **Domain Enumeration**
+   - Subdomain discovery via subfinder
+   - API endpoint detection
+   - Out-of-scope domain filtering
+
+2. **Dorking**
+   - Automated dork generation for multiple platforms
+   - Results categorized by platform
+   - API-specific dork queries
+
+### Active Scanning
+1. **Network Analysis**
+   - Full port scans (-p-)
+   - Service version detection
+   - Automated reporting
+
+2. **Vulnerability Assessment**
+   - Integration with searchsploit
+   - Service-based vulnerability mapping
+   - Summary reports generation
+
+## Security Notes
+- Sensitive files (tokens, credentials) are automatically excluded via `.gitignore`
+- Ensure proper scope definition before running scans
+- Review and comply with target's security policies
+
+## Requirements
+- Nmap
+- subfinder
+- ffuf
+- curl
+- searchsploit
 
 ---
