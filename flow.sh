@@ -92,12 +92,10 @@ robots() {
     done
 }
 
-#!/bin/bash
-
 # Scans the network using targets from a given file
 scan_network() {
     local input_file="$1"
-    mkdir -p "$NMAP_DIR"
+    mkdir -p "$LOGS_DIR/$NMAP_DIR"
 
     if [[ ! -f "$input_file" || ! -r "$input_file" ]]; then
         echo "Error: Input file '$input_file' not found or not readable!"
@@ -114,13 +112,9 @@ scan_network() {
 
         clean_target=$(echo "$target" | sed -e 's#http[s]*://##' -e 's#www\.##' | tr -d '/:')
 
-        # Basic scan is currently disabled, you can choose to use it instead of verbose, or you can use both
-        # echo "Running basic scan..."
-        # nmap -sC -sV "$clean_target" -oA "$NMAP_DIR/${clean_target}.scsv"
-
         echo "Running full port scan..."
-        nmap -p- "$clean_target" -oA "$NMAP_DIR/${clean_target}.allports"
-    done <"$input_file" # THIS IS THE CRUCIAL FIX - reads file content
+        nmap -p- "$clean_target" -oA "$LOGS_DIR/$NMAP_DIR/${clean_target}.allports"
+    done <"$input_file"
 }
 
 process_gnmap() {
@@ -129,9 +123,9 @@ process_gnmap() {
         return
     fi
 
-    echo "[+] Processing .gnmap files in $NMAP_DIR..."
+    echo "[+] Processing .gnmap files in $LOGS_DIR/$NMAP_DIR..."
 
-    mkdir -p "$NMAP_DIR"
+    mkdir -p "$LOGS_DIR/$NMAP_DIR"
 
     # Create empty output files
     >"$SUMMARY_FILE"
@@ -139,8 +133,8 @@ process_gnmap() {
     >"$SERVICES_FILE"
     >"$SEARCHSPLOIT_RESULTS"
 
-    # Process each .gnmap file in the NMAP_DIR
-    for gnmap_file in "$NMAP_DIR"/*.gnmap; do
+    # Process each .gnmap file in the LOGS_DIR/nmap
+    for gnmap_file in "$LOGS_DIR/$NMAP_DIR"/*.gnmap; do
         [[ ! -f "$gnmap_file" ]] && continue
         echo "[++] Processing $gnmap_file..."
 
@@ -340,14 +334,14 @@ security_checks() {
 main() {
     get_params "$@"
     # Recon
-    passive_recon # dorking, robots
+    passive_recon      # dorking, robots
     fuzz_documentation # fuzzing for documentation with ffuf
     fuzz_directories
 
     # Network scan
-    nmap_scan # scan domains and apidomans
+    nmap_scan         # scan domains and apidomans
     scan_network $IPS # scan manually added ip's after shodan recon
-    process_gnmap # run manually after all scans, it's also in default nmap function
+    process_gnmap     # run manually after all scans, it's also in default nmap function
 
     # Security checks
     security_checks
