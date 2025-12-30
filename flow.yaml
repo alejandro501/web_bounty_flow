@@ -1,0 +1,58 @@
+log_file: flow.log
+lists:
+  organizations: organizations
+  ips: ips
+  wildcards: wildcards
+  domains: domains
+  apidomains: apidomains
+  out_of_scope: out-of-scope
+paths:
+  sitemaps_file: _sitemaps.txt
+  robots_dir: robots
+  robots_hits_dir: hits
+  robots_no_hits_dir: no_hits
+  dorking_dir: dorking
+  fuzzing_dir: fuzzing
+  ffuf_dir: ffuf
+  fuzzing_hits_dir: hits
+  fuzzing_no_hits_dir: no_hits
+  all_hits_file: _all_hits.txt
+  logs_dir: logs
+  nmap_dir: logs/nmap
+wordlists:
+  api_wild_501: ${HOME}/hack/resources/wordlists/api-wild-501.txt
+  seclist_api_longest: ${HOME}/hack/resources/wordlists/SecLists/Discovery/Web-Content/api/api-endpoints-res.txt
+  custom_project_specific: project-apifuzz.txt
+  apidocs: ${HOME}/hack/resources/wordlists/api_docs_path
+nmap_summary:
+  enable: true
+  summary_file: logs/nmap/_nmap_summary.txt
+  pointers_file: logs/nmap/_nmap_pointers.txt
+  services_file: logs/nmap/_nmap_services.txt
+  searchsploit_results: logs/nmap/_searchsploit_results.txt
+  interesting_services:
+    - ftp
+    - ssh
+    - smtp
+    - rdp
+    - vnc
+    - mysql
+    - postgresql
+    - redis
+    - elasticsearch
+    - mongodb
+    - mqtt
+    - telnet
+  interesting_ports:
+    - "21"
+    - "22"
+    - "25"
+    - "3389"
+    - "5900"
+    - "3306"
+    - "5432"
+    - "6379"
+    - "9200"
+    - "27017"
+    - "1883"
+    - "23"
