@@ -7,6 +7,15 @@ const urlStatus = document.getElementById("url-status");
 const runButton = document.getElementById("run-flow");
 const flowStatus = document.getElementById("flow-status");
 
+function isValidURL(value) {
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 uploadForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const formData = new FormData(uploadForm);
@@ -28,9 +37,22 @@ uploadForm?.addEventListener("submit", async (event) => {
 
 urlForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const listType = urlForm.list_type.value;
+  const entry = urlForm.url.value.trim();
+
+  if (!entry) {
+    urlStatus.textContent = "Entry cannot be empty";
+    return;
+  }
+
+  if (listType !== "wildcards" && !isValidURL(entry)) {
+    urlStatus.textContent = "Please enter a valid URL for this list";
+    return;
+  }
+
   const payload = {
-    list_type: urlForm.list_type.value,
-    url: urlForm.url.value,
+    list_type: listType,
+    url: entry,
   };
   urlStatus.textContent = "Saving…";
 
