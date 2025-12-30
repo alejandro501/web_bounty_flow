@@ -1,0 +1,22 @@
+FROM golang:1.23.2-alpine AS build
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 go build -o /bin/bflow-server ./cmd/server
+
+FROM alpine:3.18
+RUN addgroup -S app && adduser -S app -G app
+
+WORKDIR /app
+COPY --from=build /bin/bflow-server /usr/local/bin/bflow-server
+COPY flow.yaml .
+RUN mkdir -p fuzzing robots dorking logs && \
+    touch organizations wildcards domains apidomains ips out-of-scope && \
+    chown -R app:app /app
+
+USER app
+EXPOSE 8080
+ENTRYPOINT ["bflow-server", "--config", "/app/flow.yaml"]
