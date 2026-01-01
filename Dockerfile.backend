@@ -8,15 +8,20 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o /bin/bflow-server ./cmd/server
 
 FROM alpine:3.18
-RUN addgroup -S app && adduser -S app -G app
+ARG APP_UID=1000
+ARG APP_GID=1000
+RUN addgroup -S -g "${APP_GID}" app && adduser -S -u "${APP_UID}" -G app app
 
 WORKDIR /app
 COPY --from=build /bin/bflow-server /usr/local/bin/bflow-server
+COPY --from=build /usr/local/go /usr/local/go
 COPY flow.yaml .
-RUN mkdir -p fuzzing robots dorking logs && \
-    touch organizations wildcards domains apidomains ips out-of-scope && \
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN apk add --no-cache git curl unzip nmap python3 py3-pip su-exec bash
+RUN mkdir -p data fuzzing robots dorking logs && \
     chown -R app:app /app
 
-USER app
 EXPOSE 8080
-ENTRYPOINT ["bflow-server", "--config", "/app/flow.yaml"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["bflow-server", "--config", "/app/flow.yaml"]
