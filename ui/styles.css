@@ -107,3 +107,17 @@ button:active {
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.6);
 }
+
+.log-view {
+  min-height: 200px;
+  margin-top: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 1rem;
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}

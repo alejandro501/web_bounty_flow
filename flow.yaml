@@ -1,11 +1,11 @@
 log_file: flow.log
 lists:
-  organizations: organizations
-  ips: ips
-  wildcards: wildcards
-  domains: domains
-  apidomains: apidomains
-  out_of_scope: out-of-scope
+  organizations: data/organizations
+  ips: data/ips
+  wildcards: data/wildcards
+  domains: data/domains
+  apidomains: data/apidomains
+  out_of_scope: data/out-of-scope
 paths:
   sitemaps_file: _sitemaps.txt
   robots_dir: robots

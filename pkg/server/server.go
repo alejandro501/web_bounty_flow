@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,25 +26,30 @@ type Server struct {
 	logger *log.Logger
 	mux    *http.ServeMux
 
-	mu      sync.Mutex
-	running bool
-	status  string
+	mu       sync.Mutex
+	running  bool
+	status   string
+	logMu    sync.Mutex
+	logLines []string
 }
 
 // New creates a new HTTP server wired to the bounty flow.
-func New(cfg *config.Config, logger *log.Logger) *Server {
+func New(cfg *config.Config) *Server {
 	s := &Server{
 		cfg:    cfg,
-		app:    app.New(cfg, logger),
-		logger: logger,
 		mux:    http.NewServeMux(),
 		status: "idle",
 	}
+	s.logger = log.New(io.MultiWriter(os.Stdout, s), "[bflow-server] ", log.LstdFlags)
+	appLogger := log.New(io.MultiWriter(os.Stdout, s), "[bflow] ", log.LstdFlags)
+	s.app = app.New(cfg, appLogger)
 
 	s.mux.HandleFunc("/api/upload", s.corsMiddleware(s.uploadHandler))
 	s.mux.HandleFunc("/api/url", s.corsMiddleware(s.urlHandler))
 	s.mux.HandleFunc("/api/run", s.corsMiddleware(s.runHandler))
 	s.mux.HandleFunc("/api/status", s.corsMiddleware(s.statusHandler))
+	s.mux.HandleFunc("/api/logs", s.corsMiddleware(s.logsHandler))
+	s.mux.HandleFunc("/api/list", s.corsMiddleware(s.listHandler))
 	s.mux.HandleFunc("/", s.corsMiddleware(s.rootHandler))
 
 	return s
@@ -200,6 +206,53 @@ func (s *Server) statusHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func (s *Server) logsHandler(w http.ResponseWriter, r *http.Request) {
+	s.logMu.Lock()
+	lines := append([]string(nil), s.logLines...)
+	s.logMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string][]string{"logs": lines})
+}
+
+func (s *Server) listHandler(w http.ResponseWriter, r *http.Request) {
+	listType := r.URL.Query().Get("type")
+	if listType == "" {
+		http.Error(w, "type query parameter required", http.StatusBadRequest)
+		return
+	}
+
+	dest, err := s.listPath(listType)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	lines := readListLines(dest)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string][]string{"entries": lines})
+}
+
+func (s *Server) recordLog(line string) {
+	if line == "" {
+		return
+	}
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	s.logLines = append(s.logLines, line)
+	if len(s.logLines) > 400 {
+		s.logLines = s.logLines[len(s.logLines)-400:]
+	}
+}
+
+func (s *Server) Write(p []byte) (int, error) {
+	lines := strings.Split(string(p), "\n")
+	for _, line := range lines {
+		s.recordLog(strings.TrimSpace(line))
+	}
+	return len(p), nil
+}
+
 func (s *Server) startFlow(org, orgList string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -282,4 +335,26 @@ func (s *Server) saveTemporaryFile(dest string, src io.Reader) error {
 	}
 
 	return nil
+}
+
+func readListLines(path string) []string {
+	if path == "" {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines
 }

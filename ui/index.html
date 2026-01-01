@@ -60,9 +60,30 @@
 
       <section class="panel">
         <h2>Flow control</h2>
-        <button id="run-flow">Run full flow</button>
+        <button id="run-flow">Run flow</button>
         <p id="flow-status" class="muted">idle</p>
         <p>Current status will refresh automatically</p>
+      </section>
+
+      <section class="panel">
+        <h2>Scope entries</h2>
+        <label>
+          Current list
+          <select id="list-view-select">
+            <option value="wildcards">Wildcards</option>
+            <option value="domains">Domains</option>
+            <option value="apidomains">API Domains</option>
+            <option value="organizations">Organizations</option>
+            <option value="ips">IPs</option>
+            <option value="out_of_scope">Out of scope</option>
+          </select>
+        </label>
+        <pre id="list-view-output" class="log-view">Select a list to show entries.</pre>
+      </section>
+
+      <section class="panel">
+        <h2>Flow logs</h2>
+        <pre id="flow-log-output" class="log-view">Logs appear here when you start the flow.</pre>
       </section>
     </main>
     <script src="app.js"></script>

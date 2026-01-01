@@ -6,6 +6,9 @@ const urlForm = document.getElementById("url-form");
 const urlStatus = document.getElementById("url-status");
 const runButton = document.getElementById("run-flow");
 const flowStatus = document.getElementById("flow-status");
+const listViewSelect = document.getElementById("list-view-select");
+const listViewOutput = document.getElementById("list-view-output");
+const flowLogOutput = document.getElementById("flow-log-output");
 
 function isValidURL(value) {
   try {
@@ -66,6 +69,7 @@ urlForm?.addEventListener("submit", async (event) => {
       throw new Error(await response.text());
     }
     urlStatus.textContent = "Entry appended";
+    await refreshListEntries(listType);
   } catch (error) {
     urlStatus.textContent = `Append failed: ${error.message}`;
   }
@@ -105,3 +109,49 @@ async function refreshStatus() {
 
 refreshStatus();
 setInterval(refreshStatus, 5000);
+
+async function refreshListEntries(type) {
+  if (!listViewOutput) {
+    return;
+  }
+  listViewOutput.textContent = "Loading…";
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/list?type=${encodeURIComponent(type)}`);
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const data = await response.json();
+    listViewOutput.textContent =
+      data.entries && data.entries.length ? data.entries.join("\n") : "No entries yet.";
+  } catch (error) {
+    listViewOutput.textContent = `Error: ${error.message}`;
+  }
+}
+
+listViewSelect?.addEventListener("change", () => {
+  refreshListEntries(listViewSelect.value);
+});
+
+if (listViewSelect?.value) {
+  refreshListEntries(listViewSelect.value);
+}
+
+async function refreshLogs() {
+  if (!flowLogOutput) {
+    return;
+  }
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/logs`);
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
+    const data = await res.json();
+    flowLogOutput.textContent = data.logs ? data.logs.join("\n") : "Waiting for logs…";
+    flowLogOutput.scrollTop = flowLogOutput.scrollHeight;
+  } catch (error) {
+    flowLogOutput.textContent = `Log fetch error: ${error.message}`;
+  }
+}
+
+refreshLogs();
+setInterval(refreshLogs, 3000);

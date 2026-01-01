@@ -23,8 +23,7 @@ func main() {
 	}
 
 	logger := log.New(os.Stdout, "[bflow-server] ", log.LstdFlags)
-
-	srv := server.New(cfg, logger)
+	srv := server.New(cfg)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)

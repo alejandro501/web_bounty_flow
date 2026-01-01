@@ -103,6 +103,26 @@ func (a *App) prepareDirectories() error {
 		a.cfg.Paths.NmapDir,
 	}
 
+	listFiles := []string{
+		a.cfg.Lists.Organizations,
+		a.cfg.Lists.IPs,
+		a.cfg.Lists.Wildcards,
+		a.cfg.Lists.Domains,
+		a.cfg.Lists.APIDomains,
+		a.cfg.Lists.OutOfScope,
+	}
+
+	for _, listPath := range listFiles {
+		if listPath == "" {
+			continue
+		}
+		dir := filepath.Dir(listPath)
+		if dir == "." || dir == "" {
+			continue
+		}
+		directories = append(directories, dir)
+	}
+
 	for _, dir := range directories {
 		if dir == "" {
 			continue
