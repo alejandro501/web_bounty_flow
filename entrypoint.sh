@@ -6,6 +6,7 @@ GOBIN=/usr/local/bin
 export GOPATH GOBIN PATH="$GOBIN:/usr/local/go/bin:$PATH"
 
 GO_TOOLS=$(cat <<'EOF'
+github.com/alejandro501/generate_dork_links@latest
 github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 github.com/tomnomnom/httprobe@latest
 github.com/ffuf/ffuf@latest
@@ -40,6 +41,23 @@ install_searchsploit() {
 
 install_go_tools
 install_searchsploit
+
+ensure_resources() {
+  mkdir -p /app/resources
+  chown app:app /app/resources
+  clone_if_missing() {
+    local repo=$1
+    local dest=$2
+    if [ ! -d "$dest" ]; then
+      echo "cloning $repo"
+      git clone --depth 1 "$repo" "$dest"
+    fi
+  }
+  clone_if_missing https://github.com/danielmiessler/SecLists.git /app/resources/SecLists
+  clone_if_missing https://github.com/alejandro501/resources.git /app/resources/resources
+}
+
+ensure_resources
 
 if [ "$#" -eq 0 ]; then
   set -- bflow-server --config /app/flow.yaml
