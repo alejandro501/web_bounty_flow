@@ -24,6 +24,15 @@ wordlists:
   seclist_api_longest: ${HOME}/hack/resources/wordlists/SecLists/Discovery/Web-Content/api/api-endpoints-res.txt
   custom_project_specific: project-apifuzz.txt
   apidocs: ${HOME}/hack/resources/wordlists/api_docs_path
+  dorking:
+    github: ${HOME}/hack/resources/wordlists/dorking/dorking-github.txt
+    google: ${HOME}/hack/resources/wordlists/dorking/dorking-google.txt
+    shodan: ${HOME}/hack/resources/wordlists/dorking/shodan.txt
+    wayback: ${HOME}/hack/resources/wordlists/dorking/api-wayback.txt
+    api_github: ${HOME}/hack/resources/wordlists/dorking/api-dorking-github.txt
+    api_google: ${HOME}/hack/resources/wordlists/dorking/api-dorking-google.txt
+    api_shodan: ${HOME}/hack/resources/wordlists/dorking/api-shodan.txt
+    api_wayback: ${HOME}/hack/resources/wordlists/dorking/api-wayback.txt
 nmap_summary:
   enable: true
   summary_file: logs/nmap/_nmap_summary.txt

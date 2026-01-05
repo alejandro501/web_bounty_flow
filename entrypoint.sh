@@ -4,6 +4,7 @@ set -euo pipefail
 GOPATH=/go
 GOBIN=/usr/local/bin
 export GOPATH GOBIN PATH="$GOBIN:/usr/local/go/bin:$PATH"
+export RESOURCES_DIR=${RESOURCES_DIR:-/app/resources/resources}
 
 GO_TOOLS=$(cat <<'EOF'
 github.com/alejandro501/generate_dork_links@latest
@@ -55,6 +56,8 @@ ensure_resources() {
   }
   clone_if_missing https://github.com/danielmiessler/SecLists.git /app/resources/SecLists
   clone_if_missing https://github.com/alejandro501/resources.git /app/resources/resources
+  mkdir -p /home/rojo/hack
+  ln -sfn /app/resources/resources /home/rojo/hack/resources
 }
 
 ensure_resources

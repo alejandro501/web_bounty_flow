@@ -46,10 +46,22 @@ type Paths struct {
 
 // Wordlists references external wordlist files.
 type Wordlists struct {
-	APIWild501            string `yaml:"api_wild_501"`
-	SecListAPILongest     string `yaml:"seclist_api_longest"`
-	CustomProjectSpecific string `yaml:"custom_project_specific"`
-	APIDocs               string `yaml:"apidocs"`
+	APIWild501            string           `yaml:"api_wild_501"`
+	SecListAPILongest     string           `yaml:"seclist_api_longest"`
+	CustomProjectSpecific string           `yaml:"custom_project_specific"`
+	APIDocs               string           `yaml:"apidocs"`
+	Dorking               DorkingWordlists `yaml:"dorking"`
+}
+
+type DorkingWordlists struct {
+	Github     string `yaml:"github"`
+	Google     string `yaml:"google"`
+	Shodan     string `yaml:"shodan"`
+	Wayback    string `yaml:"wayback"`
+	ApiGithub  string `yaml:"api_github"`
+	ApiGoogle  string `yaml:"api_google"`
+	ApiShodan  string `yaml:"api_shodan"`
+	ApiWayback string `yaml:"api_wayback"`
 }
 
 // NmapSummary controls the summary files and interesting targets.
@@ -109,6 +121,14 @@ func (c *Config) expandPaths() {
 	c.Wordlists.SecListAPILongest = expand(c.Wordlists.SecListAPILongest)
 	c.Wordlists.CustomProjectSpecific = expand(c.Wordlists.CustomProjectSpecific)
 	c.Wordlists.APIDocs = expand(c.Wordlists.APIDocs)
+	c.Wordlists.Dorking.Github = expand(c.Wordlists.Dorking.Github)
+	c.Wordlists.Dorking.Google = expand(c.Wordlists.Dorking.Google)
+	c.Wordlists.Dorking.Shodan = expand(c.Wordlists.Dorking.Shodan)
+	c.Wordlists.Dorking.Wayback = expand(c.Wordlists.Dorking.Wayback)
+	c.Wordlists.Dorking.ApiGithub = expand(c.Wordlists.Dorking.ApiGithub)
+	c.Wordlists.Dorking.ApiGoogle = expand(c.Wordlists.Dorking.ApiGoogle)
+	c.Wordlists.Dorking.ApiShodan = expand(c.Wordlists.Dorking.ApiShodan)
+	c.Wordlists.Dorking.ApiWayback = expand(c.Wordlists.Dorking.ApiWayback)
 
 	c.NmapSummary.SummaryFile = expand(c.NmapSummary.SummaryFile)
 	c.NmapSummary.PointersFile = expand(c.NmapSummary.PointersFile)
