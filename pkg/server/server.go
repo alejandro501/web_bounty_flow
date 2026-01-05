@@ -131,6 +131,11 @@ type urlRequest struct {
 	URL      string `json:"url"`
 }
 
+type urlResponse struct {
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
 func (s *Server) urlHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -154,6 +159,24 @@ func (s *Server) urlHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	entry := strings.TrimSpace(req.URL)
+	if entry == "" {
+		http.Error(w, "url cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	existing := readListLines(dest)
+	for _, line := range existing {
+		if strings.EqualFold(line, entry) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(urlResponse{
+				Status:  "exists",
+				Message: "Entry already exists",
+			})
+			return
+		}
+	}
+
 	f, err := os.OpenFile(dest, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -161,10 +184,13 @@ func (s *Server) urlHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
-	fmt.Fprintln(f, strings.TrimSpace(req.URL))
+	fmt.Fprintln(f, entry)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "appended"})
+	json.NewEncoder(w).Encode(urlResponse{
+		Status:  "appended",
+		Message: "Entry appended",
+	})
 }
 
 type runRequest struct {

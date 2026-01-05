@@ -137,7 +137,8 @@ func (a *App) prepareDirectories() error {
 
 func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 	if fileExists(a.cfg.Lists.Organizations) {
-		if err := a.runCommand(ctx, "generate_dork_links", "-oR", a.cfg.Lists.Organizations, "--api"); err != nil {
+		args := append([]string{"--list", a.cfg.Lists.Organizations, "--all"}, a.dorkWordlistArgs(false)...)
+		if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
 			return err
 		}
 	}
@@ -152,7 +153,7 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 		}
 
 		if fileExists(a.cfg.Lists.Domains) {
-			if err := a.runShell(ctx, fmt.Sprintf("cat %s | grep api | httprobe --prefer-https | anew %s", a.cfg.Lists.Domains, a.cfg.Lists.APIDomains)); err != nil {
+			if err := a.runShell(ctx, fmt.Sprintf("cat %s | grep api | httprobe | anew %s", a.cfg.Lists.Domains, a.cfg.Lists.APIDomains)); err != nil {
 				return err
 			}
 		}
@@ -164,10 +165,13 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 		}
 
 		for _, listPath := range targetSets {
-			if fileExists(listPath) {
-				if err := a.runCommand(ctx, "generate_dork_links", "-L", listPath, "--api"); err != nil {
-					return err
-				}
+			if !fileExists(listPath) {
+				continue
+			}
+			useAPI := listPath == a.cfg.Lists.APIDomains
+			args := append([]string{"--list", listPath, "--all"}, a.dorkWordlistArgs(useAPI)...)
+			if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
+				return err
 			}
 		}
 
@@ -646,6 +650,41 @@ func (a *App) runCommand(ctx context.Context, name string, args ...string) error
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func (a *App) runCommandWithEnv(ctx context.Context, env []string, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = append(os.Environ(), env...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func (a *App) runGenerateDorkLinks(ctx context.Context, args ...string) error {
+	env := []string{fmt.Sprintf("DORKING=%s", a.cfg.Paths.DorkingDir)}
+	return a.runCommandWithEnv(ctx, env, "generate_dork_links", args...)
+}
+
+func (a *App) dorkWordlistArgs(useAPI bool) []string {
+	wl := a.cfg.Wordlists.Dorking
+	args := []string{}
+	add := func(flag, value string) {
+		if value != "" {
+			args = append(args, flag, value)
+		}
+	}
+	if useAPI {
+		add("--wordlist-github", wl.ApiGithub)
+		add("--wordlist-google", wl.ApiGoogle)
+		add("--wordlist-shodan", wl.ApiShodan)
+		add("--wordlist-wayback", wl.ApiWayback)
+	} else {
+		add("--wordlist-github", wl.Github)
+		add("--wordlist-google", wl.Google)
+		add("--wordlist-shodan", wl.Shodan)
+		add("--wordlist-wayback", wl.Wayback)
+	}
+	return args
 }
 
 func (a *App) runShell(ctx context.Context, script string) error {

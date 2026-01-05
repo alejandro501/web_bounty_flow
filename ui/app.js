@@ -68,7 +68,8 @@ urlForm?.addEventListener("submit", async (event) => {
     if (!response.ok) {
       throw new Error(await response.text());
     }
-    urlStatus.textContent = "Entry appended";
+    const data = await response.json();
+    urlStatus.textContent = data.message ?? "Entry appended";
     await refreshListEntries(listType);
   } catch (error) {
     urlStatus.textContent = `Append failed: ${error.message}`;
