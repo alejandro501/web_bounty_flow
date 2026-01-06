@@ -14,7 +14,7 @@ body {
 }
 
 main {
-  width: min(900px, 90vw);
+  width: min(1200px, 95vw);
   padding: 2rem;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -22,17 +22,49 @@ main {
   box-shadow: 0 20px 45px rgba(0, 0, 0, 0.4);
 }
 
-h1 {
+.layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-areas:
+    "title title"
+    "upload append"
+    "flow scope"
+    "logs logs";
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.page-title {
+  grid-area: title;
   margin-top: 0;
   text-align: center;
 }
 
 .panel {
-  margin-top: 2rem;
   padding: 1.5rem;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.panel-upload {
+  grid-area: upload;
+}
+
+.panel-append {
+  grid-area: append;
+}
+
+.panel-flow {
+  grid-area: flow;
+}
+
+.panel-scope {
+  grid-area: scope;
+}
+
+.panel-logs {
+  grid-area: logs;
 }
 
 form {
@@ -120,4 +152,21 @@ button:active {
   line-height: 1.4;
   overflow-y: auto;
   white-space: pre-wrap;
+}
+
+.log-view--tall {
+  min-height: 360px;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "title"
+      "upload"
+      "append"
+      "flow"
+      "scope"
+      "logs";
+  }
 }
