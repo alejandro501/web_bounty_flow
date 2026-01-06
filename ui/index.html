@@ -62,7 +62,25 @@
         <h2>Flow control</h2>
         <button id="run-flow">Run flow</button>
         <p id="flow-status" class="muted">idle</p>
-        <p>Current status will refresh automatically (high-level only)</p>
+        <p>Current status will refresh automatically</p>
+        <div class="flow-steps">
+          <p class="muted">Flow order</p>
+          <ul>
+            <li>Load flow.conf and parse --organization / --org-list inputs.</li>
+            <li>Passive recon: generate_dork_links for organizations (API-focused queries).</li>
+            <li>Passive recon: subfinder on wildcards -> append to domains.</li>
+            <li>Passive recon: filter out-of-scope entries from domains.</li>
+            <li>Passive recon: httprobe API domains (grep api -> apidomains).</li>
+            <li>Passive recon: generate_dork_links for wildcards, domains, apidomains; move outputs into dorking/ buckets.</li>
+            <li>Passive recon: robots fetch + sitemap extraction for wildcards/domains/apidomains.</li>
+            <li>Passive recon: sort_http on domains.</li>
+            <li>Documentation fuzzing: ffuf against orgs/wildcards/apidomains.</li>
+            <li>Directory fuzzing: ffuf against apidomains/wildcards.</li>
+            <li>Nmap scans: domains, apidomains, then IPs.</li>
+            <li>Process .gnmap summaries and run searchsploit mapping.</li>
+            <li>Security checks: toxicache, hop-by-hop, request smuggling, h2csmuggler, ssi/esi, cloudflare checks.</li>
+          </ul>
+        </div>
       </section>
 
       <section class="panel panel-scope">
