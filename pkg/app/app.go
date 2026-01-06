@@ -139,11 +139,18 @@ func (a *App) prepareDirectories() error {
 }
 
 func (a *App) passiveRecon(ctx context.Context, opts Options) error {
+	dorkingRan := false
+
 	if fileExists(a.cfg.Lists.Organizations) {
-		args := append([]string{"-list", a.cfg.Lists.Organizations, "-all"}, a.dorkWordlistArgs(false)...)
+		dorkList, err := a.prepareDorkList(a.cfg.Lists.Organizations)
+		if err != nil {
+			return err
+		}
+		args := append([]string{"-list", dorkList, "-all"}, a.dorkWordlistArgs(false)...)
 		if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
 			return err
 		}
+		dorkingRan = true
 	}
 
 	if fileExists(a.cfg.Lists.Wildcards) {
@@ -178,10 +185,15 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 				continue
 			}
 			useAPI := listPath == a.cfg.Lists.APIDomains
-			args := append([]string{"-list", listPath, "-all"}, a.dorkWordlistArgs(useAPI)...)
+			dorkList, err := a.prepareDorkList(listPath)
+			if err != nil {
+				return err
+			}
+			args := append([]string{"-list", dorkList, "-all"}, a.dorkWordlistArgs(useAPI)...)
 			if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
 				return err
 			}
+			dorkingRan = true
 		}
 
 		if err := a.organizeDorkOutputs(); err != nil {
@@ -196,6 +208,16 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 		}
 		if err := a.robots(ctx, a.cfg.Lists.APIDomains); err != nil {
 			return err
+		}
+	}
+
+	if dorkingRan {
+		count, err := countRegularFiles(a.cfg.Paths.DorkingDir)
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			return fmt.Errorf("dorking step produced no output in %s", a.cfg.Paths.DorkingDir)
 		}
 	}
 
@@ -684,7 +706,7 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	cmd := fmt.Sprintf("cat %s | awk '{print $1}' | httprobe | anew %s", a.cfg.Lists.Domains, dest)
+	cmd := fmt.Sprintf("cat %s | awk '{print $1}' | httprobe | awk -F/ '{host=$3; scheme=$1} {if (scheme == \"https:\") https[host]=1; all[host]=scheme} END {for (h in all) {if (https[h]) {print \"https://\" h} else {print \"http://\" h}}}' | sort | anew %s", a.cfg.Lists.Domains, dest)
 	if err := a.runShell(ctx, cmd); err != nil {
 		return "", err
 	}
@@ -720,6 +742,57 @@ func (a *App) dorkWordlistArgs(useAPI bool) []string {
 		add("--wordlist-wayback", wl.Wayback)
 	}
 	return args
+}
+
+func (a *App) prepareDorkList(path string) (string, error) {
+	lines, err := readFileLines(path)
+	if err != nil {
+		return "", err
+	}
+
+	seen := make(map[string]struct{})
+	var cleaned []string
+	for _, line := range lines {
+		normalized := normalizeDorkTarget(line)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		cleaned = append(cleaned, normalized)
+	}
+
+	if len(cleaned) == 0 {
+		return "", fmt.Errorf("no valid targets for dorking in %s", path)
+	}
+
+	dest := filepath.Join(filepath.Dir(path), fmt.Sprintf("%s_dorking", filepath.Base(path)))
+	if err := os.WriteFile(dest, []byte(strings.Join(cleaned, "\n")), 0o644); err != nil {
+		return "", err
+	}
+
+	return dest, nil
+}
+
+func normalizeDorkTarget(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+
+	value = strings.TrimPrefix(value, "http://")
+	value = strings.TrimPrefix(value, "https://")
+	value = strings.TrimPrefix(value, "www.")
+
+	if idx := strings.Index(value, "/"); idx != -1 {
+		value = value[:idx]
+	}
+
+	value = strings.TrimPrefix(value, "*.")
+	value = strings.TrimSpace(value)
+	return value
 }
 
 func (a *App) runShell(ctx context.Context, script string) error {
@@ -810,6 +883,39 @@ func readFileLines(path string) ([]string, error) {
 		lines = append(lines, line)
 	}
 	return lines, scanner.Err()
+}
+
+func countRegularFiles(root string) (int, error) {
+	if root == "" {
+		return 0, errors.New("dorking directory is empty")
+	}
+
+	info, err := os.Stat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	if !info.IsDir() {
+		return 0, fmt.Errorf("%s is not a directory", root)
+	}
+
+	count := 0
+	err = filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type().IsRegular() {
+			count++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
 }
 
 func readSafeLines(path string) []string {

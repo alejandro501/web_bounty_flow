@@ -229,7 +229,7 @@ passive_recon() {
         # after subfinder remove domains that are present in the out-of-scope file
         sed -i -f <(sed 's/.*/\/&\/d/' "$OUT_OF_SCOPE_DOMAINS") "$DOMAINS"
 
-        cat $DOMAINS | grep api | httprobe --prefer-https | anew "$APIDOMAINS"
+        cat $DOMAINS | grep api | httprobe | anew "$APIDOMAINS"
 
         generate_dork_links -L "$WILDCARDS" --api
         generate_dork_links -L "$DOMAINS" --api
