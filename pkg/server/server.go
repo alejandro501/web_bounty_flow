@@ -177,6 +177,11 @@ func (s *Server) urlHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	f, err := os.OpenFile(dest, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -260,9 +265,6 @@ func (s *Server) listHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) recordLog(line string) {
-	if line == "" {
-		return
-	}
 	s.logMu.Lock()
 	defer s.logMu.Unlock()
 	s.logLines = append(s.logLines, line)
@@ -273,8 +275,11 @@ func (s *Server) recordLog(line string) {
 
 func (s *Server) Write(p []byte) (int, error) {
 	lines := strings.Split(string(p), "\n")
-	for _, line := range lines {
-		s.recordLog(strings.TrimSpace(line))
+	for i, line := range lines {
+		if i == len(lines)-1 && line == "" {
+			continue
+		}
+		s.recordLog(strings.TrimRight(line, "\r"))
 	}
 	return len(p), nil
 }

@@ -8,6 +8,7 @@ export RESOURCES_DIR=${RESOURCES_DIR:-/app/resources/resources}
 
 GO_TOOLS=$(cat <<'EOF'
 github.com/alejandro501/generate_dork_links@latest
+github.com/alejandro501/sort_http@latest
 github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 github.com/tomnomnom/httprobe@latest
 github.com/ffuf/ffuf@latest
@@ -63,6 +64,9 @@ ensure_resources() {
   ln -sfn /app/resources/resources /home/rojo/hack/resources
   chown -R app:app /home/app/hack
   chown -R app:app /app/resources
+  mkdir -p /app/data
+  mkdir -p /app/data/{wildcards,domains,apidomains,ips,out-of-scope}
+  chown -R app:app /app/data
 }
 
 ensure_resources
