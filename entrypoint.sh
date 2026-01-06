@@ -45,7 +45,6 @@ install_searchsploit
 
 ensure_resources() {
   mkdir -p /app/resources
-  chown app:app /app/resources
   clone_if_missing() {
     local repo=$1
     local dest=$2
@@ -53,11 +52,17 @@ ensure_resources() {
       echo "cloning $repo"
       git clone --depth 1 "$repo" "$dest"
     fi
+    chown -R app:app "$dest"
   }
-  clone_if_missing https://github.com/danielmiessler/SecLists.git /app/resources/SecLists
   clone_if_missing https://github.com/alejandro501/resources.git /app/resources/resources
+  mkdir -p "${RESOURCES_DIR}/wordlists"
+  clone_if_missing https://github.com/danielmiessler/SecLists.git "${RESOURCES_DIR}/wordlists/SecLists"
+  mkdir -p /home/app/hack
+  ln -sfn /app/resources/resources /home/app/hack/resources
   mkdir -p /home/rojo/hack
   ln -sfn /app/resources/resources /home/rojo/hack/resources
+  chown -R app:app /home/app/hack
+  chown -R app:app /app/resources
 }
 
 ensure_resources

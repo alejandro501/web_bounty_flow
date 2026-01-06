@@ -153,7 +153,8 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 		}
 
 		if fileExists(a.cfg.Lists.Domains) {
-			if err := a.runShell(ctx, fmt.Sprintf("cat %s | grep api | httprobe | anew %s", a.cfg.Lists.Domains, a.cfg.Lists.APIDomains)); err != nil {
+			// Keep httprobe input clean (strip annotations like "- prefer-https").
+			if err := a.runShell(ctx, fmt.Sprintf("cat %s | grep api | awk '{print $1}' | httprobe | anew %s", a.cfg.Lists.Domains, a.cfg.Lists.APIDomains)); err != nil {
 				return err
 			}
 		}
