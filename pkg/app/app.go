@@ -28,19 +28,22 @@ type Options struct {
 
 // App coordinates each stage of the bounty flow.
 type App struct {
-	cfg        *config.Config
-	logger     *log.Logger
-	httpClient *http.Client
+	cfg             *config.Config
+	logger          *log.Logger
+	httpClient      *http.Client
+	httpDomainsPath string
+	logWriter       io.Writer
 }
 
 // New creates an orchestrator with the provided configuration.
-func New(cfg *config.Config, logger *log.Logger) *App {
+func New(cfg *config.Config, logger *log.Logger, logWriter io.Writer) *App {
 	return &App{
 		cfg:    cfg,
 		logger: logger,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		logWriter: logWriter,
 	}
 }
 
@@ -137,7 +140,7 @@ func (a *App) prepareDirectories() error {
 
 func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 	if fileExists(a.cfg.Lists.Organizations) {
-		args := append([]string{"--list", a.cfg.Lists.Organizations, "--all"}, a.dorkWordlistArgs(false)...)
+		args := append([]string{"-list", a.cfg.Lists.Organizations, "-all"}, a.dorkWordlistArgs(false)...)
 		if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
 			return err
 		}
@@ -151,14 +154,19 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 		if err := a.filterOutOfScope(); err != nil {
 			return err
 		}
+	}
 
-		if fileExists(a.cfg.Lists.Domains) {
-			// Keep httprobe input clean (strip annotations like "- prefer-https").
-			if err := a.runShell(ctx, fmt.Sprintf("cat %s | grep api | awk '{print $1}' | httprobe | anew %s", a.cfg.Lists.Domains, a.cfg.Lists.APIDomains)); err != nil {
-				return err
-			}
+	if fileExists(a.cfg.Lists.Domains) {
+		// Keep httprobe input clean
+		if err := a.runShell(ctx, fmt.Sprintf("cat %s | grep api | awk '{print $1}' | httprobe | anew %s", a.cfg.Lists.Domains, a.cfg.Lists.APIDomains)); err != nil {
+			return err
 		}
+		if _, err := a.buildHTTPDomains(ctx); err != nil {
+			return err
+		}
+	}
 
+	if fileExists(a.cfg.Lists.Wildcards) {
 		targetSets := []string{
 			a.cfg.Lists.Wildcards,
 			a.cfg.Lists.Domains,
@@ -170,7 +178,7 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 				continue
 			}
 			useAPI := listPath == a.cfg.Lists.APIDomains
-			args := append([]string{"--list", listPath, "--all"}, a.dorkWordlistArgs(useAPI)...)
+			args := append([]string{"-list", listPath, "-all"}, a.dorkWordlistArgs(useAPI)...)
 			if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
 				return err
 			}
@@ -183,7 +191,7 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 		if err := a.robots(ctx, a.cfg.Lists.Wildcards); err != nil {
 			return err
 		}
-		if err := a.robots(ctx, a.cfg.Lists.Domains); err != nil {
+		if err := a.robots(ctx, a.httpListOrDefault(a.cfg.Lists.Domains)); err != nil {
 			return err
 		}
 		if err := a.robots(ctx, a.cfg.Lists.APIDomains); err != nil {
@@ -192,7 +200,7 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 	}
 
 	if fileExists(a.cfg.Lists.Domains) {
-		if err := a.runShell(ctx, fmt.Sprintf("sort_http -I %s", a.cfg.Lists.Domains)); err != nil {
+		if err := a.runShell(ctx, fmt.Sprintf("sort_http -I %s", a.httpListOrDefault(a.cfg.Lists.Domains))); err != nil {
 			return err
 		}
 	}
@@ -448,7 +456,7 @@ func (a *App) processGnmap(ctx context.Context) error {
 }
 
 func (a *App) securityChecks(ctx context.Context) error {
-	domainArg := a.cfg.Lists.Domains
+	domainArg := a.httpListOrDefault(a.cfg.Lists.Domains)
 	if domainArg == "" {
 		return errors.New("domains list is required for security checks")
 	}
@@ -648,22 +656,48 @@ func (a *App) collectTargets() []string {
 
 func (a *App) runCommand(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = a.commandOutput()
+	cmd.Stderr = a.commandOutput()
 	return cmd.Run()
 }
 
 func (a *App) runCommandWithEnv(ctx context.Context, env []string, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = append(os.Environ(), env...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = a.commandOutput()
+	cmd.Stderr = a.commandOutput()
 	return cmd.Run()
 }
 
 func (a *App) runGenerateDorkLinks(ctx context.Context, args ...string) error {
 	env := []string{fmt.Sprintf("DORKING=%s", a.cfg.Paths.DorkingDir)}
 	return a.runCommandWithEnv(ctx, env, "generate_dork_links", args...)
+}
+
+func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
+	if !fileExists(a.cfg.Lists.Domains) {
+		return "", nil
+	}
+
+	dest := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "domains_http")
+	if err := os.WriteFile(dest, []byte{}, 0o644); err != nil {
+		return "", err
+	}
+
+	cmd := fmt.Sprintf("cat %s | awk '{print $1}' | httprobe | anew %s", a.cfg.Lists.Domains, dest)
+	if err := a.runShell(ctx, cmd); err != nil {
+		return "", err
+	}
+
+	a.httpDomainsPath = dest
+	return dest, nil
+}
+
+func (a *App) httpListOrDefault(path string) string {
+	if path == a.cfg.Lists.Domains && a.httpDomainsPath != "" && fileExists(a.httpDomainsPath) {
+		return a.httpDomainsPath
+	}
+	return path
 }
 
 func (a *App) dorkWordlistArgs(useAPI bool) []string {
@@ -690,9 +724,16 @@ func (a *App) dorkWordlistArgs(useAPI bool) []string {
 
 func (a *App) runShell(ctx context.Context, script string) error {
 	cmd := exec.CommandContext(ctx, "sh", "-c", script)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = a.commandOutput()
+	cmd.Stderr = a.commandOutput()
 	return cmd.Run()
+}
+
+func (a *App) commandOutput() io.Writer {
+	if a.logWriter == nil {
+		return os.Stdout
+	}
+	return io.MultiWriter(os.Stdout, a.logWriter)
 }
 
 var errNoFFUFHits = errors.New("no ffuf hits")

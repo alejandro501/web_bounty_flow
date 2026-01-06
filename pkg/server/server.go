@@ -42,7 +42,7 @@ func New(cfg *config.Config) *Server {
 	}
 	s.logger = log.New(io.MultiWriter(os.Stdout, s), "[bflow-server] ", log.LstdFlags)
 	appLogger := log.New(io.MultiWriter(os.Stdout, s), "[bflow] ", log.LstdFlags)
-	s.app = app.New(cfg, appLogger)
+	s.app = app.New(cfg, appLogger, s)
 
 	s.mux.HandleFunc("/api/upload", s.corsMiddleware(s.uploadHandler))
 	s.mux.HandleFunc("/api/url", s.corsMiddleware(s.urlHandler))
