@@ -863,13 +863,26 @@ func moveRobotFiles(robotsPath, urlsPath, targetDir string) error {
 	if targetDir == "" {
 		return errors.New("empty target directory")
 	}
-	if err := os.Rename(robotsPath, filepath.Join(targetDir, filepath.Base(robotsPath))); err != nil {
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return err
 	}
-	if err := os.Rename(urlsPath, filepath.Join(targetDir, filepath.Base(urlsPath))); err != nil {
+	if err := moveIfExists(robotsPath, filepath.Join(targetDir, filepath.Base(robotsPath))); err != nil {
+		return err
+	}
+	if err := moveIfExists(urlsPath, filepath.Join(targetDir, filepath.Base(urlsPath))); err != nil {
 		return err
 	}
 	return nil
+}
+
+func moveIfExists(src, dst string) error {
+	if src == "" {
+		return nil
+	}
+	if !fileExists(src) {
+		return nil
+	}
+	return os.Rename(src, dst)
 }
 
 func appendToFile(path, content string) error {
