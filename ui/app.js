@@ -9,6 +9,7 @@ const flowStatus = document.getElementById("flow-status");
 const listViewSelect = document.getElementById("list-view-select");
 const listViewOutput = document.getElementById("list-view-output");
 const flowLogOutput = document.getElementById("flow-log-output");
+const flowStepsList = document.getElementById("flow-steps-list");
 
 function isValidURL(value) {
   try {
@@ -110,6 +111,54 @@ async function refreshStatus() {
 
 refreshStatus();
 setInterval(refreshStatus, 5000);
+
+function stepPrefix(status) {
+  switch (status) {
+    case "done":
+      return "[x]";
+    case "running":
+      return "[>]";
+    case "error":
+      return "[!]";
+    case "skipped":
+      return "[-]";
+    default:
+      return "[ ]";
+  }
+}
+
+async function refreshSteps() {
+  if (!flowStepsList) {
+    return;
+  }
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/steps`);
+    const bodyText = await res.text();
+    if (!res.ok) {
+      throw new Error(bodyText || `status ${res.status}`);
+    }
+    let data;
+    try {
+      data = bodyText ? JSON.parse(bodyText) : {};
+    } catch (parseError) {
+      throw new Error(`non-JSON response from ${BACKEND_URL}/api/steps`);
+    }
+    const steps = data.steps ?? [];
+    flowStepsList.innerHTML = steps
+      .map((step) => {
+        const status = step.status || "pending";
+        const prefix = stepPrefix(status);
+        const safeLabel = step.label || step.id || "step";
+        return `<li class="flow-step flow-step--${status}"><span class="flow-step__status">${prefix}</span><span class="flow-step__label">${safeLabel}</span></li>`;
+      })
+      .join("");
+  } catch (error) {
+    flowStepsList.innerHTML = `<li class="flow-step flow-step--error">[!] Failed to load steps: ${error.message}</li>`;
+  }
+}
+
+refreshSteps();
+setInterval(refreshSteps, 3000);
 
 async function refreshListEntries(type) {
   if (!listViewOutput) {

@@ -26,6 +26,62 @@ type Options struct {
 	OrgList      string
 }
 
+// StepStatus tracks a flow step state.
+type StepStatus string
+
+const (
+	StepPending StepStatus = "pending"
+	StepRunning StepStatus = "running"
+	StepDone    StepStatus = "done"
+	StepSkipped StepStatus = "skipped"
+	StepError   StepStatus = "error"
+)
+
+// Step describes a flow stage for UI progress.
+type Step struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+const (
+	StepLoadConfig   = "load-config"
+	StepDorkOrgs     = "dork-orgs"
+	StepSubfinder    = "subfinder"
+	StepFilterOOS    = "filter-out-of-scope"
+	StepHttprobeAPI  = "httprobe-api"
+	StepDorkLists    = "dork-lists"
+	StepRobots       = "robots"
+	StepSortHTTP     = "sort-http"
+	StepDocFuzz      = "doc-fuzz"
+	StepDirFuzz      = "dir-fuzz"
+	StepNmap         = "nmap"
+	StepGnmap        = "gnmap"
+	StepSecurity     = "security"
+)
+
+var flowSteps = []Step{
+	{ID: StepLoadConfig, Label: "Load flow.conf and parse --organization / --org-list inputs."},
+	{ID: StepDorkOrgs, Label: "Passive recon: generate_dork_links for organizations (API-focused queries)."},
+	{ID: StepSubfinder, Label: "Passive recon: subfinder on wildcards -> append to domains."},
+	{ID: StepFilterOOS, Label: "Passive recon: filter out-of-scope entries from domains."},
+	{ID: StepHttprobeAPI, Label: "Passive recon: httprobe API domains (grep api -> apidomains)."},
+	{ID: StepDorkLists, Label: "Passive recon: generate_dork_links for wildcards, domains, apidomains; move outputs into dorking/ buckets."},
+	{ID: StepRobots, Label: "Passive recon: robots fetch + sitemap extraction for wildcards/domains/apidomains."},
+	{ID: StepSortHTTP, Label: "Passive recon: sort_http on domains."},
+	{ID: StepDocFuzz, Label: "Documentation fuzzing: ffuf against orgs/wildcards/apidomains."},
+	{ID: StepDirFuzz, Label: "Directory fuzzing: ffuf against apidomains/wildcards."},
+	{ID: StepNmap, Label: "Nmap scans: domains, apidomains, then IPs."},
+	{ID: StepGnmap, Label: "Process .gnmap summaries and run searchsploit mapping."},
+	{ID: StepSecurity, Label: "Security checks: toxicache, hop-by-hop, request smuggling, h2csmuggler, ssi/esi, cloudflare checks."},
+}
+
+// FlowSteps returns the ordered flow steps for UI rendering.
+func FlowSteps() []Step {
+	out := make([]Step, len(flowSteps))
+	copy(out, flowSteps)
+	return out
+}
+
 // App coordinates each stage of the bounty flow.
 type App struct {
 	cfg             *config.Config
@@ -33,10 +89,11 @@ type App struct {
 	httpClient      *http.Client
 	httpDomainsPath string
 	logWriter       io.Writer
+	stepUpdate      func(id string, status StepStatus)
 }
 
 // New creates an orchestrator with the provided configuration.
-func New(cfg *config.Config, logger *log.Logger, logWriter io.Writer) *App {
+func New(cfg *config.Config, logger *log.Logger, logWriter io.Writer, stepUpdate func(id string, status StepStatus)) *App {
 	return &App{
 		cfg:    cfg,
 		logger: logger,
@@ -44,11 +101,15 @@ func New(cfg *config.Config, logger *log.Logger, logWriter io.Writer) *App {
 			Timeout: 10 * time.Second,
 		},
 		logWriter: logWriter,
+		stepUpdate: stepUpdate,
 	}
 }
 
 // Run executes the flow in the same logical order as the old shell script.
 func (a *App) Run(ctx context.Context, opts Options) error {
+	a.updateStep(StepLoadConfig, StepRunning)
+	a.updateStep(StepLoadConfig, StepDone)
+
 	a.logger.Println("preparing directories")
 	if err := a.prepareDirectories(); err != nil {
 		return err
@@ -59,37 +120,67 @@ func (a *App) Run(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	a.logger.Println("running documentation fuzzing")
-	if err := a.fuzzDocumentation(ctx); err != nil {
+	if err := a.runStep(StepDocFuzz, func() error {
+		a.logger.Println("running documentation fuzzing")
+		return a.fuzzDocumentation(ctx)
+	}); err != nil {
 		return err
 	}
 
-	a.logger.Println("running directory fuzzing")
-	if err := a.fuzzDirectories(ctx); err != nil {
+	if err := a.runStep(StepDirFuzz, func() error {
+		a.logger.Println("running directory fuzzing")
+		return a.fuzzDirectories(ctx)
+	}); err != nil {
 		return err
 	}
 
-	a.logger.Println("running nmap scans")
-	if err := a.nmapScan(ctx); err != nil {
+	if err := a.runStep(StepNmap, func() error {
+		a.logger.Println("running nmap scans")
+		if err := a.nmapScan(ctx); err != nil {
+			return err
+		}
+		a.logger.Println("scanning additional IPs")
+		return a.scanIPs(ctx)
+	}); err != nil {
 		return err
 	}
 
-	a.logger.Println("scanning additional IPs")
-	if err := a.scanIPs(ctx); err != nil {
+	if err := a.runStep(StepGnmap, func() error {
+		a.logger.Println("processing gnmap summaries")
+		return a.processGnmap(ctx)
+	}); err != nil {
 		return err
 	}
 
-	a.logger.Println("processing gnmap summaries")
-	if err := a.processGnmap(ctx); err != nil {
-		return err
-	}
-
-	a.logger.Println("running security check utilities")
-	if err := a.securityChecks(ctx); err != nil {
+	if err := a.runStep(StepSecurity, func() error {
+		a.logger.Println("running security check utilities")
+		return a.securityChecks(ctx)
+	}); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (a *App) updateStep(id string, status StepStatus) {
+	if a.stepUpdate == nil {
+		return
+	}
+	a.stepUpdate(id, status)
+}
+
+func (a *App) runStep(id string, fn func() error) error {
+	a.updateStep(id, StepRunning)
+	if err := fn(); err != nil {
+		a.updateStep(id, StepError)
+		return err
+	}
+	a.updateStep(id, StepDone)
+	return nil
+}
+
+func (a *App) skipStep(id string) {
+	a.updateStep(id, StepSkipped)
 }
 
 func (a *App) prepareDirectories() error {
@@ -142,35 +233,54 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 	dorkingRan := false
 
 	if fileExists(a.cfg.Lists.Organizations) {
-		dorkList, err := a.prepareDorkList(a.cfg.Lists.Organizations)
-		if err != nil {
+		if err := a.runStep(StepDorkOrgs, func() error {
+			dorkList, err := a.prepareDorkList(a.cfg.Lists.Organizations)
+			if err != nil {
+				return err
+			}
+			args := append([]string{"-list", dorkList, "-all"}, a.dorkWordlistArgs(false)...)
+			if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
+				return err
+			}
+			dorkingRan = true
+			return nil
+		}); err != nil {
 			return err
 		}
-		args := append([]string{"-list", dorkList, "-all"}, a.dorkWordlistArgs(false)...)
-		if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
-			return err
-		}
-		dorkingRan = true
+	} else {
+		a.skipStep(StepDorkOrgs)
 	}
 
 	if fileExists(a.cfg.Lists.Wildcards) {
-		if err := a.runShell(ctx, fmt.Sprintf("subfinder -dL %s | anew %s", a.cfg.Lists.Wildcards, a.cfg.Lists.Domains)); err != nil {
+		if err := a.runStep(StepSubfinder, func() error {
+			return a.runShell(ctx, fmt.Sprintf("subfinder -dL %s | anew %s", a.cfg.Lists.Wildcards, a.cfg.Lists.Domains))
+		}); err != nil {
 			return err
 		}
-
-		if err := a.filterOutOfScope(); err != nil {
-			return err
-		}
+	} else {
+		a.skipStep(StepSubfinder)
 	}
 
 	if fileExists(a.cfg.Lists.Domains) {
-		// Keep httprobe input clean
-		if err := a.runShell(ctx, fmt.Sprintf("cat %s | grep api | awk '{print $1}' | httprobe | anew %s", a.cfg.Lists.Domains, a.cfg.Lists.APIDomains)); err != nil {
+		if err := a.runStep(StepFilterOOS, func() error {
+			return a.filterOutOfScope()
+		}); err != nil {
 			return err
 		}
-		if _, err := a.buildHTTPDomains(ctx); err != nil {
+
+		if err := a.runStep(StepHttprobeAPI, func() error {
+			// Keep httprobe input clean
+			if err := a.runShell(ctx, fmt.Sprintf("cat %s | grep api | awk '{print $1}' | httprobe | anew %s", a.cfg.Lists.Domains, a.cfg.Lists.APIDomains)); err != nil {
+				return err
+			}
+			_, err := a.buildHTTPDomains(ctx)
+			return err
+		}); err != nil {
 			return err
 		}
+	} else {
+		a.skipStep(StepFilterOOS)
+		a.skipStep(StepHttprobeAPI)
 	}
 
 	if fileExists(a.cfg.Lists.Wildcards) {
@@ -180,35 +290,49 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 			a.cfg.Lists.APIDomains,
 		}
 
-		for _, listPath := range targetSets {
-			if !fileExists(listPath) {
-				continue
+		if err := a.runStep(StepDorkLists, func() error {
+			for _, listPath := range targetSets {
+				if !fileExists(listPath) {
+					continue
+				}
+				useAPI := listPath == a.cfg.Lists.APIDomains
+				dorkList, err := a.prepareDorkList(listPath)
+				if err != nil {
+					return err
+				}
+				args := append([]string{"-list", dorkList, "-all"}, a.dorkWordlistArgs(useAPI)...)
+				if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
+					return err
+				}
+				dorkingRan = true
 			}
-			useAPI := listPath == a.cfg.Lists.APIDomains
-			dorkList, err := a.prepareDorkList(listPath)
-			if err != nil {
+
+			if err := a.organizeDorkOutputs(); err != nil {
 				return err
 			}
-			args := append([]string{"-list", dorkList, "-all"}, a.dorkWordlistArgs(useAPI)...)
-			if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
+
+			return nil
+		}); err != nil {
+			return err
+		}
+
+		if err := a.runStep(StepRobots, func() error {
+			if err := a.robots(ctx, a.cfg.Lists.Wildcards); err != nil {
 				return err
 			}
-			dorkingRan = true
-		}
-
-		if err := a.organizeDorkOutputs(); err != nil {
+			if err := a.robots(ctx, a.httpListOrDefault(a.cfg.Lists.Domains)); err != nil {
+				return err
+			}
+			if err := a.robots(ctx, a.cfg.Lists.APIDomains); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
-
-		if err := a.robots(ctx, a.cfg.Lists.Wildcards); err != nil {
-			return err
-		}
-		if err := a.robots(ctx, a.httpListOrDefault(a.cfg.Lists.Domains)); err != nil {
-			return err
-		}
-		if err := a.robots(ctx, a.cfg.Lists.APIDomains); err != nil {
-			return err
-		}
+	} else {
+		a.skipStep(StepDorkLists)
+		a.skipStep(StepRobots)
 	}
 
 	if dorkingRan {
@@ -222,9 +346,13 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 	}
 
 	if fileExists(a.cfg.Lists.Domains) {
-		if err := a.runShell(ctx, fmt.Sprintf("sort_http -I %s", a.httpListOrDefault(a.cfg.Lists.Domains))); err != nil {
+		if err := a.runStep(StepSortHTTP, func() error {
+			return a.runShell(ctx, fmt.Sprintf("sort_http -I %s", a.httpListOrDefault(a.cfg.Lists.Domains)))
+		}); err != nil {
 			return err
 		}
+	} else {
+		a.skipStep(StepSortHTTP)
 	}
 
 	return nil

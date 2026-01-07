@@ -31,6 +31,9 @@ type Server struct {
 	status   string
 	logMu    sync.Mutex
 	logLines []string
+	stepMu    sync.Mutex
+	steps     []app.Step
+	stepState map[string]app.StepStatus
 }
 
 // New creates a new HTTP server wired to the bounty flow.
@@ -40,19 +43,27 @@ func New(cfg *config.Config) *Server {
 		mux:    http.NewServeMux(),
 		status: "idle",
 	}
+	s.initSteps()
 	s.logger = log.New(io.MultiWriter(os.Stdout, s), "[bflow-server] ", log.LstdFlags)
 	appLogger := log.New(io.MultiWriter(os.Stdout, s), "[bflow] ", log.LstdFlags)
-	s.app = app.New(cfg, appLogger, s)
+	s.app = app.New(cfg, appLogger, s, s.updateStep)
 
 	s.mux.HandleFunc("/api/upload", s.corsMiddleware(s.uploadHandler))
 	s.mux.HandleFunc("/api/url", s.corsMiddleware(s.urlHandler))
 	s.mux.HandleFunc("/api/run", s.corsMiddleware(s.runHandler))
 	s.mux.HandleFunc("/api/status", s.corsMiddleware(s.statusHandler))
 	s.mux.HandleFunc("/api/logs", s.corsMiddleware(s.logsHandler))
+	s.mux.HandleFunc("/api/steps", s.corsMiddleware(s.stepsHandler))
 	s.mux.HandleFunc("/api/list", s.corsMiddleware(s.listHandler))
 	s.mux.HandleFunc("/", s.corsMiddleware(s.rootHandler))
 
 	return s
+}
+
+type stepResponse struct {
+	ID     string         `json:"id"`
+	Label  string         `json:"label"`
+	Status app.StepStatus `json:"status"`
 }
 
 // ListenAndServe starts the configured HTTP server.
@@ -237,6 +248,23 @@ func (s *Server) statusHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func (s *Server) stepsHandler(w http.ResponseWriter, r *http.Request) {
+	s.stepMu.Lock()
+	steps := make([]stepResponse, 0, len(s.steps))
+	for _, step := range s.steps {
+		status := s.stepState[step.ID]
+		steps = append(steps, stepResponse{
+			ID:     step.ID,
+			Label:  step.Label,
+			Status: status,
+		})
+	}
+	s.stepMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string][]stepResponse{"steps": steps})
+}
+
 func (s *Server) logsHandler(w http.ResponseWriter, r *http.Request) {
 	s.logMu.Lock()
 	lines := append([]string(nil), s.logLines...)
@@ -284,6 +312,30 @@ func (s *Server) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func (s *Server) initSteps() {
+	s.steps = app.FlowSteps()
+	s.stepState = make(map[string]app.StepStatus, len(s.steps))
+	for _, step := range s.steps {
+		s.stepState[step.ID] = app.StepPending
+	}
+}
+
+func (s *Server) resetSteps() {
+	s.stepMu.Lock()
+	for _, step := range s.steps {
+		s.stepState[step.ID] = app.StepPending
+	}
+	s.stepMu.Unlock()
+}
+
+func (s *Server) updateStep(id string, status app.StepStatus) {
+	s.stepMu.Lock()
+	if _, ok := s.stepState[id]; ok {
+		s.stepState[id] = status
+	}
+	s.stepMu.Unlock()
+}
+
 func (s *Server) startFlow(org, orgList string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -292,6 +344,7 @@ func (s *Server) startFlow(org, orgList string) error {
 	}
 	s.running = true
 	s.status = "running"
+	s.resetSteps()
 
 	go func() {
 		defer func() {

@@ -155,8 +155,33 @@ button:active {
   font-size: 0.9rem;
 }
 
-.flow-steps li {
+.flow-step {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
   margin-bottom: 0.4rem;
+}
+
+.flow-step__status {
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  color: rgba(255, 255, 255, 0.6);
+  min-width: 2.2rem;
+}
+
+.flow-step--done .flow-step__status {
+  color: #4fdc7b;
+}
+
+.flow-step--running .flow-step__status {
+  color: #ffd166;
+}
+
+.flow-step--error .flow-step__status {
+  color: #ff6b6b;
+}
+
+.flow-step--skipped .flow-step__status {
+  color: rgba(255, 255, 255, 0.4);
 }
 
 .log-view {
