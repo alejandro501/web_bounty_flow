@@ -49,7 +49,7 @@ urlForm?.addEventListener("submit", async (event) => {
     return;
   }
 
-  if (listType !== "wildcards" && !isValidURL(entry)) {
+  if (!["wildcards", "organizations"].includes(listType) && !isValidURL(entry)) {
     urlStatus.textContent = "Please enter a valid URL for this list";
     return;
   }

@@ -685,6 +685,13 @@ func (a *App) organizeDorkOutputs() error {
 			return err
 		}
 		for _, file := range files {
+			info, err := os.Stat(file)
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				continue
+			}
 			if err := os.Rename(file, filepath.Join(dir, filepath.Base(file))); err != nil {
 				return err
 			}
