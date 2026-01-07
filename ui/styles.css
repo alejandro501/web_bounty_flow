@@ -220,7 +220,8 @@ button:active {
 }
 
 .log-view--tall {
-  min-height: 720px;
+  min-height: 420px;
+  max-height: 501px;
 }
 
 @media (max-width: 900px) {
