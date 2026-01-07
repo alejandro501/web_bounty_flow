@@ -64,8 +64,8 @@ ensure_resources() {
   ln -sfn /app/resources/resources /home/rojo/hack/resources
   chown -R app:app /home/app/hack
   chown -R app:app /app/resources
-  mkdir -p /app/data
-  mkdir -p /app/data/{wildcards,domains,apidomains,ips,out-of-scope}
+  mkdir -p /app/data || true
+  touch /app/data/wildcards /app/data/domains /app/data/apidomains /app/data/ips /app/data/out-of-scope
   chown -R app:app /app/data
 }
 

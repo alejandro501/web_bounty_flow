@@ -238,6 +238,8 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 			if err != nil {
 				return err
 			}
+			defer os.Remove(dorkList)
+
 			args := append([]string{"-list", dorkList, "-all"}, a.dorkWordlistArgs(false)...)
 			if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
 				return err
@@ -300,6 +302,7 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 				if err != nil {
 					return err
 				}
+				defer os.Remove(dorkList)
 				args := append([]string{"-list", dorkList, "-all"}, a.dorkWordlistArgs(useAPI)...)
 				if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
 					return err
@@ -677,7 +680,7 @@ func (a *App) organizeDorkOutputs() error {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
-		files, err := filepath.Glob(fmt.Sprintf("*%s*", name))
+		files, err := filepath.Glob(filepath.Join(a.cfg.Paths.DorkingDir, fmt.Sprintf("*%s*", name)))
 		if err != nil {
 			return err
 		}
@@ -896,12 +899,19 @@ func (a *App) prepareDorkList(path string) (string, error) {
 		return "", fmt.Errorf("no valid targets for dorking in %s", path)
 	}
 
-	dest := filepath.Join(filepath.Dir(path), fmt.Sprintf("%s_dorking", filepath.Base(path)))
-	if err := os.WriteFile(dest, []byte(strings.Join(cleaned, "\n")), 0o644); err != nil {
+	tmpFile, err := os.CreateTemp("", "bflow-dork-list-")
+	if err != nil {
+		return "", err
+	}
+	if _, err := tmpFile.WriteString(strings.Join(cleaned, "\n")); err != nil {
+		tmpFile.Close()
+		return "", err
+	}
+	if err := tmpFile.Close(); err != nil {
 		return "", err
 	}
 
-	return dest, nil
+	return tmpFile.Name(), nil
 }
 
 func normalizeDorkTarget(value string) string {
