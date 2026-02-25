@@ -6,11 +6,20 @@
     <title>Bounty Flow UI</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body data-backend-url="http://localhost:5050">
+  <body data-backend-url="http://localhost:5050" data-active-view="flow">
     <main class="layout">
-      <h1 class="page-title">Bounty Flow Control</h1>
+      <aside class="sidebar">
+        <h1 class="brand">alejandro501<span class="brand-accent">_</span></h1>
+        <nav class="menu">
+          <button class="menu-item is-active" data-view="flow">Flow</button>
+          <button class="menu-item" data-view="config">Configuration</button>
+        </nav>
+      </aside>
 
-      <section class="panel panel-upload">
+      <section class="view view-flow is-active">
+        <h2 class="page-title">Bounty Flow Control</h2>
+
+        <section class="panel panel-upload">
         <h2>Upload a scope file</h2>
         <form id="upload-form">
           <label>
@@ -34,7 +43,7 @@
         <p id="upload-status" class="muted">Pending upload</p>
       </section>
 
-      <section class="panel panel-append">
+        <section class="panel panel-append">
         <h2>Append a single entry</h2>
         <form id="url-form">
           <label>
@@ -58,7 +67,7 @@
         <p id="url-status" class="muted">No submission yet</p>
       </section>
 
-      <section class="panel panel-flow">
+        <section class="panel panel-flow">
         <h2>Flow control</h2>
         <button id="run-flow">Run flow</button>
         <p id="flow-status" class="muted">idle</p>
@@ -68,7 +77,7 @@
         </div>
       </section>
 
-      <section class="panel panel-scope">
+        <section class="panel panel-scope">
         <h2>Scope entries</h2>
         <label>
           Current list
@@ -84,9 +93,41 @@
         <pre id="list-view-output" class="log-view">Select a list to show entries.</pre>
       </section>
 
-      <section class="panel panel-logs">
+        <section class="panel panel-config">
+          <div class="config-header">
+            <div>
+              <h3>GitHub API Keys</h3>
+              <p class="muted">Add multiple keys for rotation and rate limits.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="github-auto-run" />
+              <span>Auto-run GitHub dorking</span>
+            </label>
+          </div>
+
+          <div class="config-form">
+            <label>
+              Label
+              <input type="text" id="github-key-label" placeholder="primary" />
+            </label>
+            <label>
+              Token
+              <input type="password" id="github-key-value" placeholder="ghp_..." />
+            </label>
+            <label class="inline">
+              <input type="checkbox" id="github-key-active" checked />
+              Active
+            </label>
+            <button id="github-key-add" type="button">Add key</button>
+          </div>
+
+          <div id="github-keys-list" class="config-list"></div>
+        </section>
+
+        <section class="panel panel-logs">
         <h2>Flow logs</h2>
         <pre id="flow-log-output" class="log-view log-view--tall">Logs appear here when you start the flow.</pre>
+      </section>
       </section>
     </main>
     <script src="app.js"></script>

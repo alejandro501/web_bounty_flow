@@ -10,6 +10,14 @@ const listViewSelect = document.getElementById("list-view-select");
 const listViewOutput = document.getElementById("list-view-output");
 const flowLogOutput = document.getElementById("flow-log-output");
 const flowStepsList = document.getElementById("flow-steps-list");
+const menuItems = document.querySelectorAll(".menu-item");
+const pageTitle = document.querySelector(".page-title");
+const githubAutoRun = document.getElementById("github-auto-run");
+const githubKeyLabel = document.getElementById("github-key-label");
+const githubKeyValue = document.getElementById("github-key-value");
+const githubKeyActive = document.getElementById("github-key-active");
+const githubKeyAdd = document.getElementById("github-key-add");
+const githubKeysList = document.getElementById("github-keys-list");
 
 function isValidURL(value) {
   try {
@@ -37,6 +45,18 @@ uploadForm?.addEventListener("submit", async (event) => {
   } catch (error) {
     uploadStatus.textContent = `Upload failed: ${error.message}`;
   }
+});
+
+menuItems.forEach((item) => {
+  item.addEventListener("click", () => {
+    menuItems.forEach((btn) => btn.classList.remove("is-active"));
+    item.classList.add("is-active");
+    const view = item.dataset.view;
+    document.body.dataset.activeView = view;
+    if (pageTitle) {
+      pageTitle.textContent = view === "config" ? "Configuration" : "Bounty Flow Control";
+    }
+  });
 });
 
 urlForm?.addEventListener("submit", async (event) => {
@@ -159,6 +179,141 @@ async function refreshSteps() {
 
 refreshSteps();
 setInterval(refreshSteps, 3000);
+
+async function loadConfig() {
+  if (!githubKeysList) {
+    return;
+  }
+  githubKeysList.textContent = "Loading keys…";
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/config`);
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
+    const data = await res.json();
+    const provider = data.providers?.github ?? { auto_run: true, keys: [] };
+    githubAutoRun.checked = provider.auto_run ?? true;
+    renderGithubKeys(provider.keys ?? []);
+  } catch (error) {
+    githubKeysList.textContent = `Failed to load config: ${error.message}`;
+  }
+}
+
+function renderGithubKeys(keys) {
+  if (!githubKeysList) {
+    return;
+  }
+  if (!keys.length) {
+    githubKeysList.innerHTML = "<p class=\"muted\">No keys yet.</p>";
+    return;
+  }
+  const escapeHTML = (value) =>
+    value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  githubKeysList.innerHTML = keys
+    .map((key) => {
+      const safeLabel = key.label ?? "";
+      const safeValue = key.value ?? "";
+      const checked = key.active ? "checked" : "";
+      return `
+        <div class="config-row" data-key-id="${key.id}">
+          <input type="text" value="${escapeHTML(safeLabel)}" class="config-label" />
+          <input type="password" value="${escapeHTML(safeValue)}" class="config-value" />
+          <label class="inline">
+            <input type="checkbox" class="config-active" ${checked} />
+            Active
+          </label>
+          <div class="config-actions">
+            <button class="config-save" type="button">Save</button>
+            <button class="config-delete" type="button">Remove</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+githubKeyAdd?.addEventListener("click", async () => {
+  const label = githubKeyLabel.value.trim();
+  const value = githubKeyValue.value.trim();
+  const active = githubKeyActive.checked;
+  if (!value) {
+    githubKeysList.textContent = "Token value is required.";
+    return;
+  }
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/config/providers/github/keys`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label, value, active }),
+    });
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
+    githubKeyLabel.value = "";
+    githubKeyValue.value = "";
+    githubKeyActive.checked = true;
+    await loadConfig();
+  } catch (error) {
+    githubKeysList.textContent = `Failed to add key: ${error.message}`;
+  }
+});
+
+githubAutoRun?.addEventListener("change", async () => {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/config/providers/github/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auto_run: githubAutoRun.checked }),
+    });
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
+  } catch (error) {
+    githubKeysList.textContent = `Failed to update auto-run: ${error.message}`;
+  }
+});
+
+githubKeysList?.addEventListener("click", async (event) => {
+  const target = event.target;
+  const row = target.closest(".config-row");
+  if (!row) {
+    return;
+  }
+  const keyId = row.dataset.keyId;
+  if (target.classList.contains("config-delete")) {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/config/providers/github/keys/${keyId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      await loadConfig();
+    } catch (error) {
+      githubKeysList.textContent = `Failed to remove key: ${error.message}`;
+    }
+  }
+  if (target.classList.contains("config-save")) {
+    const label = row.querySelector(".config-label").value.trim();
+    const value = row.querySelector(".config-value").value.trim();
+    const active = row.querySelector(".config-active").checked;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/config/providers/github/keys/${keyId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label, value, active }),
+      });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+      await loadConfig();
+    } catch (error) {
+      githubKeysList.textContent = `Failed to update key: ${error.message}`;
+    }
+  }
+});
+
+loadConfig();
 
 async function refreshListEntries(type) {
   if (!listViewOutput) {

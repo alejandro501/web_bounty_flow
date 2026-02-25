@@ -25,36 +25,88 @@ body {
     linear-gradient(140deg, var(--bg-0), var(--bg-2));
   color: var(--text);
   min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 main {
-  width: min(1200px, 95vw);
-  padding: 2rem;
+  width: 100%;
+  min-height: 100vh;
+  padding: 0;
   background: linear-gradient(160deg, rgba(20, 20, 28, 0.95), rgba(13, 13, 18, 0.9));
   border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: 0;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
 }
 
 .layout {
   display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  padding: 2rem 1.5rem;
+  background: rgba(6, 6, 10, 0.8);
+  border-right: 1px solid var(--border);
+}
+
+.brand {
+  margin: 0 0 2rem;
+  font-size: 1.4rem;
+  letter-spacing: 0.02em;
+}
+
+.brand-accent {
+  color: var(--accent);
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.menu-item {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 0.65rem 0.8rem;
+  border-radius: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  box-shadow: none;
+}
+
+.menu-item.is-active {
+  border-color: var(--accent-soft);
+  background: rgba(225, 6, 44, 0.1);
+  color: var(--accent-bright);
+}
+
+.view {
+  display: none;
+  padding: 2rem;
+}
+
+.view.is-active {
+  display: block;
+}
+
+.page-title {
+  margin: 0 0 1.5rem;
+  font-size: 1.6rem;
+}
+
+.view-flow {
+  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-areas:
-    "title title"
     "upload append"
     "flow scope"
     "logs logs";
   gap: 1.5rem;
   align-items: start;
-}
-
-.page-title {
-  grid-area: title;
-  margin-top: 0;
-  text-align: center;
 }
 
 .panel {
@@ -83,6 +135,82 @@ main {
 
 .panel-logs {
   grid-area: logs;
+}
+
+.panel-config {
+  display: none;
+  grid-area: config;
+}
+
+body[data-active-view="config"] .view-flow {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    "upload append config"
+    "flow scope config"
+    "logs logs config";
+}
+
+body[data-active-view="config"] .panel-config {
+  display: block;
+}
+
+.config-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.config-form {
+  margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.config-form .inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.config-form button {
+  align-self: end;
+}
+
+.config-list {
+  margin-top: 1.5rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.config-row {
+  display: grid;
+  grid-template-columns: 1.2fr 2fr auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.config-row input[type="text"],
+.config-row input[type="password"] {
+  margin: 0;
+}
+
+.config-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.toggle {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  font-size: 0.9rem;
+  color: var(--muted);
 }
 
 form {
@@ -227,12 +355,46 @@ button:active {
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .menu {
+    flex-direction: row;
+  }
+
+  .view-flow {
+    grid-template-columns: 1fr;
     grid-template-areas:
-      "title"
       "upload"
       "append"
       "flow"
       "scope"
       "logs";
+  }
+
+  body[data-active-view="config"] .view-flow {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "upload"
+      "append"
+      "flow"
+      "scope"
+      "config"
+      "logs";
+  }
+
+  .config-form {
+    grid-template-columns: 1fr;
+  }
+
+  .config-row {
+    grid-template-columns: 1fr;
   }
 }

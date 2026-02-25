@@ -26,7 +26,7 @@ func main() {
 	}
 
 	logger := log.New(os.Stdout, "[bflow] ", log.LstdFlags)
-	a := app.New(cfg, logger, nil, nil)
+	a := app.New(cfg, logger, nil, nil, nil)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

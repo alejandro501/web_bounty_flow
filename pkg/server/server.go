@@ -17,6 +17,7 @@ import (
 
 	"github.com/rojo/hack/web_bounty_flow/pkg/app"
 	"github.com/rojo/hack/web_bounty_flow/pkg/config"
+	"github.com/rojo/hack/web_bounty_flow/pkg/configstore"
 )
 
 // Server provides the HTTP layer for interacting with the bounty flow.
@@ -34,6 +35,7 @@ type Server struct {
 	stepMu    sync.Mutex
 	steps     []app.Step
 	stepState map[string]app.StepStatus
+	configStore *configstore.Store
 }
 
 // New creates a new HTTP server wired to the bounty flow.
@@ -45,14 +47,18 @@ func New(cfg *config.Config) *Server {
 	}
 	s.initSteps()
 	s.logger = log.New(io.MultiWriter(os.Stdout, s), "[bflow-server] ", log.LstdFlags)
+	s.initConfigStore()
 	appLogger := log.New(io.MultiWriter(os.Stdout, s), "[bflow] ", log.LstdFlags)
-	s.app = app.New(cfg, appLogger, s, s.updateStep)
+	s.app = app.New(cfg, appLogger, s, s.updateStep, s.configStore)
 
 	s.mux.HandleFunc("/api/upload", s.corsMiddleware(s.uploadHandler))
 	s.mux.HandleFunc("/api/url", s.corsMiddleware(s.urlHandler))
 	s.mux.HandleFunc("/api/run", s.corsMiddleware(s.runHandler))
 	s.mux.HandleFunc("/api/status", s.corsMiddleware(s.statusHandler))
 	s.mux.HandleFunc("/api/logs", s.corsMiddleware(s.logsHandler))
+	s.mux.HandleFunc("/api/config", s.corsMiddleware(s.configHandler))
+	s.mux.HandleFunc("/api/config/providers/", s.corsMiddleware(s.providerConfigHandler))
+	s.mux.HandleFunc("/api/dorking/github/run", s.corsMiddleware(s.githubRunHandler))
 	s.mux.HandleFunc("/api/steps", s.corsMiddleware(s.stepsHandler))
 	s.mux.HandleFunc("/api/list", s.corsMiddleware(s.listHandler))
 	s.mux.HandleFunc("/", s.corsMiddleware(s.rootHandler))
@@ -64,6 +70,21 @@ type stepResponse struct {
 	ID     string         `json:"id"`
 	Label  string         `json:"label"`
 	Status app.StepStatus `json:"status"`
+}
+
+type configResponse struct {
+	Version   int                                 `json:"version"`
+	Providers map[string]*configstore.DecryptedProvider `json:"providers"`
+}
+
+type keyPayload struct {
+	Label  string `json:"label"`
+	Value  string `json:"value"`
+	Active bool   `json:"active"`
+}
+
+type settingsPayload struct {
+	AutoRun bool `json:"auto_run"`
 }
 
 // ListenAndServe starts the configured HTTP server.
@@ -274,6 +295,146 @@ func (s *Server) logsHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string][]string{"logs": lines})
 }
 
+func (s *Server) configHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.configStore == nil {
+		http.Error(w, "config store not available (BFLOW_CONFIG_KEY missing)", http.StatusServiceUnavailable)
+		return
+	}
+	cfg, err := s.configStore.LoadDecrypted()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	resp := configResponse{Version: cfg.Version, Providers: cfg.Providers}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) providerConfigHandler(w http.ResponseWriter, r *http.Request) {
+	if s.configStore == nil {
+		http.Error(w, "config store not available (BFLOW_CONFIG_KEY missing)", http.StatusServiceUnavailable)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/config/providers/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.Error(w, "provider required", http.StatusBadRequest)
+		return
+	}
+	provider := parts[0]
+
+	switch {
+	case len(parts) == 1 && r.Method == http.MethodGet:
+		cfg, err := s.configStore.LoadDecrypted()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		out := cfg.Providers[provider]
+		if out == nil {
+			out = &configstore.DecryptedProvider{AutoRun: true}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(out)
+		return
+	case len(parts) == 2 && parts[1] == "settings" && r.Method == http.MethodPut:
+		var payload settingsPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := s.configStore.UpdateProviderSettings(provider, payload.AutoRun); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	case len(parts) >= 2 && parts[1] == "keys":
+		s.handleKeys(provider, parts[2:], w, r)
+		return
+	default:
+		http.Error(w, "unsupported config route", http.StatusNotFound)
+	}
+}
+
+func (s *Server) handleKeys(provider string, rest []string, w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		var payload keyPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		key := configstore.DecryptedKey{
+			Label:  payload.Label,
+			Value:  payload.Value,
+			Active: payload.Active,
+		}
+		updated, err := s.configStore.UpsertKey(provider, key)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(updated)
+	case http.MethodPut:
+		if len(rest) == 0 || rest[0] == "" {
+			http.Error(w, "key id required", http.StatusBadRequest)
+			return
+		}
+		var payload keyPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		key := configstore.DecryptedKey{
+			ID:     rest[0],
+			Label:  payload.Label,
+			Value:  payload.Value,
+			Active: payload.Active,
+		}
+		updated, err := s.configStore.UpsertKey(provider, key)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(updated)
+	case http.MethodDelete:
+		if len(rest) == 0 || rest[0] == "" {
+			http.Error(w, "key id required", http.StatusBadRequest)
+			return
+		}
+		if err := s.configStore.DeleteKey(provider, rest[0]); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) githubRunHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.app == nil {
+		http.Error(w, "app not available", http.StatusServiceUnavailable)
+		return
+	}
+	go func() {
+		_ = s.app.RunGithubDorking(context.Background())
+	}()
+	w.WriteHeader(http.StatusAccepted)
+}
+
 func (s *Server) listHandler(w http.ResponseWriter, r *http.Request) {
 	listType := r.URL.Query().Get("type")
 	if listType == "" {
@@ -334,6 +495,19 @@ func (s *Server) updateStep(id string, status app.StepStatus) {
 		s.stepState[id] = status
 	}
 	s.stepMu.Unlock()
+}
+
+func (s *Server) initConfigStore() {
+	path := os.Getenv("BFLOW_CONFIG_PATH")
+	if strings.TrimSpace(path) == "" {
+		path = filepath.Join("data", "config.json")
+	}
+	store, err := configstore.New(path)
+	if err != nil {
+		s.logger.Printf("config store disabled: %v", err)
+		return
+	}
+	s.configStore = store
 }
 
 func (s *Server) startFlow(org, orgList string) error {

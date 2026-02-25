@@ -11,7 +11,7 @@ paths:
   robots_dir: robots
   robots_hits_dir: hits
   robots_no_hits_dir: no_hits
-  dorking_dir: dorking
+  dorking_dir: data/dorking
   fuzzing_dir: fuzzing
   ffuf_dir: ffuf
   fuzzing_hits_dir: hits

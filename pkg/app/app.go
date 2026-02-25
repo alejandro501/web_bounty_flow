@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/rojo/hack/web_bounty_flow/pkg/config"
+	"github.com/rojo/hack/web_bounty_flow/pkg/configstore"
+	"github.com/rojo/hack/web_bounty_flow/pkg/dorking"
 )
 
 // Options are the runtime overrides that used to come from CLI flags.
@@ -50,6 +52,7 @@ const (
 	StepFilterOOS    = "filter-out-of-scope"
 	StepHttprobeAPI  = "httprobe-api"
 	StepDorkLists    = "dork-lists"
+	StepGithubDork   = "github-dork"
 	StepRobots       = "robots"
 	StepSortHTTP     = "sort-http"
 	StepDocFuzz      = "doc-fuzz"
@@ -66,6 +69,7 @@ var flowSteps = []Step{
 	{ID: StepFilterOOS, Label: "Passive recon: filter out-of-scope entries from domains."},
 	{ID: StepHttprobeAPI, Label: "Passive recon: httprobe API domains (grep api -> apidomains)."},
 	{ID: StepDorkLists, Label: "Passive recon: generate_dork_links for wildcards, domains, apidomains; move outputs into dorking/ buckets."},
+	{ID: StepGithubDork, Label: "GitHub dorking automation (API search + hits)."},
 	{ID: StepRobots, Label: "Passive recon: robots fetch + sitemap extraction for wildcards/domains/apidomains."},
 	{ID: StepSortHTTP, Label: "Passive recon: sort_http on domains."},
 	{ID: StepDocFuzz, Label: "Documentation fuzzing: ffuf against orgs/wildcards/apidomains."},
@@ -90,10 +94,11 @@ type App struct {
 	httpDomainsPath string
 	logWriter       io.Writer
 	stepUpdate      func(id string, status StepStatus)
+	configStore     *configstore.Store
 }
 
 // New creates an orchestrator with the provided configuration.
-func New(cfg *config.Config, logger *log.Logger, logWriter io.Writer, stepUpdate func(id string, status StepStatus)) *App {
+func New(cfg *config.Config, logger *log.Logger, logWriter io.Writer, stepUpdate func(id string, status StepStatus), configStore *configstore.Store) *App {
 	return &App{
 		cfg:    cfg,
 		logger: logger,
@@ -102,6 +107,7 @@ func New(cfg *config.Config, logger *log.Logger, logWriter io.Writer, stepUpdate
 		},
 		logWriter: logWriter,
 		stepUpdate: stepUpdate,
+		configStore: configStore,
 	}
 }
 
@@ -162,6 +168,11 @@ func (a *App) Run(ctx context.Context, opts Options) error {
 	return nil
 }
 
+// RunGithubDorking triggers the GitHub dorking step without running the full flow.
+func (a *App) RunGithubDorking(ctx context.Context) error {
+	return a.githubDorking(ctx)
+}
+
 func (a *App) updateStep(id string, status StepStatus) {
 	if a.stepUpdate == nil {
 		return
@@ -181,6 +192,51 @@ func (a *App) runStep(id string, fn func() error) error {
 
 func (a *App) skipStep(id string) {
 	a.updateStep(id, StepSkipped)
+}
+
+func (a *App) githubDorking(ctx context.Context) error {
+	if a.configStore == nil {
+		a.skipStep(StepGithubDork)
+		return nil
+	}
+
+	cfg, err := a.configStore.LoadDecrypted()
+	if err != nil {
+		return err
+	}
+
+	gh := cfg.Providers["github"]
+	if gh == nil || !gh.AutoRun {
+		a.skipStep(StepGithubDork)
+		return nil
+	}
+
+	activeKeys := gh.ActiveTokens()
+	if len(activeKeys) == 0 {
+		a.skipStep(StepGithubDork)
+		return nil
+	}
+
+	var tokens []dorking.Token
+	for _, key := range activeKeys {
+		tokens = append(tokens, dorking.Token{ID: key.ID, Value: key.Value})
+	}
+
+	outputDir := filepath.Join(a.cfg.Paths.DorkingDir, "github")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return err
+	}
+
+	opts := dorking.GithubOptions{
+		OutputDir: outputDir,
+		Tokens:    tokens,
+		Logger:    a.logger,
+		UpdateToken: func(tokenID string, used time.Time, lastErr string) {
+			_ = a.configStore.UpdateTokenUsage("github", tokenID, used, lastErr)
+		},
+	}
+
+	return dorking.RunGithubSearch(ctx, opts)
 }
 
 func (a *App) prepareDirectories() error {
@@ -319,6 +375,12 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 			return err
 		}
 
+		if err := a.runStep(StepGithubDork, func() error {
+			return a.githubDorking(ctx)
+		}); err != nil {
+			return err
+		}
+
 		if err := a.runStep(StepRobots, func() error {
 			if err := a.robots(ctx, a.cfg.Lists.Wildcards); err != nil {
 				return err
@@ -335,6 +397,7 @@ func (a *App) passiveRecon(ctx context.Context, opts Options) error {
 		}
 	} else {
 		a.skipStep(StepDorkLists)
+		a.skipStep(StepGithubDork)
 		a.skipStep(StepRobots)
 	}
 

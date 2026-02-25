@@ -14,3 +14,4 @@ dorking/github/_github_token.txt
 
 # ffuf
 ffuf/github/github_token.txt
+.env
