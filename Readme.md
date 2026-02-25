@@ -2,28 +2,37 @@
 
 Go backend + static web UI for running recon flow tasks.
 
-## Run Web Interface (recommended)
-1. Create env file:
+## Quick Start (recommended)
 ```bash
-cp .env.example .env
-# set BFLOW_CONFIG_KEY to a base64-encoded 32-byte key
+./startup.sh
 ```
-2. Start services:
+
+`startup.sh` will:
+- create `.env` from `.env.example` if missing
+- set `BFLOW_CONFIG_KEY` if missing (base64 string for 32-byte key)
+- run `docker compose up --build -d`
+- open `http://localhost:5001`
+
+## Docker (manual)
 ```bash
 docker compose up --build
 ```
-3. Open:
+
+Open:
 - UI: http://localhost:5001
 - API health: http://localhost:5050/
 
-## Local Run (without Docker)
-Backend API:
+## Local Run (no Docker)
 ```bash
 go run ./cmd/server -config flow.yaml -addr :8080
 ```
 Then serve `ui/` with any static server and set `data-backend-url` in `ui/index.html` if needed.
 
 ## Notes
-- Old `flow.sh`-based docs are obsolete; this project now runs via Go binaries (`cmd/server`, `cmd/bflow`) and the web UI.
+- `BFLOW_CONFIG_KEY` encrypts/decrypts provider tokens in the config store.
+- Generate one manually if needed:
+```bash
+openssl rand -base64 32
+```
 - Main config is `flow.yaml`.
 - Persistent data is under `data/`.
