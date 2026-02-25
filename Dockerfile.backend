@@ -1,11 +1,28 @@
-FROM golang:1.23.2-alpine AS build
+FROM golang:1.25-alpine AS build
 WORKDIR /src
+
+RUN apk add --no-cache git
 
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 go build -o /bin/bflow-server ./cmd/server
+
+RUN mkdir -p /toolbin
+RUN GOBIN=/toolbin go install github.com/alejandro501/generate_dork_links@latest && \
+    GOBIN=/toolbin go install github.com/alejandro501/sort_http@latest && \
+    GOBIN=/toolbin go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest && \
+    GOBIN=/toolbin go install github.com/tomnomnom/httprobe@latest && \
+    GOBIN=/toolbin go install github.com/tomnomnom/assetfinder@latest && \
+    GOBIN=/toolbin go install github.com/owasp-amass/amass/v4/cmd/amass@master && \
+    GOBIN=/toolbin go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest && \
+    GOBIN=/toolbin go install github.com/projectdiscovery/httpx/cmd/httpx@latest && \
+    GOBIN=/toolbin go install github.com/lc/gau/v2/cmd/gau@latest && \
+    GOBIN=/toolbin go install github.com/ffuf/ffuf@latest && \
+    GOBIN=/toolbin go install github.com/assetnote/h2csmuggler/cmd/h2csmuggler@latest && \
+    GOBIN=/toolbin go install github.com/tomnomnom/anew@latest && \
+    GOBIN=/toolbin go install github.com/tomnomnom/waybackurls@latest
 
 FROM alpine:3.18
 ARG APP_UID=1000
@@ -14,11 +31,13 @@ RUN addgroup -S -g "${APP_GID}" app && adduser -S -u "${APP_UID}" -G app app
 
 WORKDIR /app
 COPY --from=build /bin/bflow-server /usr/local/bin/bflow-server
-COPY --from=build /usr/local/go /usr/local/go
+COPY --from=build /toolbin/ /usr/local/bin/
 COPY flow.yaml .
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 RUN apk add --no-cache git curl unzip nmap python3 py3-pip su-exec bash
+RUN git clone --depth 1 https://github.com/offensive-security/exploitdb.git /opt/exploitdb && \
+    ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit
 RUN mkdir -p data fuzzing robots dorking logs && \
     chown -R app:app /app
 

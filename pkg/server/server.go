@@ -27,14 +27,14 @@ type Server struct {
 	logger *log.Logger
 	mux    *http.ServeMux
 
-	mu       sync.Mutex
-	running  bool
-	status   string
-	logMu    sync.Mutex
-	logLines []string
-	stepMu    sync.Mutex
-	steps     []app.Step
-	stepState map[string]app.StepStatus
+	mu          sync.Mutex
+	running     bool
+	status      string
+	logMu       sync.Mutex
+	logLines    []string
+	stepMu      sync.Mutex
+	steps       []app.Step
+	stepState   map[string]app.StepStatus
 	configStore *configstore.Store
 }
 
@@ -73,7 +73,7 @@ type stepResponse struct {
 }
 
 type configResponse struct {
-	Version   int                                 `json:"version"`
+	Version   int                                       `json:"version"`
 	Providers map[string]*configstore.DecryptedProvider `json:"providers"`
 }
 
@@ -230,11 +230,6 @@ func (s *Server) urlHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type runRequest struct {
-	Organization string `json:"organization"`
-	OrgList      string `json:"org_list"`
-}
-
 type statusResponse struct {
 	Running bool   `json:"running"`
 	Status  string `json:"status"`
@@ -246,10 +241,7 @@ func (s *Server) runHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req runRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
-
-	if err := s.startFlow(req.Organization, req.OrgList); err != nil {
+	if err := s.startFlow(); err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
@@ -448,9 +440,17 @@ func (s *Server) listHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	present := false
+	if info, statErr := os.Stat(dest); statErr == nil && !info.IsDir() {
+		present = true
+	}
+
 	lines := readListLines(dest)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string][]string{"entries": lines})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"present": present,
+		"entries": lines,
+	})
 }
 
 func (s *Server) recordLog(line string) {
@@ -510,7 +510,7 @@ func (s *Server) initConfigStore() {
 	s.configStore = store
 }
 
-func (s *Server) startFlow(org, orgList string) error {
+func (s *Server) startFlow() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.running {
@@ -531,12 +531,7 @@ func (s *Server) startFlow(org, orgList string) error {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		opts := app.Options{
-			Organization: org,
-			OrgList:      orgList,
-		}
-
-		if err := s.app.Run(ctx, opts); err != nil {
+		if err := s.app.Run(ctx); err != nil {
 			s.logger.Printf("flow run failed: %v", err)
 			s.mu.Lock()
 			s.status = fmt.Sprintf("error: %v", err)

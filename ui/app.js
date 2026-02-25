@@ -1,9 +1,5 @@
 const BACKEND_URL = document.body.dataset.backendUrl || "http://localhost:8080";
 
-const uploadForm = document.getElementById("upload-form");
-const uploadStatus = document.getElementById("upload-status");
-const urlForm = document.getElementById("url-form");
-const urlStatus = document.getElementById("url-status");
 const runButton = document.getElementById("run-flow");
 const flowStatus = document.getElementById("flow-status");
 const listViewSelect = document.getElementById("list-view-select");
@@ -18,34 +14,25 @@ const githubKeyValue = document.getElementById("github-key-value");
 const githubKeyActive = document.getElementById("github-key-active");
 const githubKeyAdd = document.getElementById("github-key-add");
 const githubKeysList = document.getElementById("github-keys-list");
+const scopeCards = document.getElementById("scope-cards");
+const scopeCardsStatus = document.getElementById("scope-cards-status");
 
-function isValidURL(value) {
-  try {
-    new URL(value);
-    return true;
-  } catch {
-    return false;
-  }
+const LIST_FILES = [
+  { type: "wildcards", label: "Wildcards" },
+  { type: "domains", label: "Domains" },
+  { type: "apidomains", label: "API Domains" },
+  { type: "organizations", label: "Organizations" },
+  { type: "ips", label: "IPs" },
+  { type: "out_of_scope", label: "Out of scope" },
+];
+
+function escapeHTML(value) {
+  return (value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;");
 }
-
-uploadForm?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const formData = new FormData(uploadForm);
-  uploadStatus.textContent = "Uploading…";
-
-  try {
-    const response = await fetch(`${BACKEND_URL}/api/upload`, {
-      method: "POST",
-      body: formData,
-    });
-    if (!response.ok) {
-      throw new Error(await response.text());
-    }
-    uploadStatus.textContent = "Upload finished";
-  } catch (error) {
-    uploadStatus.textContent = `Upload failed: ${error.message}`;
-  }
-});
 
 menuItems.forEach((item) => {
   item.addEventListener("click", () => {
@@ -59,46 +46,8 @@ menuItems.forEach((item) => {
   });
 });
 
-urlForm?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const listType = urlForm.list_type.value;
-  const entry = urlForm.url.value.trim();
-
-  if (!entry) {
-    urlStatus.textContent = "Entry cannot be empty";
-    return;
-  }
-
-  if (!["wildcards", "organizations"].includes(listType) && !isValidURL(entry)) {
-    urlStatus.textContent = "Please enter a valid URL for this list";
-    return;
-  }
-
-  const payload = {
-    list_type: listType,
-    url: entry,
-  };
-  urlStatus.textContent = "Saving…";
-
-  try {
-    const response = await fetch(`${BACKEND_URL}/api/url`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-      throw new Error(await response.text());
-    }
-    const data = await response.json();
-    urlStatus.textContent = data.message ?? "Entry appended";
-    await refreshListEntries(listType);
-  } catch (error) {
-    urlStatus.textContent = `Append failed: ${error.message}`;
-  }
-});
-
 runButton?.addEventListener("click", async () => {
-  flowStatus.textContent = "requesting run…";
+  flowStatus.textContent = "requesting run...";
   try {
     const response = await fetch(`${BACKEND_URL}/api/run`, {
       method: "POST",
@@ -113,6 +62,127 @@ runButton?.addEventListener("click", async () => {
     flowStatus.textContent = `Run failed: ${error.message}`;
   }
 });
+
+async function fetchListMeta(type) {
+  const response = await fetch(`${BACKEND_URL}/api/list?type=${encodeURIComponent(type)}`);
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  const data = await response.json();
+  if (Array.isArray(data.entries)) {
+    const present = typeof data.present === "boolean" ? data.present : data.entries.length > 0;
+    return { present, entries: data.entries };
+  }
+
+  return { present: false, entries: [] };
+}
+
+async function handleScopeUpload(type, file) {
+  if (!file) {
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("list_type", type);
+  formData.append("file", file);
+
+  if (scopeCardsStatus) {
+    scopeCardsStatus.textContent = `Uploading ${file.name} to ${type}...`;
+  }
+
+  const response = await fetch(`${BACKEND_URL}/api/upload`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  await Promise.all([
+    refreshScopeCards(),
+    listViewSelect?.value ? refreshListEntries(listViewSelect.value) : Promise.resolve(),
+  ]);
+
+  if (scopeCardsStatus) {
+    scopeCardsStatus.textContent = `Uploaded ${file.name} to ${type}`;
+  }
+}
+
+function renderScopeCards(states) {
+  if (!scopeCards) {
+    return;
+  }
+
+  scopeCards.innerHTML = LIST_FILES.map(({ type, label }) => {
+    const state = states[type] || { present: false };
+    const statusText = state.present ? "Present" : "Missing";
+    const statusClass = state.present ? "scope-card__status--present" : "scope-card__status--missing";
+    const inputId = `scope-upload-${type}`;
+
+    return `
+      <article class="scope-card" data-type="${escapeHTML(type)}">
+        <h3 class="scope-card__name">${escapeHTML(label)}</h3>
+        <span class="scope-card__status ${statusClass}">${statusText}</span>
+        <input id="${inputId}" type="file" accept=".txt" />
+        <button type="button" class="scope-card__upload" data-input-id="${inputId}">Upload</button>
+      </article>
+    `;
+  }).join("");
+
+  scopeCards.querySelectorAll(".scope-card__upload").forEach((button) => {
+    button.addEventListener("click", () => {
+      const inputId = button.dataset.inputId;
+      const input = document.getElementById(inputId);
+      input?.click();
+    });
+  });
+
+  scopeCards.querySelectorAll(".scope-card input[type='file']").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const card = input.closest(".scope-card");
+      const type = card?.dataset.type;
+      const [file] = input.files || [];
+      if (!type || !file) {
+        return;
+      }
+
+      try {
+        await handleScopeUpload(type, file);
+      } catch (error) {
+        if (scopeCardsStatus) {
+          scopeCardsStatus.textContent = `Upload failed: ${error.message}`;
+        }
+      } finally {
+        input.value = "";
+      }
+    });
+  });
+}
+
+async function refreshScopeCards() {
+  if (!scopeCards) {
+    return;
+  }
+
+  const states = {};
+  await Promise.all(
+    LIST_FILES.map(async ({ type }) => {
+      try {
+        states[type] = await fetchListMeta(type);
+      } catch {
+        states[type] = { present: false, entries: [] };
+      }
+    }),
+  );
+
+  renderScopeCards(states);
+
+  if (scopeCardsStatus) {
+    scopeCardsStatus.textContent = "File status refreshed";
+  }
+}
 
 async function refreshStatus() {
   try {
@@ -160,7 +230,7 @@ async function refreshSteps() {
     let data;
     try {
       data = bodyText ? JSON.parse(bodyText) : {};
-    } catch (parseError) {
+    } catch {
       throw new Error(`non-JSON response from ${BACKEND_URL}/api/steps`);
     }
     const steps = data.steps ?? [];
@@ -169,11 +239,11 @@ async function refreshSteps() {
         const status = step.status || "pending";
         const prefix = stepPrefix(status);
         const safeLabel = step.label || step.id || "step";
-        return `<li class="flow-step flow-step--${status}"><span class="flow-step__status">${prefix}</span><span class="flow-step__label">${safeLabel}</span></li>`;
+        return `<li class="flow-step flow-step--${status}"><span class="flow-step__status">${prefix}</span><span class="flow-step__label">${escapeHTML(safeLabel)}</span></li>`;
       })
       .join("");
   } catch (error) {
-    flowStepsList.innerHTML = `<li class="flow-step flow-step--error">[!] Failed to load steps: ${error.message}</li>`;
+    flowStepsList.innerHTML = `<li class="flow-step flow-step--error">[!] Failed to load steps: ${escapeHTML(error.message)}</li>`;
   }
 }
 
@@ -184,7 +254,7 @@ async function loadConfig() {
   if (!githubKeysList) {
     return;
   }
-  githubKeysList.textContent = "Loading keys…";
+  githubKeysList.textContent = "Loading keys...";
   try {
     const res = await fetch(`${BACKEND_URL}/api/config`);
     if (!res.ok) {
@@ -204,11 +274,10 @@ function renderGithubKeys(keys) {
     return;
   }
   if (!keys.length) {
-    githubKeysList.innerHTML = "<p class=\"muted\">No keys yet.</p>";
+    githubKeysList.innerHTML = '<p class="muted">No keys yet.</p>';
     return;
   }
-  const escapeHTML = (value) =>
-    value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
   githubKeysList.innerHTML = keys
     .map((key) => {
       const safeLabel = key.label ?? "";
@@ -319,13 +388,13 @@ async function refreshListEntries(type) {
   if (!listViewOutput) {
     return;
   }
-  listViewOutput.textContent = "Loading…";
+  listViewOutput.textContent = "Loading...";
   try {
-    const response = await fetch(`${BACKEND_URL}/api/list?type=${encodeURIComponent(type)}`);
-    if (!response.ok) {
-      throw new Error(await response.text());
+    const data = await fetchListMeta(type);
+    if (!data.present) {
+      listViewOutput.textContent = "File missing.";
+      return;
     }
-    const data = await response.json();
     listViewOutput.textContent =
       data.entries && data.entries.length ? data.entries.join("\n") : "No entries yet.";
   } catch (error) {
@@ -351,7 +420,7 @@ async function refreshLogs() {
       throw new Error(await res.text());
     }
     const data = await res.json();
-    flowLogOutput.textContent = data.logs ? data.logs.join("\n") : "Waiting for logs…";
+    flowLogOutput.textContent = data.logs ? data.logs.join("\n") : "Waiting for logs...";
     flowLogOutput.scrollTop = flowLogOutput.scrollHeight;
   } catch (error) {
     flowLogOutput.textContent = `Log fetch error: ${error.message}`;
@@ -360,3 +429,11 @@ async function refreshLogs() {
 
 refreshLogs();
 setInterval(refreshLogs, 3000);
+
+refreshScopeCards();
+setInterval(() => {
+  refreshScopeCards();
+  if (listViewSelect?.value) {
+    refreshListEntries(listViewSelect.value);
+  }
+}, 4000);

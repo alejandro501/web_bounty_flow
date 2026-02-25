@@ -16,8 +16,6 @@ import (
 
 func main() {
 	cfgPath := flag.String("config", "flow.yaml", "path to the YAML configuration file")
-	org := flag.String("org", "", "single organization or domain to seed")
-	orgList := flag.String("org-list", "", "alternate list of organizations/domains to load")
 	flag.Parse()
 
 	cfg, err := config.Load(*cfgPath)
@@ -37,7 +35,7 @@ func main() {
 		time.Sleep(100 * time.Millisecond)
 	}()
 
-	if err := a.Run(ctx, app.Options{Organization: *org, OrgList: *orgList}); err != nil {
+	if err := a.Run(ctx); err != nil {
 		logger.Fatalf("flow run failed: %v", err)
 	}
 

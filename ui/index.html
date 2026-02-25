@@ -19,57 +19,15 @@
       <section class="view view-flow is-active">
         <h2 class="page-title">Bounty Flow Control</h2>
 
-        <section class="panel panel-upload">
-        <h2>Upload a scope file</h2>
-        <form id="upload-form">
-          <label>
-            List type
-            <select name="list_type" required>
-              <option value="">— Select —</option>
-              <option value="organizations">Organizations</option>
-              <option value="wildcards">Wildcards</option>
-              <option value="domains">Domains</option>
-              <option value="apidomains">API Domains</option>
-              <option value="ips">IPs</option>
-              <option value="out_of_scope">Out of scope</option>
-            </select>
-          </label>
-          <label>
-            Text file (.txt)
-            <input type="file" name="file" accept=".txt" required />
-          </label>
-          <button type="submit">Upload</button>
-        </form>
-        <p id="upload-status" class="muted">Pending upload</p>
-      </section>
-
-        <section class="panel panel-append">
-        <h2>Append a single entry</h2>
-        <form id="url-form">
-          <label>
-            List type
-            <select name="list_type" required>
-              <option value="">— Select —</option>
-              <option value="organizations">Organizations</option>
-              <option value="wildcards">Wildcards</option>
-              <option value="domains">Domains</option>
-              <option value="apidomains">API Domains</option>
-              <option value="ips">IPs</option>
-              <option value="out_of_scope">Out of scope</option>
-            </select>
-          </label>
-          <label>
-            URL / entry
-            <input type="text" name="url" placeholder="https://example.com or *.example.com" required />
-          </label>
-          <button type="submit">Append</button>
-        </form>
-        <p id="url-status" class="muted">No submission yet</p>
+        <section class="panel panel-files">
+        <h2>Scope files</h2>
+        <div id="scope-cards" class="scope-cards"></div>
+        <p id="scope-cards-status" class="muted">Checking files...</p>
       </section>
 
         <section class="panel panel-flow">
         <h2>Flow control</h2>
-        <button id="run-flow">Run flow</button>
+        <button id="run-flow">Run recon (subdomain + URL discovery)</button>
         <p id="flow-status" class="muted">idle</p>
         <div class="flow-steps">
           <p class="muted">Flow order</p>
