@@ -47,6 +47,24 @@ Open:
 - UI: http://localhost:5001
 - API health: http://localhost:5050/
 
+## Docker Dev Hot Reload
+Use this when editing backend Go code frequently.
+
+Start with hot reload:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+Watch backend logs (you will see rebuild/restart on `.go` and `flow.yaml` changes):
+```bash
+docker compose logs -f backend
+```
+
+Notes:
+- Frontend is already live-mounted (`./ui`), so UI edits are instant.
+- In hot-reload mode, backend source is bind-mounted and rebuilt by `air` inside the container.
+- Full rebuild is only needed when Dockerfile-level dependencies change.
+
 ## Local Run (no Docker)
 ```bash
 go run ./cmd/server -config flow.yaml -addr :8080

@@ -16,6 +16,13 @@ const githubKeyAdd = document.getElementById("github-key-add");
 const githubKeysList = document.getElementById("github-keys-list");
 const scopeCards = document.getElementById("scope-cards");
 const scopeCardsStatus = document.getElementById("scope-cards-status");
+const scopeCardNodes = new Map();
+
+let lastStatusText = "";
+let lastStepsSignature = "";
+let lastLogsSignature = "";
+let lastScopeSignature = "";
+const lastListTextByType = {};
 
 const LIST_FILES = [
   { type: "wildcards", label: "Wildcards" },
@@ -32,6 +39,18 @@ function escapeHTML(value) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/\"/g, "&quot;");
+}
+
+function hasSelectionInside(element) {
+  if (!element || !window.getSelection) {
+    return false;
+  }
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    return false;
+  }
+  const range = selection.getRangeAt(0);
+  return element.contains(range.commonAncestorContainer);
 }
 
 menuItems.forEach((item) => {
@@ -102,7 +121,7 @@ async function handleScopeUpload(type, file) {
 
   await Promise.all([
     refreshScopeCards(),
-    listViewSelect?.value ? refreshListEntries(listViewSelect.value) : Promise.resolve(),
+    listViewSelect?.value ? refreshListEntries(listViewSelect.value, { force: true }) : Promise.resolve(),
   ]);
 
   if (scopeCardsStatus) {
@@ -110,55 +129,91 @@ async function handleScopeUpload(type, file) {
   }
 }
 
-function renderScopeCards(states) {
+function initializeScopeCards() {
   if (!scopeCards) {
     return;
   }
 
   scopeCards.innerHTML = LIST_FILES.map(({ type, label }) => {
-    const state = states[type] || { present: false };
-    const statusText = state.present ? "Present" : "Missing";
-    const statusClass = state.present ? "scope-card__status--present" : "scope-card__status--missing";
     const inputId = `scope-upload-${type}`;
 
     return `
       <article class="scope-card" data-type="${escapeHTML(type)}">
         <h3 class="scope-card__name">${escapeHTML(label)}</h3>
-        <span class="scope-card__status ${statusClass}">${statusText}</span>
+        <span class="scope-card__status scope-card__status--missing">Missing</span>
         <input id="${inputId}" type="file" accept=".txt" />
         <button type="button" class="scope-card__upload" data-input-id="${inputId}">Upload</button>
       </article>
     `;
   }).join("");
 
-  scopeCards.querySelectorAll(".scope-card__upload").forEach((button) => {
-    button.addEventListener("click", () => {
-      const inputId = button.dataset.inputId;
-      const input = document.getElementById(inputId);
-      input?.click();
+  scopeCards.querySelectorAll(".scope-card").forEach((card) => {
+    const type = card.dataset.type;
+    if (!type) {
+      return;
+    }
+    scopeCardNodes.set(type, {
+      card,
+      status: card.querySelector(".scope-card__status"),
+      input: card.querySelector("input[type='file']"),
     });
   });
 
-  scopeCards.querySelectorAll(".scope-card input[type='file']").forEach((input) => {
-    input.addEventListener("change", async () => {
-      const card = input.closest(".scope-card");
-      const type = card?.dataset.type;
-      const [file] = input.files || [];
-      if (!type || !file) {
-        return;
-      }
-
-      try {
-        await handleScopeUpload(type, file);
-      } catch (error) {
-        if (scopeCardsStatus) {
-          scopeCardsStatus.textContent = `Upload failed: ${error.message}`;
-        }
-      } finally {
-        input.value = "";
-      }
-    });
+  scopeCards.addEventListener("click", (event) => {
+    const button = event.target.closest(".scope-card__upload");
+    if (!button) {
+      return;
+    }
+    const inputId = button.dataset.inputId;
+    const input = document.getElementById(inputId);
+    input?.click();
   });
+
+  scopeCards.addEventListener("change", async (event) => {
+    const input = event.target.closest(".scope-card input[type='file']");
+    if (!input) {
+      return;
+    }
+    const card = input.closest(".scope-card");
+    const type = card?.dataset.type;
+    const [file] = input.files || [];
+    if (!type || !file) {
+      return;
+    }
+
+    try {
+      await handleScopeUpload(type, file);
+    } catch (error) {
+      if (scopeCardsStatus) {
+        scopeCardsStatus.textContent = `Upload failed: ${error.message}`;
+      }
+    } finally {
+      input.value = "";
+    }
+  });
+}
+
+function updateScopeCards(states) {
+  const signature = LIST_FILES
+    .map(({ type }) => `${type}:${states[type]?.present ? "1" : "0"}`)
+    .join("|");
+  if (signature === lastScopeSignature) {
+    return false;
+  }
+  lastScopeSignature = signature;
+
+  LIST_FILES.forEach(({ type }) => {
+    const node = scopeCardNodes.get(type);
+    if (!node || !node.status) {
+      return;
+    }
+    const present = Boolean(states[type]?.present);
+    node.status.textContent = present ? "Present" : "Missing";
+    node.status.classList.toggle("scope-card__status--present", present);
+    node.status.classList.toggle("scope-card__status--missing", !present);
+  });
+
+  return true;
 }
 
 async function refreshScopeCards() {
@@ -177,10 +232,9 @@ async function refreshScopeCards() {
     }),
   );
 
-  renderScopeCards(states);
-
-  if (scopeCardsStatus) {
-    scopeCardsStatus.textContent = "File status refreshed";
+  const changed = updateScopeCards(states);
+  if (scopeCardsStatus && changed) {
+    scopeCardsStatus.textContent = "File status updated";
   }
 }
 
@@ -191,11 +245,19 @@ async function refreshStatus() {
       throw new Error("failed to read status");
     }
     const data = await res.json();
-    flowStatus.textContent = data.running
+    const statusText = data.running
       ? `running (${data.status})`
       : data.status;
+    if (statusText !== lastStatusText) {
+      flowStatus.textContent = statusText;
+      lastStatusText = statusText;
+    }
   } catch (error) {
-    flowStatus.textContent = `status error: ${error.message}`;
+    const statusText = `status error: ${error.message}`;
+    if (statusText !== lastStatusText) {
+      flowStatus.textContent = statusText;
+      lastStatusText = statusText;
+    }
   }
 }
 
@@ -234,6 +296,12 @@ async function refreshSteps() {
       throw new Error(`non-JSON response from ${BACKEND_URL}/api/steps`);
     }
     const steps = data.steps ?? [];
+    const signature = steps.map((step) => `${step.id}:${step.status || "pending"}`).join("|");
+    if (signature === lastStepsSignature) {
+      return;
+    }
+    lastStepsSignature = signature;
+
     flowStepsList.innerHTML = steps
       .map((step) => {
         const status = step.status || "pending";
@@ -243,7 +311,11 @@ async function refreshSteps() {
       })
       .join("");
   } catch (error) {
-    flowStepsList.innerHTML = `<li class="flow-step flow-step--error">[!] Failed to load steps: ${escapeHTML(error.message)}</li>`;
+    const signature = `error:${error.message}`;
+    if (signature !== lastStepsSignature) {
+      lastStepsSignature = signature;
+      flowStepsList.innerHTML = `<li class="flow-step flow-step--error">[!] Failed to load steps: ${escapeHTML(error.message)}</li>`;
+    }
   }
 }
 
@@ -384,21 +456,34 @@ githubKeysList?.addEventListener("click", async (event) => {
 
 loadConfig();
 
-async function refreshListEntries(type) {
+async function refreshListEntries(type, options = {}) {
   if (!listViewOutput) {
     return;
   }
-  listViewOutput.textContent = "Loading...";
   try {
     const data = await fetchListMeta(type);
-    if (!data.present) {
-      listViewOutput.textContent = "File missing.";
+    if (!options.force && hasSelectionInside(listViewOutput)) {
       return;
     }
-    listViewOutput.textContent =
-      data.entries && data.entries.length ? data.entries.join("\n") : "No entries yet.";
+    if (!data.present) {
+      const nextText = "File missing.";
+      if (lastListTextByType[type] !== nextText) {
+        listViewOutput.textContent = nextText;
+        lastListTextByType[type] = nextText;
+      }
+      return;
+    }
+    const nextText = data.entries && data.entries.length ? data.entries.join("\n") : "No entries yet.";
+    if (lastListTextByType[type] !== nextText) {
+      listViewOutput.textContent = nextText;
+      lastListTextByType[type] = nextText;
+    }
   } catch (error) {
-    listViewOutput.textContent = `Error: ${error.message}`;
+    const nextText = `Error: ${error.message}`;
+    if (lastListTextByType[type] !== nextText) {
+      listViewOutput.textContent = nextText;
+      lastListTextByType[type] = nextText;
+    }
   }
 }
 
@@ -420,20 +505,31 @@ async function refreshLogs() {
       throw new Error(await res.text());
     }
     const data = await res.json();
-    flowLogOutput.textContent = data.logs ? data.logs.join("\n") : "Waiting for logs...";
-    flowLogOutput.scrollTop = flowLogOutput.scrollHeight;
+    const nextText = data.logs ? data.logs.join("\n") : "Waiting for logs...";
+    if (nextText === lastLogsSignature) {
+      return;
+    }
+    const shouldStickToBottom =
+      flowLogOutput.scrollHeight - flowLogOutput.scrollTop - flowLogOutput.clientHeight < 16;
+    flowLogOutput.textContent = nextText;
+    lastLogsSignature = nextText;
+    if (shouldStickToBottom) {
+      flowLogOutput.scrollTop = flowLogOutput.scrollHeight;
+    }
   } catch (error) {
-    flowLogOutput.textContent = `Log fetch error: ${error.message}`;
+    const nextText = `Log fetch error: ${error.message}`;
+    if (nextText !== lastLogsSignature) {
+      flowLogOutput.textContent = nextText;
+      lastLogsSignature = nextText;
+    }
   }
 }
 
 refreshLogs();
 setInterval(refreshLogs, 3000);
 
+initializeScopeCards();
 refreshScopeCards();
 setInterval(() => {
   refreshScopeCards();
-  if (listViewSelect?.value) {
-    refreshListEntries(listViewSelect.value);
-  }
 }, 4000);

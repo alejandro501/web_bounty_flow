@@ -1,0 +1,17 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/bflow-server ./cmd/server"
+bin = "./tmp/bflow-server"
+full_bin = "./tmp/bflow-server --config /app/flow.yaml"
+delay = 500
+exclude_dir = ["data", "logs", "robots", "fuzzing", "dorking", ".git", "_backup", "ars0n-framework-v2", "tmp"]
+include_ext = ["go", "yaml", "yml"]
+stop_on_error = true
+
+[log]
+time = true
+
+[screen]
+clear_on_rebuild = false

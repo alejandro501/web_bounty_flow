@@ -53,12 +53,12 @@ const (
 
 var flowSteps = []Step{
 	{ID: StepLoadConfig, Label: "Load flow.yaml and initialize recon runtime."},
-	{ID: StepValidateInputs, Label: "Validate required input files (organizations, wildcards, domains, out-of-scope)."},
-	{ID: StepDorkOrgs, Label: "Passive recon: generate_dork_links for organizations (API-focused queries)."},
+	{ID: StepValidateInputs, Label: "Validate scope readiness (at least one non-empty input list is required)."},
+	{ID: StepDorkOrgs, Label: "Passive recon (round 1): generate dork links for existing organizations/wildcards/domains before enumeration."},
 	{ID: StepSubdomainDiscovery, Label: "Subdomain discovery: subfinder + assetfinder + amass on wildcards -> append to domains."},
 	{ID: StepFilterOOS, Label: "Passive recon: filter out-of-scope entries from domains."},
 	{ID: StepResolveLive, Label: "Live host resolution and API selection: dnsx + httpx/httprobe -> domains_http + apidomains."},
-	{ID: StepDorkLists, Label: "Passive recon: generate_dork_links for wildcards, domains, apidomains; move outputs into dorking/ buckets."},
+	{ID: StepDorkLists, Label: "Passive recon (round 2): regenerate dork links after recon using wildcards/domains/apidomains."},
 	{ID: StepGithubDork, Label: "GitHub dorking automation (API search + hits)."},
 	{ID: StepRobots, Label: "Passive recon: robots fetch + sitemap extraction for wildcards/domains/apidomains."},
 	{ID: StepSortHTTP, Label: "Passive recon: sort_http on domains."},
@@ -104,6 +104,9 @@ func (a *App) Run(ctx context.Context) error {
 
 	a.logger.Println("preparing directories")
 	if err := a.prepareDirectories(); err != nil {
+		return err
+	}
+	if err := a.normalizeLegacyListFiles(); err != nil {
 		return err
 	}
 
@@ -240,26 +243,24 @@ func (a *App) prepareDirectories() error {
 
 func (a *App) passiveRecon(ctx context.Context) error {
 	dorkingRan := false
-
-	if fileExists(a.cfg.Lists.Organizations) {
+	preDorkTargets := a.nonEmptyListPaths(
+		a.cfg.Lists.Organizations,
+		a.cfg.Lists.Wildcards,
+		a.cfg.Lists.Domains,
+	)
+	if len(preDorkTargets) == 0 {
+		a.skipStep(StepDorkOrgs)
+	} else {
 		if err := a.runStep(StepDorkOrgs, func() error {
-			dorkList, err := a.prepareDorkList(a.cfg.Lists.Organizations)
+			ran, err := a.runDorkingRound(ctx, preDorkTargets)
 			if err != nil {
 				return err
 			}
-			defer os.Remove(dorkList)
-
-			args := append([]string{"-list", dorkList, "-all"}, a.dorkWordlistArgs(false)...)
-			if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
-				return err
-			}
-			dorkingRan = true
+			dorkingRan = dorkingRan || ran
 			return nil
 		}); err != nil {
 			return err
 		}
-	} else {
-		a.skipStep(StepDorkOrgs)
 	}
 
 	if fileExists(a.cfg.Lists.Wildcards) {
@@ -289,35 +290,23 @@ func (a *App) passiveRecon(ctx context.Context) error {
 		a.skipStep(StepResolveLive)
 	}
 
-	if fileExists(a.cfg.Lists.Wildcards) {
-		targetSets := []string{
-			a.cfg.Lists.Wildcards,
-			a.cfg.Lists.Domains,
-			a.cfg.Lists.APIDomains,
-		}
+	postDorkTargets := a.nonEmptyListPaths(
+		a.cfg.Lists.Wildcards,
+		a.cfg.Lists.Domains,
+		a.cfg.Lists.APIDomains,
+	)
 
+	if len(postDorkTargets) == 0 {
+		a.skipStep(StepDorkLists)
+		a.skipStep(StepGithubDork)
+		a.skipStep(StepRobots)
+	} else {
 		if err := a.runStep(StepDorkLists, func() error {
-			for _, listPath := range targetSets {
-				if !fileExists(listPath) {
-					continue
-				}
-				useAPI := listPath == a.cfg.Lists.APIDomains
-				dorkList, err := a.prepareDorkList(listPath)
-				if err != nil {
-					return err
-				}
-				defer os.Remove(dorkList)
-				args := append([]string{"-list", dorkList, "-all"}, a.dorkWordlistArgs(useAPI)...)
-				if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
-					return err
-				}
-				dorkingRan = true
-			}
-
-			if err := a.organizeDorkOutputs(); err != nil {
+			ran, err := a.runDorkingRound(ctx, postDorkTargets)
+			if err != nil {
 				return err
 			}
-
+			dorkingRan = dorkingRan || ran
 			return nil
 		}); err != nil {
 			return err
@@ -343,10 +332,6 @@ func (a *App) passiveRecon(ctx context.Context) error {
 		}); err != nil {
 			return err
 		}
-	} else {
-		a.skipStep(StepDorkLists)
-		a.skipStep(StepGithubDork)
-		a.skipStep(StepRobots)
 	}
 
 	if dorkingRan {
@@ -383,59 +368,83 @@ func (a *App) passiveRecon(ctx context.Context) error {
 }
 
 func (a *App) validateReconInputs() error {
-	required := []struct {
-		label    string
-		path     string
-		nonEmpty bool
+	scopeInputs := []struct {
+		label string
+		path  string
 	}{
-		{label: "organizations", path: a.cfg.Lists.Organizations, nonEmpty: true},
-		{label: "wildcards", path: a.cfg.Lists.Wildcards, nonEmpty: true},
-		{label: "domains", path: a.cfg.Lists.Domains, nonEmpty: true},
-		{label: "out-of-scope", path: a.cfg.Lists.OutOfScope, nonEmpty: false},
+		{label: "organizations", path: a.cfg.Lists.Organizations},
+		{label: "wildcards", path: a.cfg.Lists.Wildcards},
+		{label: "domains", path: a.cfg.Lists.Domains},
+		{label: "apidomains", path: a.cfg.Lists.APIDomains},
+		{label: "ips", path: a.cfg.Lists.IPs},
 	}
 
-	var missing []string
-	var empty []string
+	var available []string
 
-	for _, item := range required {
-		if !fileExists(item.path) {
-			missing = append(missing, fmt.Sprintf("%s (%s)", item.label, item.path))
+	for _, item := range scopeInputs {
+		if fileExists(item.path) && len(readSafeLines(item.path)) > 0 {
+			available = append(available, fmt.Sprintf("%s (%s)", item.label, item.path))
+		}
+	}
+
+	if len(available) == 0 {
+		return fmt.Errorf("required recon input files are not ready; provide at least one non-empty scope file: organizations, wildcards, domains, apidomains, or ips")
+	}
+
+	a.logger.Printf("scope inputs available: %s", strings.Join(available, ", "))
+	return nil
+}
+
+func (a *App) normalizeLegacyListFiles() error {
+	paths := []string{
+		a.cfg.Lists.Organizations,
+		a.cfg.Lists.IPs,
+		a.cfg.Lists.Wildcards,
+		a.cfg.Lists.Domains,
+		a.cfg.Lists.APIDomains,
+		a.cfg.Lists.OutOfScope,
+	}
+
+	for _, path := range paths {
+		if path == "" {
 			continue
 		}
-		if item.nonEmpty {
-			lines := readSafeLines(item.path)
-			if len(lines) == 0 {
-				empty = append(empty, fmt.Sprintf("%s (%s)", item.label, item.path))
+		legacy := path + ".txt"
+
+		switch {
+		case !fileExists(path) && fileExists(legacy):
+			a.logger.Printf("migrating legacy list file %s -> %s", legacy, path)
+			if err := os.Rename(legacy, path); err != nil {
+				return err
 			}
+		case fileExists(path) && fileExists(legacy):
+			primary := readSafeLines(path)
+			old := readSafeLines(legacy)
+			merged := unique(append(primary, old...))
+			if err := os.WriteFile(path, []byte(strings.Join(merged, "\n")), 0o644); err != nil {
+				return err
+			}
+			if err := os.Remove(legacy); err != nil {
+				return err
+			}
+			a.logger.Printf("merged legacy list file %s into %s", legacy, path)
 		}
 	}
 
-	if len(missing) == 0 && len(empty) == 0 {
-		return nil
-	}
-
-	var parts []string
-	if len(missing) > 0 {
-		parts = append(parts, "missing: "+strings.Join(missing, ", "))
-	}
-	if len(empty) > 0 {
-		parts = append(parts, "empty: "+strings.Join(empty, ", "))
-	}
-
-	return fmt.Errorf("required recon input files are not ready; %s", strings.Join(parts, "; "))
+	return nil
 }
 
 func (a *App) runSubdomainDiscovery(ctx context.Context) error {
-	wildcards, err := a.prepareDorkList(a.cfg.Lists.Wildcards)
+	seeds, err := a.prepareSubdomainSeedList(a.cfg.Lists.Wildcards)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(wildcards)
+	defer os.Remove(seeds)
 
 	commands := []string{
-		fmt.Sprintf("subfinder -dL %s | anew %s", wildcards, a.cfg.Lists.Domains),
-		fmt.Sprintf("while IFS= read -r d; do assetfinder --subs-only \"$d\"; done < %s | anew %s", wildcards, a.cfg.Lists.Domains),
-		fmt.Sprintf("amass enum -passive -df %s -silent | anew %s", wildcards, a.cfg.Lists.Domains),
+		fmt.Sprintf("subfinder -dL %s | sed '/\\*/d' | awk 'NF' | anew %s", seeds, a.cfg.Lists.Domains),
+		fmt.Sprintf("while IFS= read -r d; do assetfinder --subs-only \"$d\"; done < %s | sed '/\\*/d' | awk 'NF' | anew %s", seeds, a.cfg.Lists.Domains),
+		fmt.Sprintf("amass enum -passive -df %s -silent | sed '/\\*/d' | awk 'NF' | anew %s", seeds, a.cfg.Lists.Domains),
 	}
 
 	for _, cmd := range commands {
@@ -445,6 +454,46 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (a *App) prepareSubdomainSeedList(path string) (string, error) {
+	lines, err := readFileLines(path)
+	if err != nil {
+		return "", err
+	}
+
+	seen := make(map[string]struct{})
+	var seeds []string
+	for _, line := range lines {
+		seed := normalizeSubdomainSeed(line)
+		if seed == "" {
+			continue
+		}
+		if _, ok := seen[seed]; ok {
+			continue
+		}
+		seen[seed] = struct{}{}
+		seeds = append(seeds, seed)
+	}
+
+	if len(seeds) == 0 {
+		return "", fmt.Errorf("no valid enumeration seeds in %s", path)
+	}
+
+	tmpFile, err := os.CreateTemp("", "bflow-subdomain-seeds-")
+	if err != nil {
+		return "", err
+	}
+	if _, err := tmpFile.WriteString(strings.Join(seeds, "\n")); err != nil {
+		tmpFile.Close()
+		return "", err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return "", err
+	}
+
+	a.logger.Printf("subdomain seeds prepared: %d", len(seeds))
+	return tmpFile.Name(), nil
 }
 
 func (a *App) resolveLiveAndAPI(ctx context.Context) error {
@@ -549,13 +598,58 @@ func (a *App) organizeDorkOutputs() error {
 			if info.IsDir() {
 				continue
 			}
-			if err := os.Rename(file, filepath.Join(dir, filepath.Base(file))); err != nil {
+			dest := filepath.Join(dir, filepath.Base(file))
+			if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			if err := os.Rename(file, dest); err != nil {
 				return err
 			}
 		}
 	}
 
 	return nil
+}
+
+func (a *App) nonEmptyListPaths(paths ...string) []string {
+	seen := make(map[string]struct{}, len(paths))
+	var out []string
+	for _, path := range paths {
+		if path == "" || len(readSafeLines(path)) == 0 {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	return out
+}
+
+func (a *App) runDorkingRound(ctx context.Context, listPaths []string) (bool, error) {
+	ran := false
+	for _, listPath := range listPaths {
+		useAPI := listPath == a.cfg.Lists.APIDomains
+		dorkList, err := a.prepareDorkList(listPath)
+		if err != nil {
+			return false, err
+		}
+		defer os.Remove(dorkList)
+		args := append([]string{"-list", dorkList, "-all"}, a.dorkWordlistArgs(useAPI)...)
+		if err := a.runGenerateDorkLinks(ctx, args...); err != nil {
+			return false, err
+		}
+		ran = true
+	}
+
+	if ran {
+		if err := a.organizeDorkOutputs(); err != nil {
+			return false, err
+		}
+	}
+
+	return ran, nil
 }
 
 func (a *App) filterOutOfScope() error {
@@ -786,6 +880,32 @@ func normalizeDorkTarget(value string) string {
 	value = strings.TrimPrefix(value, "*.")
 	value = strings.TrimSpace(value)
 	return value
+}
+
+func normalizeSubdomainSeed(value string) string {
+	value = normalizeDorkTarget(value)
+	if value == "" {
+		return ""
+	}
+
+	parts := strings.Split(value, ".")
+	clean := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if strings.Contains(p, "*") {
+			continue
+		}
+		clean = append(clean, p)
+	}
+
+	if len(clean) < 2 {
+		return ""
+	}
+
+	return strings.Join(clean, ".")
 }
 
 func (a *App) runShell(ctx context.Context, script string) error {

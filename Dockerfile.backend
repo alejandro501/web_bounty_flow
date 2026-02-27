@@ -31,6 +31,7 @@ RUN addgroup -S -g "${APP_GID}" app && adduser -S -u "${APP_UID}" -G app app
 
 WORKDIR /app
 COPY --from=build /bin/bflow-server /usr/local/bin/bflow-server
+COPY --from=build /usr/local/go /usr/local/go
 COPY --from=build /toolbin/ /usr/local/bin/
 COPY flow.yaml .
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

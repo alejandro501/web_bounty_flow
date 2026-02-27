@@ -1,0 +1,20 @@
+services:
+  backend:
+    volumes:
+      - ./:/app
+    environment:
+      - BFLOW_ADDR=:8080
+      - PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - GOPATH=/app/.cache/go
+      - GOMODCACHE=/app/.cache/go/pkg/mod
+      - GOCACHE=/app/.cache/go-build
+    command:
+      - sh
+      - -lc
+      - |
+        mkdir -p /app/.cache/go/bin /app/.cache/go/pkg/mod /app/.cache/go-build
+        export PATH="/app/.cache/go/bin:${PATH}"
+        if ! command -v air >/dev/null 2>&1; then
+          GOBIN=/app/.cache/go/bin go install github.com/air-verse/air@latest
+        fi
+        air -c /app/.air.toml
