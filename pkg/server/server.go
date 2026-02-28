@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +63,8 @@ func New(cfg *config.Config) *Server {
 	s.mux.HandleFunc("/api/dorking/github/run", s.corsMiddleware(s.githubRunHandler))
 	s.mux.HandleFunc("/api/steps", s.corsMiddleware(s.stepsHandler))
 	s.mux.HandleFunc("/api/list", s.corsMiddleware(s.listHandler))
+	s.mux.HandleFunc("/api/live-webservers", s.corsMiddleware(s.liveWebserversHandler))
+	s.mux.HandleFunc("/api/amass-enum", s.corsMiddleware(s.amassEnumHandler))
 	s.mux.HandleFunc("/", s.corsMiddleware(s.rootHandler))
 
 	return s
@@ -233,6 +237,36 @@ func (s *Server) urlHandler(w http.ResponseWriter, r *http.Request) {
 type statusResponse struct {
 	Running bool   `json:"running"`
 	Status  string `json:"status"`
+}
+
+type liveWebserverResponse struct {
+	Present bool               `json:"present"`
+	Count   int                `json:"count"`
+	Rows    []liveWebserverRow `json:"rows"`
+}
+
+type amassEnumResponse struct {
+	Present bool           `json:"present"`
+	Count   int            `json:"count"`
+	Rows    []amassEnumRow `json:"rows"`
+}
+
+type liveWebserverRow struct {
+	URL           string   `json:"url"`
+	StatusCode    int      `json:"status_code"`
+	Title         string   `json:"title"`
+	WebServer     string   `json:"web_server"`
+	Technologies  []string `json:"technologies"`
+	ContentLength int      `json:"content_length"`
+}
+
+type amassEnumRow struct {
+	Name   string `json:"name"`
+	Domain string `json:"domain"`
+	IP     string `json:"ip"`
+	ASN    int    `json:"asn"`
+	Source string `json:"source"`
+	Tag    string `json:"tag"`
 }
 
 func (s *Server) runHandler(w http.ResponseWriter, r *http.Request) {
@@ -453,6 +487,40 @@ func (s *Server) listHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) liveWebserversHandler(w http.ResponseWriter, r *http.Request) {
+	path := filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "live-webservers.csv")
+	resp := liveWebserverResponse{Present: false, Rows: nil, Count: 0}
+
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		resp.Present = true
+		rows, readErr := readLiveWebserversCSV(path)
+		if readErr == nil {
+			resp.Rows = rows
+			resp.Count = len(rows)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) amassEnumHandler(w http.ResponseWriter, r *http.Request) {
+	path := filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "recon", "amass", "amass_enum.jsonl")
+	resp := amassEnumResponse{Present: false, Rows: nil, Count: 0}
+
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		resp.Present = true
+		rows, readErr := readAmassEnumJSONL(path)
+		if readErr == nil {
+			resp.Rows = rows
+			resp.Count = len(rows)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
 func (s *Server) recordLog(line string) {
 	s.logMu.Lock()
 	defer s.logMu.Unlock()
@@ -556,6 +624,8 @@ func (s *Server) listPath(name string) (string, error) {
 		return s.cfg.Lists.APIDomains, nil
 	case "out_of_scope":
 		return s.cfg.Lists.OutOfScope, nil
+	case "live_webservers_csv":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "live-webservers.csv"), nil
 	default:
 		return "", fmt.Errorf("unsupported list_type %q", name)
 	}
@@ -610,4 +680,148 @@ func readListLines(path string) []string {
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+func readLiveWebserversCSV(path string) ([]liveWebserverRow, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	records, err := r.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	if len(records) <= 1 {
+		return nil, nil
+	}
+
+	var out []liveWebserverRow
+	for i := 1; i < len(records); i++ {
+		rec := records[i]
+		if len(rec) < 6 {
+			continue
+		}
+		statusCode, _ := strconv.Atoi(strings.TrimSpace(rec[1]))
+		contentLength, _ := strconv.Atoi(strings.TrimSpace(rec[5]))
+		tech := strings.TrimSpace(rec[4])
+		var techs []string
+		if tech != "" {
+			for _, t := range strings.Split(tech, ";") {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					techs = append(techs, t)
+				}
+			}
+		}
+		out = append(out, liveWebserverRow{
+			URL:           strings.TrimSpace(rec[0]),
+			StatusCode:    statusCode,
+			Title:         strings.TrimSpace(rec[2]),
+			WebServer:     strings.TrimSpace(rec[3]),
+			Technologies:  techs,
+			ContentLength: contentLength,
+		})
+	}
+	return out, nil
+}
+
+func readAmassEnumJSONL(path string) ([]amassEnumRow, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	var rows []amassEnumRow
+	seen := make(map[string]struct{})
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			continue
+		}
+
+		name := strings.TrimSpace(asRawString(raw["name"]))
+		if name == "" {
+			continue
+		}
+		domain := strings.TrimSpace(asRawString(raw["domain"]))
+		source := strings.TrimSpace(asRawString(raw["source"]))
+		tag := strings.TrimSpace(asRawString(raw["tag"]))
+		addresses, _ := raw["addresses"].([]any)
+		if len(addresses) == 0 {
+			key := strings.Join([]string{name, domain, "", "0", source, tag}, "|")
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			rows = append(rows, amassEnumRow{Name: name, Domain: domain, Source: source, Tag: tag})
+			continue
+		}
+
+		for _, addr := range addresses {
+			addrMap, ok := addr.(map[string]any)
+			if !ok {
+				continue
+			}
+			ip := strings.TrimSpace(asRawString(addrMap["ip"]))
+			asn := asRawInt(addrMap["asn"])
+			key := strings.Join([]string{name, domain, ip, strconv.Itoa(asn), source, tag}, "|")
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			rows = append(rows, amassEnumRow{
+				Name:   name,
+				Domain: domain,
+				IP:     ip,
+				ASN:    asn,
+				Source: source,
+				Tag:    tag,
+			})
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func asRawString(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case json.Number:
+		return v.String()
+	default:
+		return ""
+	}
+}
+
+func asRawInt(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case json.Number:
+		i, _ := v.Int64()
+		return int(i)
+	case string:
+		i, _ := strconv.Atoi(strings.TrimSpace(v))
+		return i
+	default:
+		return 0
+	}
 }

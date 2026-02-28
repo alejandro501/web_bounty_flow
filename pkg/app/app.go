@@ -3,11 +3,13 @@ package app
 import (
 	"bufio"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -83,9 +86,19 @@ type App struct {
 	logger          *log.Logger
 	httpClient      *http.Client
 	httpDomainsPath string
+	liveCSVPath     string
 	logWriter       io.Writer
 	stepUpdate      func(id string, status StepStatus)
 	configStore     *configstore.Store
+}
+
+type liveWebserverRecord struct {
+	URL           string
+	StatusCode    int
+	Title         string
+	WebServer     string
+	Technologies  []string
+	ContentLength int
 }
 
 // New creates an orchestrator with the provided configuration.
@@ -354,6 +367,17 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 	if len(normalizedSeeds) == 0 {
 		return fmt.Errorf("no valid wildcard seeds in %s", a.cfg.Lists.Wildcards)
 	}
+	a.logger.Printf("subdomain discovery: %d wildcard seed(s): %s", len(normalizedSeeds), strings.Join(normalizedSeeds, ", "))
+
+	reconDir := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "recon")
+	amassDir := filepath.Join(reconDir, "amass")
+	combinedAmassJSON := filepath.Join(amassDir, "amass_enum.jsonl")
+	if err := os.MkdirAll(amassDir, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(combinedAmassJSON, []byte{}, 0o644); err != nil {
+		return err
+	}
 
 	toolResults := map[string]map[string]struct{}{
 		StepAmass:       {},
@@ -378,12 +402,35 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 
 	if err := a.runStep(StepAmass, func() error {
 		for _, seed := range normalizedSeeds {
-			stdout, err := a.runCommandCapture(ctx, "amass", "enum", "-passive", "-d", seed, "-silent")
+			start := time.Now()
+			seedFile := sanitizeFilename(seed)
+			seedPrefix := filepath.Join(amassDir, seedFile)
+			seedJSON := seedPrefix + ".json"
+			seedText := seedPrefix + ".txt"
+			a.logger.Printf("amass: starting passive enum for %s", seed)
+			_, err := a.runCommandCapture(ctx, "amass", "enum", "-passive", "-d", seed, "-oA", seedPrefix)
 			if err != nil {
 				return fmt.Errorf("amass failed for %s: %w", seed, err)
 			}
-			appendResults(StepAmass, parseDomainLines(stdout, seed))
+			hostLines := readSafeLines(seedText)
+			hosts := parseDomainLines(strings.Join(hostLines, "\n"), seed)
+			appendResults(StepAmass, hosts)
+			if fileExists(seedJSON) {
+				rawJSON, readErr := os.ReadFile(seedJSON)
+				if readErr != nil {
+					return readErr
+				}
+				jsonLines := toJSONLines(rawJSON)
+				if len(jsonLines) == 0 {
+					jsonLines = []string{strings.TrimSpace(string(rawJSON))}
+				}
+				if err := appendToFile(combinedAmassJSON, strings.Join(jsonLines, "\n")+"\n"); err != nil {
+					return err
+				}
+			}
+			a.logger.Printf("amass: finished %s with %d host(s) in %s", seed, len(hosts), time.Since(start).Round(time.Second))
 		}
+		a.logger.Printf("amass: total unique hosts=%d", len(toolResults[StepAmass]))
 		return nil
 	}); err != nil {
 		return err
@@ -472,9 +519,11 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 	for _, runner := range runners {
 		if !available[runner.step] {
 			a.skipStep(runner.step)
+			a.logger.Printf("%s: skipped (binary not found)", runner.step)
 			continue
 		}
 		a.updateStep(runner.step, StepRunning)
+		a.logger.Printf("%s: running", runner.step)
 	}
 
 	for _, seed := range normalizedSeeds {
@@ -487,12 +536,16 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				start := time.Now()
+				a.logger.Printf("%s: starting seed=%s", r.step, seed)
 				hosts, err := r.runForSeed(seed)
 				if err != nil {
 					setRunErr(fmt.Errorf("%s failed for %s: %w", r.step, seed, err))
+					a.logger.Printf("%s: error seed=%s: %v", r.step, seed, err)
 					return
 				}
 				appendResults(r.step, hosts)
+				a.logger.Printf("%s: finished seed=%s hosts=%d duration=%s", r.step, seed, len(hosts), time.Since(start).Round(time.Second))
 			}()
 		}
 		wg.Wait()
@@ -514,6 +567,9 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 	if runErr != nil {
 		return runErr
 	}
+	for _, step := range []string{StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder} {
+		a.logger.Printf("%s: total unique hosts=%d", step, len(toolResults[step]))
+	}
 
 	if err := a.runStep(StepConsolidate, func() error {
 		var merged []string
@@ -534,7 +590,15 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		if err := tmpFile.Close(); err != nil {
 			return err
 		}
-		return a.runShell(ctx, fmt.Sprintf("cat %s | awk 'NF' | sort -fu > %s", tmpFile.Name(), a.cfg.Lists.Domains))
+		if err := a.runShell(ctx, fmt.Sprintf("cat %s | awk 'NF' | sort -fu > %s", tmpFile.Name(), a.cfg.Lists.Domains)); err != nil {
+			return err
+		}
+		if err := a.generateAPIDomainsFromDomains(); err != nil {
+			return err
+		}
+		a.logger.Printf("consolidate: wrote %d unique domain(s) to %s", len(readSafeLines(a.cfg.Lists.Domains)), a.cfg.Lists.Domains)
+		a.logger.Printf("consolidate: wrote %d API-related domain(s) to %s", len(readSafeLines(a.cfg.Lists.APIDomains)), a.cfg.Lists.APIDomains)
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -668,20 +732,285 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 	}
 
 	dest := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "domains_http")
+	csvPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "live-webservers.csv")
 	if err := os.WriteFile(dest, []byte{}, 0o644); err != nil {
 		return "", err
 	}
 
-	httpxCmd := fmt.Sprintf("cat %s | awk 'NF{print $1}' | httpx -silent | sed 's#/$##' | anew %s", a.cfg.Lists.Domains, dest)
-	if err := a.runShell(ctx, httpxCmd); err != nil {
+	stdout, err := a.runCommandCapture(
+		ctx,
+		"httpx",
+		"-silent",
+		"-json",
+		"-status-code",
+		"-title",
+		"-web-server",
+		"-tech-detect",
+		"-content-length",
+		"-l",
+		a.cfg.Lists.Domains,
+	)
+	if err != nil {
 		httprobeCmd := fmt.Sprintf("cat %s | awk '{print $1}' | httprobe | awk -F/ '{host=$3; scheme=$1} {if (scheme == \"https:\") https[host]=1; all[host]=scheme} END {for (h in all) {if (https[h]) {print \"https://\" h} else {print \"http://\" h}}}' | sort | anew %s", a.cfg.Lists.Domains, dest)
 		if fallbackErr := a.runShell(ctx, httprobeCmd); fallbackErr != nil {
 			return "", fmt.Errorf("http probing failed: httpx=%v; httprobe=%v", err, fallbackErr)
 		}
+
+		urls := readSafeLines(dest)
+		var fallbackRows []liveWebserverRecord
+		for _, u := range urls {
+			u = strings.TrimSpace(strings.TrimRight(u, "/"))
+			if u == "" {
+				continue
+			}
+			fallbackRows = append(fallbackRows, liveWebserverRecord{URL: u})
+		}
+		if err := a.writeLiveWebserversCSV(csvPath, fallbackRows); err != nil {
+			return "", err
+		}
+		a.liveCSVPath = csvPath
+		a.httpDomainsPath = dest
+		return dest, nil
 	}
 
+	rows := parseHTTPXJSONRecords(stdout)
+	urlSet := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		u := strings.TrimSpace(strings.TrimRight(row.URL, "/"))
+		if u == "" {
+			continue
+		}
+		urlSet[u] = struct{}{}
+	}
+	var urls []string
+	for u := range urlSet {
+		urls = append(urls, u)
+	}
+	sort.Strings(urls)
+	if err := os.WriteFile(dest, []byte(strings.Join(urls, "\n")), 0o644); err != nil {
+		return "", err
+	}
+	if err := a.writeLiveWebserversCSV(csvPath, rows); err != nil {
+		return "", err
+	}
+
+	a.liveCSVPath = csvPath
 	a.httpDomainsPath = dest
 	return dest, nil
+}
+
+func parseHTTPXJSONRecords(output string) []liveWebserverRecord {
+	var out []liveWebserverRecord
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			continue
+		}
+
+		rec := liveWebserverRecord{
+			URL:           asString(raw["url"]),
+			StatusCode:    asInt(raw["status_code"]),
+			Title:         asString(raw["title"]),
+			WebServer:     asString(raw["webserver"]),
+			ContentLength: asInt(raw["content_length"]),
+		}
+
+		if techs := asStringSlice(raw["tech"]); len(techs) > 0 {
+			rec.Technologies = techs
+		} else {
+			rec.Technologies = asStringSlice(raw["technologies"])
+		}
+		if rec.URL == "" {
+			continue
+		}
+		out = append(out, rec)
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ToLower(out[i].URL) < strings.ToLower(out[j].URL)
+	})
+	return out
+}
+
+func toJSONLines(raw []byte) []string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return nil
+	}
+	var data any
+	if err := json.Unmarshal([]byte(trimmed), &data); err != nil {
+		return nil
+	}
+	var lines []string
+	switch typed := data.(type) {
+	case map[string]any:
+		b, err := json.Marshal(typed)
+		if err == nil {
+			lines = append(lines, string(b))
+		}
+	case []any:
+		for _, item := range typed {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			b, err := json.Marshal(m)
+			if err == nil {
+				lines = append(lines, string(b))
+			}
+		}
+	}
+	return lines
+}
+
+func (a *App) generateAPIDomainsFromDomains() error {
+	lines := readSafeLines(a.cfg.Lists.Domains)
+	apiSet := make(map[string]struct{})
+	for _, line := range lines {
+		host := extractHostCandidate(line)
+		if host == "" {
+			continue
+		}
+		if isAPIRelatedHost(host) {
+			apiSet[host] = struct{}{}
+		}
+	}
+
+	apiDomains := make([]string, 0, len(apiSet))
+	for host := range apiSet {
+		apiDomains = append(apiDomains, host)
+	}
+	sort.Strings(apiDomains)
+	return os.WriteFile(a.cfg.Lists.APIDomains, []byte(strings.Join(apiDomains, "\n")), 0o644)
+}
+
+func extractHostCandidate(raw string) string {
+	value := strings.TrimSpace(strings.ToLower(raw))
+	if value == "" {
+		return ""
+	}
+
+	if strings.Contains(value, "://") {
+		parsed, err := url.Parse(value)
+		if err == nil {
+			return strings.TrimSpace(strings.Trim(parsed.Hostname(), "."))
+		}
+	}
+
+	value = strings.SplitN(value, "/", 2)[0]
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		value = host
+	} else if strings.Count(value, ":") == 1 {
+		parts := strings.SplitN(value, ":", 2)
+		if _, convErr := strconv.Atoi(parts[1]); convErr == nil {
+			value = parts[0]
+		}
+	}
+
+	return strings.TrimSpace(strings.Trim(value, "."))
+}
+
+func isAPIRelatedHost(host string) bool {
+	labels := strings.Split(strings.ToLower(strings.TrimSpace(host)), ".")
+	for _, label := range labels {
+		if label == "" {
+			continue
+		}
+		if label == "api" ||
+			strings.HasPrefix(label, "api-") ||
+			strings.HasSuffix(label, "-api") ||
+			strings.HasPrefix(label, "api") ||
+			strings.HasSuffix(label, "api") ||
+			strings.Contains(label, "graphql") ||
+			strings.Contains(label, "gateway") {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) writeLiveWebserversCSV(path string, rows []liveWebserverRecord) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	w := csv.NewWriter(f)
+	defer w.Flush()
+
+	if err := w.Write([]string{"url", "status_code", "title", "web_server", "technologies", "content_length"}); err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if err := w.Write([]string{
+			row.URL,
+			strconv.Itoa(row.StatusCode),
+			row.Title,
+			row.WebServer,
+			strings.Join(row.Technologies, "; "),
+			strconv.Itoa(row.ContentLength),
+		}); err != nil {
+			return err
+		}
+	}
+	return w.Error()
+}
+
+func asString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return strings.TrimSpace(x)
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(x)
+	default:
+		return ""
+	}
+}
+
+func asInt(v any) int {
+	switch x := v.(type) {
+	case float64:
+		return int(x)
+	case int:
+		return x
+	case string:
+		n, _ := strconv.Atoi(strings.TrimSpace(x))
+		return n
+	default:
+		return 0
+	}
+}
+
+func asStringSlice(v any) []string {
+	switch x := v.(type) {
+	case []any:
+		var out []string
+		for _, item := range x {
+			s := asString(item)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []string:
+		var out []string
+		for _, s := range x {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func (a *App) httpListOrDefault(path string) string {
@@ -737,20 +1066,31 @@ func normalizeSubdomainSeed(value string) string {
 }
 
 func (a *App) runShell(ctx context.Context, script string) error {
+	start := time.Now()
+	a.logger.Printf("exec shell: %s", script)
 	cmd := exec.CommandContext(ctx, "sh", "-c", script)
 	cmd.Stdout = a.commandOutput()
 	cmd.Stderr = a.commandOutput()
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		a.logger.Printf("exec shell failed after %s: %v", time.Since(start).Round(time.Second), err)
+		return err
+	}
+	a.logger.Printf("exec shell done in %s", time.Since(start).Round(time.Second))
+	return nil
 }
 
 func (a *App) runCommandCapture(ctx context.Context, name string, args ...string) (string, error) {
+	start := time.Now()
+	a.logger.Printf("exec: %s %s", name, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stdout strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = a.commandOutput()
 	if err := cmd.Run(); err != nil {
+		a.logger.Printf("exec failed: %s (%s): %v", name, time.Since(start).Round(time.Second), err)
 		return "", err
 	}
+	a.logger.Printf("exec done: %s (%s)", name, time.Since(start).Round(time.Second))
 	return stdout.String(), nil
 }
 
