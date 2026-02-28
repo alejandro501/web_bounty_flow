@@ -12,6 +12,7 @@
         <h1 class="brand">alejandro501<span class="brand-accent">_</span></h1>
         <nav class="menu">
           <button class="menu-item is-active" data-view="flow">Flow</button>
+          <button class="menu-item" data-view="stride">STRIDE Threat Model</button>
           <button class="menu-item" data-view="config">Configuration</button>
         </nav>
       </aside>
@@ -51,6 +52,390 @@
         <pre id="list-view-output" class="log-view">Select a list to show entries.</pre>
       </section>
 
+        <section class="panel panel-logs">
+        <h2>Flow logs</h2>
+        <pre id="flow-log-output" class="log-view log-view--tall">Logs appear here when you start the flow.</pre>
+      </section>
+      </section>
+
+      <section class="view view-stride">
+        <div class="stride-header">
+          <h2 class="page-title">STRIDE Threat Model</h2>
+          <button id="stride-export-answers" type="button">Export All Answers</button>
+        </div>
+        <section class="panel stride-panel">
+          <div class="stride-layout">
+            <aside class="stride-nav">
+              <button class="stride-tab is-active" data-stride-tab="overview">Overview</button>
+              <button class="stride-tab" data-stride-tab="high-level-questions">High Level Questions</button>
+              <button class="stride-tab" data-stride-tab="mechanisms">Mechanisms</button>
+              <button class="stride-tab" data-stride-tab="notable-objects">Notable Objects</button>
+              <button class="stride-tab" data-stride-tab="security-controls">Security Controls</button>
+              <button class="stride-tab" data-stride-tab="threat-model">Threat Model</button>
+              <button class="stride-tab" data-stride-tab="spoofing">S - Spoofing</button>
+              <button class="stride-tab" data-stride-tab="tampering">T - Tampering</button>
+              <button class="stride-tab" data-stride-tab="repudiation">R - Repudiation</button>
+              <button class="stride-tab" data-stride-tab="info-disclosure">I - Information Disclosure</button>
+              <button class="stride-tab" data-stride-tab="dos">D - Denial of Service</button>
+              <button class="stride-tab" data-stride-tab="eop">E - Elevation of Privilege</button>
+              <button class="stride-tab" data-stride-tab="workflow">Workflow</button>
+            </aside>
+
+            <div class="stride-content">
+              <article class="stride-section is-active" data-stride-content="overview">
+                <h3>STRIDE Threat Model</h3>
+                <p>Perform comprehensive threat modeling using STRIDE to identify threats across six categories:</p>
+                <ul>
+                  <li><strong>Spoofing:</strong> Impersonation of users, systems, or data.</li>
+                  <li><strong>Tampering:</strong> Malicious modification of data or code.</li>
+                  <li><strong>Repudiation:</strong> Denial of actions without proper logging.</li>
+                  <li><strong>Information Disclosure:</strong> Exposure of sensitive information.</li>
+                  <li><strong>Denial of Service:</strong> Preventing legitimate access.</li>
+                  <li><strong>Elevation of Privilege:</strong> Gaining unauthorized elevated permissions.</li>
+                </ul>
+              </article>
+
+              <article class="stride-section" data-stride-content="high-level-questions">
+                <h3>Manual Recon</h3>
+                <div class="manual-recon" data-workspace="high-level-questions">
+                  <section class="manual-recon__left">
+                    <h4>Questions by Category</h4>
+                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <div class="manual-recon__categories"></div>
+                  </section>
+
+                  <section class="manual-recon__right">
+                    <h4 class="manual-recon-question-title">Select a question</h4>
+                    <p class="manual-recon-question-category muted"></p>
+
+                    <div class="manual-recon__help">
+                      <h4>Help Me Learn!</h4>
+                      <ul class="manual-recon-help-list"></ul>
+                    </div>
+
+                    <div class="manual-recon__answers">
+                      <h4>Your Answers</h4>
+                      <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
+
+                      <button class="manual-recon-add-answer" type="button">Add New Answer</button>
+                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <button class="manual-recon-save-answer" type="button">Save Answer</button>
+                      <p class="manual-recon-answer-status muted">Not saved yet.</p>
+                    </div>
+                  </section>
+                </div>
+              </article>
+
+              <article class="stride-section" data-stride-content="mechanisms">
+                <h3>Mechanisms</h3>
+                <div class="manual-recon" data-workspace="mechanisms">
+                  <section class="manual-recon__left">
+                    <h4>Questions by Category</h4>
+                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <div class="manual-recon__categories"></div>
+                  </section>
+                  <section class="manual-recon__right">
+                    <h4 class="manual-recon-question-title">Select a question</h4>
+                    <p class="manual-recon-question-category muted"></p>
+                    <div class="manual-recon__help">
+                      <h4>Help Me Learn!</h4>
+                      <ul class="manual-recon-help-list"></ul>
+                    </div>
+                    <div class="manual-recon__answers">
+                      <h4>Your Answers</h4>
+                      <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
+                      <button class="manual-recon-add-answer" type="button">Add New Answer</button>
+                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <button class="manual-recon-save-answer" type="button">Save Answer</button>
+                      <p class="manual-recon-answer-status muted">Not saved yet.</p>
+                    </div>
+                  </section>
+                </div>
+              </article>
+
+              <article class="stride-section" data-stride-content="notable-objects">
+                <h3>Notable Objects</h3>
+                <div class="manual-recon" data-workspace="notable-objects">
+                  <section class="manual-recon__left">
+                    <h4>Questions by Category</h4>
+                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <div class="manual-recon__categories"></div>
+                  </section>
+                  <section class="manual-recon__right">
+                    <h4 class="manual-recon-question-title">Select a question</h4>
+                    <p class="manual-recon-question-category muted"></p>
+                    <div class="manual-recon__help">
+                      <h4>Help Me Learn!</h4>
+                      <ul class="manual-recon-help-list"></ul>
+                    </div>
+                    <div class="manual-recon__answers">
+                      <h4>Your Answers</h4>
+                      <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
+                      <button class="manual-recon-add-answer" type="button">Add New Answer</button>
+                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <button class="manual-recon-save-answer" type="button">Save Answer</button>
+                      <p class="manual-recon-answer-status muted">Not saved yet.</p>
+                    </div>
+                  </section>
+                </div>
+              </article>
+
+              <article class="stride-section" data-stride-content="security-controls">
+                <h3>Security Controls</h3>
+                <div class="manual-recon" data-workspace="security-controls">
+                  <section class="manual-recon__left">
+                    <h4>Questions by Category</h4>
+                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <div class="manual-recon__categories"></div>
+                  </section>
+                  <section class="manual-recon__right">
+                    <h4 class="manual-recon-question-title">Select a question</h4>
+                    <p class="manual-recon-question-category muted"></p>
+                    <div class="manual-recon__help">
+                      <h4>Help Me Learn!</h4>
+                      <ul class="manual-recon-help-list"></ul>
+                    </div>
+                    <div class="manual-recon__answers">
+                      <h4>Your Answers</h4>
+                      <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
+                      <button class="manual-recon-add-answer" type="button">Add New Answer</button>
+                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <button class="manual-recon-save-answer" type="button">Save Answer</button>
+                      <p class="manual-recon-answer-status muted">Not saved yet.</p>
+                    </div>
+                  </section>
+                </div>
+              </article>
+
+              <article class="stride-section" data-stride-content="threat-model">
+                <h3>Threat Model</h3>
+                <div class="manual-recon" data-workspace="threat-model">
+                  <section class="manual-recon__left">
+                    <h4>Questions by Category</h4>
+                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <div class="manual-recon__categories"></div>
+                  </section>
+                  <section class="manual-recon__right">
+                    <h4 class="manual-recon-question-title">Select a question</h4>
+                    <p class="manual-recon-question-category muted"></p>
+                    <div class="manual-recon__help">
+                      <h4>Help Me Learn!</h4>
+                      <ul class="manual-recon-help-list"></ul>
+                    </div>
+                    <div class="manual-recon__answers">
+                      <h4>Your Answers</h4>
+                      <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
+                      <button class="manual-recon-add-answer" type="button">Add New Answer</button>
+                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <button class="manual-recon-save-answer" type="button">Save Answer</button>
+                      <p class="manual-recon-answer-status muted">Not saved yet.</p>
+                    </div>
+                  </section>
+                </div>
+              </article>
+
+              <article class="stride-section" data-stride-content="spoofing">
+                <h3>Spoofing Checks</h3>
+                <div class="manual-recon" data-workspace="spoofing">
+                  <section class="manual-recon__left">
+                    <h4>Questions by Category</h4>
+                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <div class="manual-recon__categories"></div>
+                  </section>
+                  <section class="manual-recon__right">
+                    <h4 class="manual-recon-question-title">Select a question</h4>
+                    <p class="manual-recon-question-category muted"></p>
+                    <div class="manual-recon__help">
+                      <h4>Help Me Learn!</h4>
+                      <ul class="manual-recon-help-list"></ul>
+                    </div>
+                    <div class="manual-recon__answers">
+                      <h4>Your Answers</h4>
+                      <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
+                      <button class="manual-recon-add-answer" type="button">Add New Answer</button>
+                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <button class="manual-recon-save-answer" type="button">Save Answer</button>
+                      <p class="manual-recon-answer-status muted">Not saved yet.</p>
+                    </div>
+                  </section>
+                </div>
+              </article>
+
+              <article class="stride-section" data-stride-content="tampering">
+                <h3>Tampering Checks</h3>
+                <div class="manual-recon" data-workspace="tampering">
+                  <section class="manual-recon__left">
+                    <h4>Questions by Category</h4>
+                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <div class="manual-recon__categories"></div>
+                  </section>
+                  <section class="manual-recon__right">
+                    <h4 class="manual-recon-question-title">Select a question</h4>
+                    <p class="manual-recon-question-category muted"></p>
+                    <div class="manual-recon__help">
+                      <h4>Help Me Learn!</h4>
+                      <ul class="manual-recon-help-list"></ul>
+                    </div>
+                    <div class="manual-recon__answers">
+                      <h4>Your Answers</h4>
+                      <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
+                      <button class="manual-recon-add-answer" type="button">Add New Answer</button>
+                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <button class="manual-recon-save-answer" type="button">Save Answer</button>
+                      <p class="manual-recon-answer-status muted">Not saved yet.</p>
+                    </div>
+                  </section>
+                </div>
+              </article>
+
+              <article class="stride-section" data-stride-content="repudiation">
+                <h3>Repudiation Checks</h3>
+                <div class="manual-recon" data-workspace="repudiation">
+                  <section class="manual-recon__left">
+                    <h4>Questions by Category</h4>
+                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <div class="manual-recon__categories"></div>
+                  </section>
+                  <section class="manual-recon__right">
+                    <h4 class="manual-recon-question-title">Select a question</h4>
+                    <p class="manual-recon-question-category muted"></p>
+                    <div class="manual-recon__help">
+                      <h4>Help Me Learn!</h4>
+                      <ul class="manual-recon-help-list"></ul>
+                    </div>
+                    <div class="manual-recon__answers">
+                      <h4>Your Answers</h4>
+                      <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
+                      <button class="manual-recon-add-answer" type="button">Add New Answer</button>
+                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <button class="manual-recon-save-answer" type="button">Save Answer</button>
+                      <p class="manual-recon-answer-status muted">Not saved yet.</p>
+                    </div>
+                  </section>
+                </div>
+              </article>
+
+              <article class="stride-section" data-stride-content="info-disclosure">
+                <h3>Information Disclosure Checks</h3>
+                <div class="manual-recon" data-workspace="info-disclosure">
+                  <section class="manual-recon__left">
+                    <h4>Questions by Category</h4>
+                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <div class="manual-recon__categories"></div>
+                  </section>
+                  <section class="manual-recon__right">
+                    <h4 class="manual-recon-question-title">Select a question</h4>
+                    <p class="manual-recon-question-category muted"></p>
+                    <div class="manual-recon__help">
+                      <h4>Help Me Learn!</h4>
+                      <ul class="manual-recon-help-list"></ul>
+                    </div>
+                    <div class="manual-recon__answers">
+                      <h4>Your Answers</h4>
+                      <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
+                      <button class="manual-recon-add-answer" type="button">Add New Answer</button>
+                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <button class="manual-recon-save-answer" type="button">Save Answer</button>
+                      <p class="manual-recon-answer-status muted">Not saved yet.</p>
+                    </div>
+                  </section>
+                </div>
+              </article>
+
+              <article class="stride-section" data-stride-content="dos">
+                <h3>Denial of Service Checks</h3>
+                <div class="manual-recon" data-workspace="dos">
+                  <section class="manual-recon__left">
+                    <h4>Questions by Category</h4>
+                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <div class="manual-recon__categories"></div>
+                  </section>
+                  <section class="manual-recon__right">
+                    <h4 class="manual-recon-question-title">Select a question</h4>
+                    <p class="manual-recon-question-category muted"></p>
+                    <div class="manual-recon__help">
+                      <h4>Help Me Learn!</h4>
+                      <ul class="manual-recon-help-list"></ul>
+                    </div>
+                    <div class="manual-recon__answers">
+                      <h4>Your Answers</h4>
+                      <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
+                      <button class="manual-recon-add-answer" type="button">Add New Answer</button>
+                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <button class="manual-recon-save-answer" type="button">Save Answer</button>
+                      <p class="manual-recon-answer-status muted">Not saved yet.</p>
+                    </div>
+                  </section>
+                </div>
+              </article>
+
+              <article class="stride-section" data-stride-content="eop">
+                <h3>Elevation of Privilege Checks</h3>
+                <div class="manual-recon" data-workspace="eop">
+                  <section class="manual-recon__left">
+                    <h4>Questions by Category</h4>
+                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <div class="manual-recon__categories"></div>
+                  </section>
+                  <section class="manual-recon__right">
+                    <h4 class="manual-recon-question-title">Select a question</h4>
+                    <p class="manual-recon-question-category muted"></p>
+                    <div class="manual-recon__help">
+                      <h4>Help Me Learn!</h4>
+                      <ul class="manual-recon-help-list"></ul>
+                    </div>
+                    <div class="manual-recon__answers">
+                      <h4>Your Answers</h4>
+                      <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
+                      <button class="manual-recon-add-answer" type="button">Add New Answer</button>
+                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <button class="manual-recon-save-answer" type="button">Save Answer</button>
+                      <p class="manual-recon-answer-status muted">Not saved yet.</p>
+                    </div>
+                  </section>
+                </div>
+              </article>
+
+              <article class="stride-section" data-stride-content="workflow">
+                <h3>How To Use This While Researching</h3>
+                <ol>
+                  <li>Document recon findings first (assets, entry points, trust boundaries).</li>
+                  <li>Identify mechanisms and objects (auth, data stores, queues, admin paths).</li>
+                  <li>Assess existing security controls and where they fail.</li>
+                  <li>Map candidate attack vectors to STRIDE categories.</li>
+                  <li>Score business impact and prioritize exploit paths.</li>
+                </ol>
+              </article>
+            </div>
+
+            <aside class="stride-learn">
+              <div class="stride-learn__card">
+                <h3>Help Me Learn!</h3>
+                <p class="muted">Guided prompts for the current STRIDE subsection.</p>
+                <div class="learn-carousel">
+                  <p id="learn-question" class="learn-question">Select a STRIDE section.</p>
+                  <ul id="learn-answers" class="learn-answers"></ul>
+                </div>
+                <div class="learn-controls">
+                  <button id="learn-prev" class="learn-btn" type="button">Previous</button>
+                  <span id="learn-index" class="learn-index">0 / 0</span>
+                  <button id="learn-next" class="learn-btn" type="button">Next</button>
+                </div>
+              </div>
+
+              <div class="stride-answer">
+                <h3>Your Answer</h3>
+                <p class="muted">Capture your own notes and threat hypotheses by subsection.</p>
+                <textarea id="stride-answer-text" rows="10" placeholder="Write your analysis, assumptions, and evidence here..."></textarea>
+                <p id="stride-answer-status" class="muted">Not saved yet.</p>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </section>
+
+      <section class="view view-config">
+        <h2 class="page-title">Configuration</h2>
         <section class="panel panel-config">
           <div class="config-header">
             <div>
@@ -81,11 +466,6 @@
 
           <div id="github-keys-list" class="config-list"></div>
         </section>
-
-        <section class="panel panel-logs">
-        <h2>Flow logs</h2>
-        <pre id="flow-log-output" class="log-view log-view--tall">Logs appear here when you start the flow.</pre>
-      </section>
       </section>
     </main>
     <script src="app.js"></script>

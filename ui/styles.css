@@ -98,8 +98,14 @@ main {
   font-size: 1.6rem;
 }
 
+.stride-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 .view-flow {
-  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-areas:
     "files files"
@@ -108,6 +114,10 @@ main {
     "logs logs";
   gap: 1.5rem;
   align-items: start;
+}
+
+.view-flow.is-active {
+  display: grid;
 }
 
 .panel {
@@ -135,21 +145,251 @@ main {
 }
 
 .panel-config {
+  max-width: 1200px;
+}
+
+.view-stride {
   display: none;
-  grid-area: config;
 }
 
-body[data-active-view="config"] .view-flow {
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  grid-template-areas:
-    "files config"
-    "scope config"
-    "flow config"
-    "logs config";
+.view-config {
+  display: none;
 }
 
-body[data-active-view="config"] .panel-config {
+.stride-panel {
+  padding: 1rem;
+}
+
+.stride-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 360px;
+  gap: 1rem;
+}
+
+.stride-nav {
+  display: grid;
+  gap: 0.5rem;
+  align-content: start;
+  max-height: 72vh;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.stride-tab {
+  text-align: left;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  text-transform: none;
+  padding: 0.65rem 0.75rem;
+}
+
+.stride-tab.is-active {
+  border-color: var(--accent-soft);
+  background: rgba(225, 6, 44, 0.12);
+  color: var(--accent-bright);
+}
+
+.stride-content {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+  padding: 1.25rem;
+  min-height: 60vh;
+}
+
+.stride-section {
+  display: none;
+}
+
+.stride-section.is-active {
   display: block;
+}
+
+.stride-section h3 {
+  margin-top: 0;
+}
+
+.stride-section ul,
+.stride-section ol {
+  line-height: 1.5;
+}
+
+.manual-recon {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 1rem;
+}
+
+.manual-recon__left,
+.manual-recon__right {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0.9rem;
+}
+
+.manual-recon__left h4,
+.manual-recon__right h4 {
+  margin: 0 0 0.65rem;
+}
+
+.manual-recon__categories {
+  margin-top: 0.75rem;
+  max-height: 56vh;
+  overflow-y: auto;
+  padding-right: 0.3rem;
+}
+
+.manual-recon__category {
+  margin-bottom: 0.8rem;
+}
+
+.manual-recon__category-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.85rem;
+  color: #ffd7de;
+}
+
+.manual-recon__question {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  box-shadow: none;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 0.55rem 0.65rem;
+  margin-bottom: 0.35rem;
+  font-size: 0.8rem;
+}
+
+.manual-recon__question.is-active {
+  border-color: var(--accent-soft);
+  background: rgba(225, 6, 44, 0.16);
+}
+
+.manual-recon__help,
+.manual-recon__answers {
+  margin-top: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.28);
+  padding: 0.85rem;
+}
+
+.manual-recon__help ul {
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.86rem;
+}
+
+.manual-recon__answers-list {
+  font-size: 0.86rem;
+  line-height: 1.4;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-bottom: 0.6rem;
+}
+
+.manual-recon__answer-item {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  margin-bottom: 0.45rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.manual-recon__answer-item small {
+  color: var(--muted);
+}
+
+.manual-recon-add-answer {
+  margin-bottom: 0.55rem;
+}
+
+.manual-recon-answer-input {
+  width: 100%;
+  resize: vertical;
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.83rem;
+}
+
+.manual-recon-save-answer {
+  margin-top: 0.55rem;
+}
+
+.stride-learn {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.stride-learn__card,
+.stride-answer {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  background: linear-gradient(165deg, rgba(225, 6, 44, 0.12), rgba(255, 255, 255, 0.03));
+}
+
+.stride-learn__card h3,
+.stride-answer h3 {
+  margin: 0;
+}
+
+.learn-carousel {
+  margin-top: 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 0.85rem;
+  background: rgba(10, 10, 14, 0.55);
+}
+
+.learn-question {
+  margin: 0 0 0.6rem;
+  font-size: 0.92rem;
+  color: #ffd7de;
+}
+
+.learn-answers {
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.4rem;
+  font-size: 0.86rem;
+  color: var(--text);
+}
+
+.learn-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.75rem;
+}
+
+.learn-btn {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.78rem;
+  text-transform: none;
+}
+
+.learn-index {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+#stride-answer-text {
+  margin-top: 0.85rem;
+  width: 100%;
+  resize: vertical;
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.86rem;
 }
 
 .config-header {
@@ -281,6 +521,10 @@ input {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01));
   background-color: var(--bg-1);
   color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+select {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
@@ -289,7 +533,6 @@ input {
   background-position: calc(100% - 20px) calc(50% - 3px), calc(100% - 15px) calc(50% - 3px);
   background-size: 6px 6px, 6px 6px;
   background-repeat: no-repeat;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 select:hover,
@@ -425,21 +668,23 @@ button:active {
       "logs";
   }
 
-  body[data-active-view="config"] .view-flow {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      "files"
-      "scope"
-      "flow"
-      "config"
-      "logs";
-  }
-
   .config-form {
     grid-template-columns: 1fr;
   }
 
   .config-row {
+    grid-template-columns: 1fr;
+  }
+
+  .stride-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .stride-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .manual-recon {
     grid-template-columns: 1fr;
   }
 }
@@ -453,5 +698,9 @@ button:active {
 @media (max-width: 700px) {
   .scope-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stride-nav {
+    grid-template-columns: 1fr;
   }
 }
