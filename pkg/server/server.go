@@ -626,6 +626,10 @@ func (s *Server) listPath(name string) (string, error) {
 		return s.cfg.Lists.OutOfScope, nil
 	case "live_webservers_csv":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "live-webservers.csv"), nil
+	case "fuzzing_doc_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "documentation", "doc_hits.txt"), nil
+	case "fuzzing_dir_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "ffuf", "dir_hits.txt"), nil
 	default:
 		return "", fmt.Errorf("unsupported list_type %q", name)
 	}

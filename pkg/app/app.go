@@ -56,6 +56,8 @@ const (
 	StepConsolidate    = "consolidate"
 	StepHTTPX          = "httpx"
 	StepCeWL           = "cewl"
+	StepFuzzDocs       = "fuzz-docs"
+	StepFuzzDirs       = "fuzz-dirs"
 	StepGithubDork     = "github-dork"
 )
 
@@ -71,6 +73,8 @@ var flowSteps = []Step{
 	{ID: StepConsolidate, Label: "Consolidate all discovered hosts and remove duplicates."},
 	{ID: StepHTTPX, Label: "Probe consolidated hosts with httpx for live web servers."},
 	{ID: StepCeWL, Label: "Generate custom CeWL wordlist from live web servers."},
+	{ID: StepFuzzDocs, Label: "Run ffuf documentation endpoint fuzzing and collect hits."},
+	{ID: StepFuzzDirs, Label: "Run ffuf directory/API path fuzzing and collect hits."},
 }
 
 // FlowSteps returns the ordered flow steps for UI rendering.
@@ -214,15 +218,17 @@ func (a *App) githubDorking(ctx context.Context) error {
 }
 
 func (a *App) prepareDirectories() error {
+	ffufBase := a.fuzzingFFUFDir()
+	docBase := a.fuzzingDocsDir()
 	directories := []string{
 		a.cfg.Paths.RobotsDir,
 		filepath.Join(a.cfg.Paths.RobotsDir, a.cfg.Paths.RobotsHitsDir),
 		filepath.Join(a.cfg.Paths.RobotsDir, a.cfg.Paths.RobotsNoHitsDir),
 		a.cfg.Paths.DorkingDir,
-		filepath.Join(a.cfg.Paths.FuzzingDir, a.cfg.Paths.FFUFDir),
-		filepath.Join(a.cfg.Paths.FuzzingDir, a.cfg.Paths.FFUFDir, a.cfg.Paths.FuzzingHitsDir),
-		filepath.Join(a.cfg.Paths.FuzzingDir, a.cfg.Paths.FFUFDir, a.cfg.Paths.FuzzingNoHitsDir),
-		filepath.Join(a.cfg.Paths.FuzzingDir, "documentation"),
+		ffufBase,
+		filepath.Join(ffufBase, a.cfg.Paths.FuzzingHitsDir),
+		filepath.Join(ffufBase, a.cfg.Paths.FuzzingNoHitsDir),
+		docBase,
 		a.cfg.Paths.LogsDir,
 		a.cfg.Paths.NmapDir,
 	}
@@ -261,14 +267,14 @@ func (a *App) prepareDirectories() error {
 
 func (a *App) passiveRecon(ctx context.Context) error {
 	for _, step := range []string{
-		StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepConsolidate, StepHTTPX, StepCeWL,
+		StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepConsolidate, StepHTTPX, StepCeWL, StepFuzzDocs, StepFuzzDirs,
 	} {
 		a.updateStep(step, StepPending)
 	}
 
 	if !fileExists(a.cfg.Lists.Wildcards) || len(readSafeLines(a.cfg.Lists.Wildcards)) == 0 {
 		for _, step := range []string{
-			StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepConsolidate, StepHTTPX, StepCeWL,
+			StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepConsolidate, StepHTTPX, StepCeWL, StepFuzzDocs, StepFuzzDirs,
 		} {
 			a.skipStep(step)
 		}
@@ -400,49 +406,46 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		}
 	}
 
-	if err := a.runStep(StepAmass, func() error {
-		for _, seed := range normalizedSeeds {
-			start := time.Now()
-			seedFile := sanitizeFilename(seed)
-			seedPrefix := filepath.Join(amassDir, seedFile)
-			seedJSON := seedPrefix + ".json"
-			seedText := seedPrefix + ".txt"
-			a.logger.Printf("amass: starting passive enum for %s", seed)
-			_, err := a.runCommandCapture(ctx, "amass", "enum", "-passive", "-d", seed, "-oA", seedPrefix)
-			if err != nil {
-				return fmt.Errorf("amass failed for %s: %w", seed, err)
-			}
-			hostLines := readSafeLines(seedText)
-			hosts := parseDomainLines(strings.Join(hostLines, "\n"), seed)
-			appendResults(StepAmass, hosts)
-			if fileExists(seedJSON) {
-				rawJSON, readErr := os.ReadFile(seedJSON)
-				if readErr != nil {
-					return readErr
-				}
-				jsonLines := toJSONLines(rawJSON)
-				if len(jsonLines) == 0 {
-					jsonLines = []string{strings.TrimSpace(string(rawJSON))}
-				}
-				if err := appendToFile(combinedAmassJSON, strings.Join(jsonLines, "\n")+"\n"); err != nil {
-					return err
-				}
-			}
-			a.logger.Printf("amass: finished %s with %d host(s) in %s", seed, len(hosts), time.Since(start).Round(time.Second))
-		}
-		a.logger.Printf("amass: total unique hosts=%d", len(toolResults[StepAmass]))
-		return nil
-	}); err != nil {
-		return err
-	}
-
 	type toolRunner struct {
 		step       string
 		required   string
 		runForSeed func(seed string) ([]string, error)
 	}
 
+	var amassFileMu sync.Mutex
 	runners := []toolRunner{
+		{
+			step:     StepAmass,
+			required: "amass",
+			runForSeed: func(seed string) ([]string, error) {
+				seedFile := sanitizeFilename(seed)
+				seedPrefix := filepath.Join(amassDir, seedFile)
+				seedJSON := seedPrefix + ".json"
+				seedText := seedPrefix + ".txt"
+				_, err := a.runCommandCapture(ctx, "amass", "enum", "-passive", "-d", seed, "-oA", seedPrefix)
+				if err != nil {
+					return nil, err
+				}
+				hosts := parseDomainLines(strings.Join(readSafeLines(seedText), "\n"), seed)
+				if fileExists(seedJSON) {
+					rawJSON, readErr := os.ReadFile(seedJSON)
+					if readErr != nil {
+						return nil, readErr
+					}
+					jsonLines := toJSONLines(rawJSON)
+					if len(jsonLines) == 0 {
+						jsonLines = []string{strings.TrimSpace(string(rawJSON))}
+					}
+					amassFileMu.Lock()
+					appendErr := appendToFile(combinedAmassJSON, strings.Join(jsonLines, "\n")+"\n")
+					amassFileMu.Unlock()
+					if appendErr != nil {
+						return nil, appendErr
+					}
+				}
+				return hosts, nil
+			},
+		},
 		{
 			step:     StepSublist3r,
 			required: "sublist3r",
@@ -506,14 +509,20 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		available[runner.step] = err == nil
 	}
 
-	var runErr error
-	var runErrMu sync.Mutex
-	setRunErr := func(err error) {
-		runErrMu.Lock()
-		defer runErrMu.Unlock()
-		if runErr == nil {
-			runErr = err
+	failedSteps := make(map[string]error)
+	var failedMu sync.Mutex
+	markFailed := func(step string, err error) {
+		failedMu.Lock()
+		defer failedMu.Unlock()
+		if _, ok := failedSteps[step]; !ok {
+			failedSteps[step] = err
 		}
+	}
+	isFailed := func(step string) bool {
+		failedMu.Lock()
+		defer failedMu.Unlock()
+		_, ok := failedSteps[step]
+		return ok
 	}
 
 	for _, runner := range runners {
@@ -530,7 +539,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		var wg sync.WaitGroup
 		for _, runner := range runners {
 			r := runner
-			if !available[r.step] {
+			if !available[r.step] || isFailed(r.step) {
 				continue
 			}
 			wg.Add(1)
@@ -540,7 +549,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 				a.logger.Printf("%s: starting seed=%s", r.step, seed)
 				hosts, err := r.runForSeed(seed)
 				if err != nil {
-					setRunErr(fmt.Errorf("%s failed for %s: %w", r.step, seed, err))
+					markFailed(r.step, fmt.Errorf("%s failed for %s: %w", r.step, seed, err))
 					a.logger.Printf("%s: error seed=%s: %v", r.step, seed, err)
 					return
 				}
@@ -549,26 +558,29 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 			}()
 		}
 		wg.Wait()
-		if runErr != nil {
-			break
-		}
 	}
 
 	for _, runner := range runners {
 		if !available[runner.step] {
 			continue
 		}
-		if runErr != nil {
+		if isFailed(runner.step) {
 			a.updateStep(runner.step, StepError)
 			continue
 		}
 		a.updateStep(runner.step, StepDone)
 	}
-	if runErr != nil {
-		return runErr
+	if len(failedSteps) > 0 {
+		var failedLabels []string
+		for _, runner := range runners {
+			if err, ok := failedSteps[runner.step]; ok {
+				failedLabels = append(failedLabels, fmt.Sprintf("%s (%v)", runner.step, err))
+			}
+		}
+		a.logger.Printf("subdomain discovery: continuing with partial results; failed tools: %s", strings.Join(failedLabels, "; "))
 	}
-	for _, step := range []string{StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder} {
-		a.logger.Printf("%s: total unique hosts=%d", step, len(toolResults[step]))
+	for _, runner := range runners {
+		a.logger.Printf("%s: total unique hosts=%d", runner.step, len(toolResults[runner.step]))
 	}
 
 	if err := a.runStep(StepConsolidate, func() error {
@@ -612,10 +624,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 
 	if _, err := exec.LookPath("cewl"); err != nil {
 		a.skipStep(StepCeWL)
-		return nil
-	}
-
-	return a.runStep(StepCeWL, func() error {
+	} else if err := a.runStep(StepCeWL, func() error {
 		targets := readSafeLines(a.httpListOrDefault(a.cfg.Lists.Domains))
 		if len(targets) == 0 {
 			return nil
@@ -649,7 +658,285 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		sort.Strings(words)
 		out := filepath.Join(reconDir, "cewl_custom_wordlist.txt")
 		return os.WriteFile(out, []byte(strings.Join(words, "\n")), 0o644)
+	}); err != nil {
+		return err
+	}
+
+	if err := a.runFuzzDocumentation(ctx); err != nil {
+		return err
+	}
+	return a.runFuzzDirectories(ctx)
+}
+
+func (a *App) runFuzzDocumentation(ctx context.Context) error {
+	if _, err := exec.LookPath("ffuf"); err != nil {
+		a.skipStep(StepFuzzDocs)
+		a.logger.Printf("%s: skipped (ffuf not found)", StepFuzzDocs)
+		return nil
+	}
+	if !fileExists(a.cfg.Wordlists.APIDocs) {
+		a.skipStep(StepFuzzDocs)
+		a.logger.Printf("%s: skipped (apidocs wordlist missing: %s)", StepFuzzDocs, a.cfg.Wordlists.APIDocs)
+		return nil
+	}
+
+	return a.runStep(StepFuzzDocs, func() error {
+		targets := unique(append(readSafeLines(a.cfg.Lists.APIDomains), readSafeLines(a.cfg.Lists.Wildcards)...))
+		urlTargets := normalizeHTTPSTargets(targets)
+		if len(urlTargets) == 0 {
+			a.logger.Printf("%s: no targets available", StepFuzzDocs)
+			return nil
+		}
+
+		docsDir := a.fuzzingDocsDir()
+		if err := os.MkdirAll(docsDir, 0o755); err != nil {
+			return err
+		}
+		hitsFile := filepath.Join(docsDir, "doc_hits.txt")
+		if err := os.WriteFile(hitsFile, []byte{}, 0o644); err != nil {
+			return err
+		}
+
+		totalHits := 0
+		for _, target := range urlTargets {
+			outFile := filepath.Join(docsDir, fmt.Sprintf("%s.csv", sanitizeFilename(target)))
+			a.logger.Printf("%s: ffuf target=%s", StepFuzzDocs, target)
+			_, err := a.runCommandCapture(
+				ctx,
+				"ffuf",
+				"-u", strings.TrimRight(target, "/")+"/FUZZ",
+				"-w", a.cfg.Wordlists.APIDocs,
+				"-mc", "200,301",
+				"-of", "csv",
+				"-o", outFile,
+			)
+			if err != nil {
+				a.logger.Printf("%s: ffuf failed for %s: %v", StepFuzzDocs, target, err)
+				continue
+			}
+			hits, parseErr := extractFFUFHitURLs(outFile)
+			if parseErr != nil {
+				a.logger.Printf("%s: failed to parse %s: %v", StepFuzzDocs, outFile, parseErr)
+				continue
+			}
+			if len(hits) > 0 {
+				totalHits += len(hits)
+				if err := appendToFile(hitsFile, strings.Join(hits, "\n")+"\n"); err != nil {
+					return err
+				}
+			}
+		}
+		a.logger.Printf("%s: total hits=%d (%s)", StepFuzzDocs, totalHits, hitsFile)
+		return dedupeAndSortFile(hitsFile)
 	})
+}
+
+func (a *App) runFuzzDirectories(ctx context.Context) error {
+	if _, err := exec.LookPath("ffuf"); err != nil {
+		a.skipStep(StepFuzzDirs)
+		a.logger.Printf("%s: skipped (ffuf not found)", StepFuzzDirs)
+		return nil
+	}
+	missing := missingFiles(a.cfg.Wordlists.APIWild501, a.cfg.Wordlists.SecListAPILongest, a.cfg.Wordlists.CustomProjectSpecific)
+	if len(missing) > 0 {
+		a.skipStep(StepFuzzDirs)
+		a.logger.Printf("%s: skipped (wordlist missing: %s)", StepFuzzDirs, strings.Join(missing, ", "))
+		return nil
+	}
+
+	return a.runStep(StepFuzzDirs, func() error {
+		targets := unique(append(readSafeLines(a.cfg.Lists.APIDomains), readSafeLines(a.cfg.Lists.Wildcards)...))
+		urlTargets := normalizeHTTPSTargets(targets)
+		if len(urlTargets) == 0 {
+			a.logger.Printf("%s: no targets available", StepFuzzDirs)
+			return nil
+		}
+
+		ffufDir := a.fuzzingFFUFDir()
+		hitsDir := filepath.Join(ffufDir, a.cfg.Paths.FuzzingHitsDir)
+		noHitsDir := filepath.Join(ffufDir, a.cfg.Paths.FuzzingNoHitsDir)
+		if err := os.MkdirAll(hitsDir, 0o755); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(noHitsDir, 0o755); err != nil {
+			return err
+		}
+
+		fuzzList := filepath.Join(ffufDir, "fuzzme.txt")
+		hitsFile := filepath.Join(ffufDir, "dir_hits.txt")
+		if err := combineWordlists(fuzzList, a.cfg.Wordlists.APIWild501, a.cfg.Wordlists.SecListAPILongest, a.cfg.Wordlists.CustomProjectSpecific); err != nil {
+			return err
+		}
+		if err := os.WriteFile(hitsFile, []byte{}, 0o644); err != nil {
+			return err
+		}
+
+		totalHits := 0
+		for _, target := range urlTargets {
+			clean := sanitizeFilename(target)
+			outFile := filepath.Join(ffufDir, fmt.Sprintf("%s.csv", clean))
+			a.logger.Printf("%s: ffuf target=%s", StepFuzzDirs, target)
+			_, err := a.runCommandCapture(
+				ctx,
+				"ffuf",
+				"-u", strings.TrimRight(target, "/")+"/FUZZ",
+				"-w", fuzzList,
+				"-mc", "200,301",
+				"-of", "csv",
+				"-o", outFile,
+			)
+			if err != nil {
+				a.logger.Printf("%s: ffuf failed for %s: %v", StepFuzzDirs, target, err)
+				continue
+			}
+			hits, parseErr := extractFFUFHitURLs(outFile)
+			if parseErr != nil {
+				a.logger.Printf("%s: failed to parse %s: %v", StepFuzzDirs, outFile, parseErr)
+				continue
+			}
+			if len(hits) == 0 {
+				_ = moveIfExists(outFile, filepath.Join(noHitsDir, filepath.Base(outFile)))
+				continue
+			}
+			totalHits += len(hits)
+			if err := appendToFile(hitsFile, strings.Join(hits, "\n")+"\n"); err != nil {
+				return err
+			}
+			_ = moveIfExists(outFile, filepath.Join(hitsDir, filepath.Base(outFile)))
+		}
+		a.logger.Printf("%s: total hits=%d (%s)", StepFuzzDirs, totalHits, hitsFile)
+		return dedupeAndSortFile(hitsFile)
+	})
+}
+
+func normalizeHTTPSTargets(inputs []string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, raw := range inputs {
+		host := normalizeDorkTarget(raw)
+		if host == "" {
+			continue
+		}
+		target := "https://" + host
+		if _, ok := seen[target]; ok {
+			continue
+		}
+		seen[target] = struct{}{}
+		out = append(out, target)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func combineWordlists(dest string, files ...string) error {
+	set := make(map[string]struct{})
+	for _, path := range files {
+		for _, line := range readSafeLines(path) {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			set[line] = struct{}{}
+		}
+	}
+	var entries []string
+	for line := range set {
+		entries = append(entries, line)
+	}
+	sort.Strings(entries)
+	return os.WriteFile(dest, []byte(strings.Join(entries, "\n")), 0o644)
+}
+
+func extractFFUFHitURLs(csvPath string) ([]string, error) {
+	f, err := os.Open(csvPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	records, err := r.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	if len(records) <= 1 {
+		return nil, nil
+	}
+
+	header := records[0]
+	urlIdx := -1
+	for i, h := range header {
+		if strings.EqualFold(strings.TrimSpace(h), "url") {
+			urlIdx = i
+			break
+		}
+	}
+	if urlIdx == -1 && len(header) > 1 {
+		urlIdx = 1
+	}
+	if urlIdx == -1 {
+		return nil, nil
+	}
+
+	set := make(map[string]struct{})
+	for _, rec := range records[1:] {
+		if len(rec) <= urlIdx {
+			continue
+		}
+		u := strings.TrimSpace(rec[urlIdx])
+		if u == "" {
+			continue
+		}
+		set[u] = struct{}{}
+	}
+	var out []string
+	for u := range set {
+		out = append(out, u)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func dedupeAndSortFile(path string) error {
+	if !fileExists(path) {
+		return nil
+	}
+	lines := unique(readSafeLines(path))
+	sort.Strings(lines)
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+}
+
+func missingFiles(paths ...string) []string {
+	var missing []string
+	for _, p := range paths {
+		if !fileExists(p) {
+			missing = append(missing, p)
+		}
+	}
+	return missing
+}
+
+func (a *App) dataRootDir() string {
+	return filepath.Dir(a.cfg.Lists.Domains)
+}
+
+func (a *App) fuzzingBaseDir() string {
+	base := strings.TrimSpace(a.cfg.Paths.FuzzingDir)
+	if filepath.IsAbs(base) {
+		return base
+	}
+	if strings.HasPrefix(base, "data"+string(os.PathSeparator)) || base == "data" {
+		return base
+	}
+	return filepath.Join(a.dataRootDir(), base)
+}
+
+func (a *App) fuzzingFFUFDir() string {
+	return filepath.Join(a.fuzzingBaseDir(), a.cfg.Paths.FFUFDir)
+}
+
+func (a *App) fuzzingDocsDir() string {
+	return filepath.Join(a.fuzzingBaseDir(), "documentation")
 }
 
 func (a *App) robots(ctx context.Context, source string) error {

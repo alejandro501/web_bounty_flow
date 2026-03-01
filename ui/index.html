@@ -50,6 +50,8 @@
             <option value="ips">IPs</option>
             <option value="out_of_scope">Out of scope</option>
             <option value="live_webservers_csv">Live Web Servers CSV</option>
+            <option value="fuzzing_doc_hits">Fuzzing Doc Hits</option>
+            <option value="fuzzing_dir_hits">Fuzzing Dir Hits</option>
           </select>
         </label>
         <pre id="list-view-output" class="log-view">Select a list to show entries.</pre>
@@ -536,6 +538,16 @@
               <tbody id="amass-table-body"></tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      <div id="file-viewer-modal" class="modal-shell" hidden>
+        <div class="modal-panel modal-panel--file">
+          <div class="modal-header">
+            <h3 id="file-viewer-title">Scope File</h3>
+            <button id="close-file-viewer" type="button">Close</button>
+          </div>
+          <pre id="file-viewer-content" class="log-view log-view--tall">Loading...</pre>
         </div>
       </div>
     </main>

@@ -479,6 +479,28 @@ form {
   font-size: 0.9rem;
 }
 
+.scope-card__open {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  box-shadow: none;
+  cursor: pointer;
+  text-decoration: none;
+  font-weight: inherit;
+}
+
+.scope-card__open:hover {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .scope-card__status {
   display: inline-flex;
   align-items: center;
@@ -615,6 +637,11 @@ button:active {
   border: 1px solid var(--border);
   background: linear-gradient(160deg, rgba(20, 20, 28, 0.98), rgba(13, 13, 18, 0.98));
   padding: 1rem;
+}
+
+.modal-panel--file .log-view {
+  margin-top: 0.8rem;
+  max-height: 72vh;
 }
 
 .modal-header {
