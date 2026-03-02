@@ -701,6 +701,22 @@ button:active {
   color: #ffd7de;
 }
 
+.lws-table tr.lws-row.lws-status--2xx td {
+  background: rgba(109, 243, 162, 0.22);
+}
+
+.lws-table tr.lws-row.lws-status--3xx td {
+  background: rgba(255, 209, 102, 0.22);
+}
+
+.lws-table tr.lws-row.lws-status--4xx td {
+  background: rgba(255, 102, 102, 0.22);
+}
+
+.lws-table tr.lws-row.lws-status--5xx td {
+  background: rgba(72, 160, 255, 0.24);
+}
+
 .flow-steps ul {
   margin: 0.5rem 0 0;
   padding-left: 1.25rem;

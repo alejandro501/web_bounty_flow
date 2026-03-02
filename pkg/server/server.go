@@ -526,6 +526,14 @@ func (s *Server) amassEnumHandler(w http.ResponseWriter, r *http.Request) {
 			resp.Count = len(rows)
 		}
 	}
+	if resp.Count == 0 {
+		fallbackRows, fallbackErr := readAmassEnumFromSeedText(filepath.Dir(path))
+		if fallbackErr == nil && len(fallbackRows) > 0 {
+			resp.Present = true
+			resp.Rows = fallbackRows
+			resp.Count = len(fallbackRows)
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -861,6 +869,48 @@ func readAmassEnumJSONL(path string) ([]amassEnumRow, error) {
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
+	return rows, nil
+}
+
+func readAmassEnumFromSeedText(dir string) ([]amassEnumRow, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	var rows []amassEnumRow
+	seen := make(map[string]struct{})
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := strings.TrimSpace(entry.Name())
+		if !strings.HasSuffix(strings.ToLower(name), ".txt") {
+			continue
+		}
+		seed := strings.TrimSpace(strings.TrimSuffix(name, filepath.Ext(name)))
+		if seed == "" {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		for _, host := range readListLines(path) {
+			host = strings.TrimSpace(host)
+			if host == "" {
+				continue
+			}
+			key := strings.ToLower(host) + "|" + strings.ToLower(seed)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			rows = append(rows, amassEnumRow{
+				Name:   host,
+				Domain: seed,
+				Source: "amass",
+			})
+		}
+	}
+
 	return rows, nil
 }
 

@@ -1399,6 +1399,28 @@ function normalizeFilterValue(v) {
   return (v || "").toString().toLowerCase().trim();
 }
 
+function liveStatusClass(statusCode) {
+  const code = Number(statusCode) || 0;
+  if (code >= 200 && code < 300) {
+    return "lws-status--2xx";
+  }
+  if (code >= 300 && code < 400) {
+    return "lws-status--3xx";
+  }
+  if (code >= 400 && code < 500) {
+    return "lws-status--4xx";
+  }
+  if (code >= 500 && code < 600) {
+    return "lws-status--5xx";
+  }
+  return "";
+}
+
+function liveStatusRowClass(statusCode) {
+  const statusClass = liveStatusClass(statusCode);
+  return statusClass ? `lws-row ${statusClass}` : "";
+}
+
 function renderAmassTable() {
   if (!amassTableBody || !amassCount) {
     return;
@@ -1474,7 +1496,7 @@ function renderLiveWebserversTable() {
 
   lwsCount.textContent = `Showing ${filtered.length} of ${liveWebserverRows.length} rows`;
   lwsTableBody.innerHTML = filtered.map((row) => `
-      <tr>
+      <tr class="${liveStatusRowClass(row.status_code)}">
         <td><code>${escapeHTML(row.url || "")}</code></td>
         <td>${escapeHTML(String(row.status_code || ""))}</td>
         <td>${escapeHTML(row.title || "")}</td>
