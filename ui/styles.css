@@ -112,8 +112,10 @@ main {
     "scope scope"
     "flow flow"
     "logs logs";
+  grid-template-rows: auto minmax(0, 1fr) auto minmax(0, 1fr);
   gap: 1.5rem;
   align-items: start;
+  min-height: calc(100vh - 4rem);
 }
 
 .view-flow.is-active {
@@ -138,10 +140,14 @@ main {
 
 .panel-scope {
   grid-area: scope;
+  display: flex;
+  flex-direction: column;
 }
 
 .panel-logs {
   grid-area: logs;
+  display: flex;
+  flex-direction: column;
 }
 
 .panel-config {
@@ -702,6 +708,32 @@ button:active {
   font-size: 0.9rem;
 }
 
+.flow-segment {
+  list-style: none;
+  margin: 0 0 0.6rem;
+}
+
+.flow-segment details {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.flow-segment__title {
+  cursor: pointer;
+  color: #ffd7de;
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.flow-segment__items {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.55rem 0 0;
+}
+
 .flow-step {
   display: flex;
   gap: 0.6rem;
@@ -731,8 +763,16 @@ button:active {
   color: rgba(255, 255, 255, 0.4);
 }
 
+.flow-step--not-implemented .flow-step__status {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.flow-step__label--not-implemented {
+  color: rgba(255, 255, 255, 0.6);
+}
+
 .log-view {
-  min-height: 200px;
+  min-height: 220px;
   margin-top: 1rem;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -746,8 +786,19 @@ button:active {
 }
 
 .log-view--tall {
-  min-height: 420px;
-  max-height: 501px;
+  min-height: 340px;
+  max-height: 62vh;
+}
+
+.panel-scope .log-view {
+  flex: 1;
+  min-height: 320px;
+  max-height: 62vh;
+}
+
+.panel-logs .log-view {
+  flex: 1;
+  margin-top: 0.75rem;
 }
 
 @media (max-width: 900px) {
@@ -774,6 +825,8 @@ button:active {
       "scope"
       "flow"
       "logs";
+    grid-template-rows: auto;
+    min-height: auto;
   }
 
   .config-form {
@@ -798,6 +851,13 @@ button:active {
 
   .modal-filters {
     grid-template-columns: 1fr;
+  }
+
+  .panel-scope .log-view,
+  .panel-logs .log-view,
+  .log-view--tall {
+    min-height: 240px;
+    max-height: 50vh;
   }
 }
 

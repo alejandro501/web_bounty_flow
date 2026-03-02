@@ -71,6 +71,93 @@ const LIST_FILES = [
   { type: "fuzzing_dir_hits", label: "Fuzzing Dir Hits", uploadable: false },
 ];
 
+const FLOW_SEGMENTS = [
+  {
+    title: "0) Preflight and Runtime",
+    items: [
+      { label: "Load flow.yaml and initialize recon runtime.", stepId: "load-config", implemented: true },
+      { label: "Validate scope readiness.", stepId: "validate-inputs", implemented: true },
+      { label: "Block run when required tools are missing.", implemented: true },
+      { label: "Retry policy with backoff for unstable sources.", implemented: true },
+    ],
+  },
+  {
+    title: "1) Mapping - Subdomain Enumeration (Chapter 4)",
+    items: [
+      { label: "Run amass enum for each wildcard.", stepId: "amass", implemented: true },
+      { label: "Run sublist3r in parallel with other passive tools.", stepId: "sublist3r", implemented: true },
+      { label: "Run assetfinder in parallel with other passive tools.", stepId: "assetfinder", implemented: true },
+      { label: "Run gau in parallel with other passive tools.", stepId: "gau", implemented: true },
+      { label: "Query certificate transparency logs in parallel.", stepId: "ctl", implemented: true },
+      { label: "Run subfinder in parallel with other passive tools.", stepId: "subfinder", implemented: true },
+      { label: "Consolidate all discovered hosts and remove duplicates.", stepId: "consolidate", implemented: true },
+      { label: "Add dnsx validation stage before consolidation.", implemented: false },
+      { label: "Persist per-tool raw outputs in dedicated folders.", implemented: false },
+    ],
+  },
+  {
+    title: "2) Mapping - URL and Content Discovery (Chapter 4)",
+    items: [
+      { label: "Probe consolidated hosts with httpx for live web servers.", stepId: "httpx", implemented: true },
+      { label: "Run robots.txt and sitemap discovery in main flow.", implemented: false },
+      { label: "Integrate waybackurls into active flow.", implemented: false },
+      { label: "Integrate katana crawling into active flow.", implemented: false },
+      { label: "Consolidate URL corpus from all sources.", implemented: false },
+      { label: "Auto-generate dork links for org/wildcard/domain/api-domain seeds.", implemented: false },
+    ],
+  },
+  {
+    title: "3) Input and Injection Fuzzing (Chapters 9-10)",
+    items: [
+      { label: "Generate custom CeWL wordlist from live web servers.", stepId: "cewl", implemented: true },
+      { label: "Run ffuf documentation endpoint fuzzing.", stepId: "fuzz-docs", implemented: true },
+      { label: "Run ffuf directory/API path fuzzing.", stepId: "fuzz-dirs", implemented: true },
+      { label: "Fuzz query/body/header/cookie parameters.", implemented: false },
+      { label: "Automate SQLi/NoSQL/XPath/LDAP checks.", implemented: false },
+      { label: "Automate OS command/path traversal/file inclusion checks.", implemented: false },
+      { label: "Automate XXE/SOAP/SSRF/SMTP injection checks.", implemented: false },
+    ],
+  },
+  {
+    title: "4) Authentication, Session, Access Control (Chapters 6-8)",
+    items: [
+      { label: "Automate username enumeration and password policy checks.", implemented: false },
+      { label: "Automate recovery/remember-me weakness testing.", implemented: false },
+      { label: "Automate session token entropy and cookie policy analysis.", implemented: false },
+      { label: "Automate session fixation and logout invalidation checks.", implemented: false },
+      { label: "Automate role-matrix authorization replay (BOLA/IDOR).", implemented: false },
+      { label: "Automate method-based access control mismatch checks.", implemented: false },
+    ],
+  },
+  {
+    title: "5) Client-Side Attack Classes (Chapters 12-13)",
+    items: [
+      { label: "Automate reflected/stored/DOM XSS testing.", implemented: false },
+      { label: "Automate CSRF token validation checks.", implemented: false },
+      { label: "Automate clickjacking and frame policy checks.", implemented: false },
+      { label: "Automate CORS/SOP misconfiguration scanning.", implemented: false },
+      { label: "Automate open redirect validation and chaining checks.", implemented: false },
+    ],
+  },
+  {
+    title: "6) Logic, Architecture, and Server Platform (Chapters 11, 16-18)",
+    items: [
+      { label: "Automate multi-step workflow and race-condition logic checks.", implemented: false },
+      { label: "Integrate request smuggling/h2c/hop-by-hop/SSI-ESI checks into main flow.", implemented: false },
+      { label: "Reintroduce automated Nmap scan + service enrichment + searchsploit.", implemented: false },
+      { label: "Automate tier-segmentation and shared-hosting isolation checks.", implemented: false },
+    ],
+  },
+  {
+    title: "7) Source Review and Methodology Orchestration (Chapters 19-21)",
+    items: [
+      { label: "Integrate semgrep/gosec and correlate static findings with live endpoints.", implemented: false },
+      { label: "Add run manifest, checkpointing, and export bundle.", implemented: false },
+      { label: "Build chapter-aligned stage gates and completion scorecard.", implemented: false },
+    ],
+  },
+];
+
 const STRIDE_LESSONS = {
   overview: [
     {
@@ -1163,7 +1250,7 @@ function initializeScopeCards() {
 
     return `
       <article class="scope-card" data-type="${escapeHTML(type)}">
-        <h3 class="scope-card__name"><button type="button" class="scope-card__open" data-type="${escapeHTML(type)}" data-label="${escapeHTML(label)}">${escapeHTML(label)}</button></h3>
+        <h3 class="scope-card__name"><button type="button" class="scope-card__open" data-type="${escapeHTML(type)}" data-label="${escapeHTML(label)}" data-base-label="${escapeHTML(label)}">${escapeHTML(label)} (0)</button></h3>
         <span class="scope-card__status scope-card__status--missing">Missing</span>
         ${uploadable ? `<input id="${inputId}" type="file" accept=".txt,.csv" />` : ""}
         ${uploadable ? `<button type="button" class="scope-card__upload" data-input-id="${inputId}">Upload</button>` : '<p class="muted">Auto-generated by flow.</p>'}
@@ -1178,6 +1265,7 @@ function initializeScopeCards() {
     }
     scopeCardNodes.set(type, {
       card,
+      open: card.querySelector(".scope-card__open"),
       status: card.querySelector(".scope-card__status"),
       input: card.querySelector("input[type='file']"),
     });
@@ -1249,7 +1337,7 @@ async function openScopeFileModal(type, label) {
 
 function updateScopeCards(states) {
   const signature = LIST_FILES
-    .map(({ type }) => `${type}:${states[type]?.present ? "1" : "0"}`)
+    .map(({ type }) => `${type}:${states[type]?.present ? "1" : "0"}:${states[type]?.entries?.length || 0}`)
     .join("|");
   if (signature === lastScopeSignature) {
     return false;
@@ -1261,7 +1349,12 @@ function updateScopeCards(states) {
     if (!node || !node.status) {
       return;
     }
+    const count = Array.isArray(states[type]?.entries) ? states[type].entries.length : 0;
     const present = Boolean(states[type]?.present);
+    if (node.open) {
+      const baseLabel = node.open.dataset.baseLabel || node.open.dataset.label || type;
+      node.open.textContent = `${baseLabel} (${count})`;
+    }
     node.status.textContent = present ? "Present" : "Missing";
     node.status.classList.toggle("scope-card__status--present", present);
     node.status.classList.toggle("scope-card__status--missing", !present);
@@ -1626,14 +1719,24 @@ async function refreshSteps() {
     }
     lastStepsSignature = signature;
 
-    flowStepsList.innerHTML = steps
-      .map((step) => {
-        const status = step.status || "pending";
+    const stepMap = new Map(steps.map((step) => [step.id, step]));
+    flowStepsList.innerHTML = FLOW_SEGMENTS.map((segment) => {
+      const itemsHtml = segment.items.map((item) => {
+        if (!item.implemented) {
+          return `<li class="flow-step flow-step--not-implemented"><span class="flow-step__status">[ ]</span><span class="flow-step__label flow-step__label--not-implemented">${escapeHTML(item.label)} (Not Implemented)</span></li>`;
+        }
+        const step = item.stepId ? stepMap.get(item.stepId) : null;
+        if (!item.stepId) {
+          return `<li class="flow-step flow-step--done"><span class="flow-step__status">[x]</span><span class="flow-step__label">${escapeHTML(item.label)}</span></li>`;
+        }
+        const status = step?.status || "pending";
         const prefix = stepPrefix(status);
-        const safeLabel = step.label || step.id || "step";
+        const safeLabel = item.label || step?.label || item.stepId || "step";
         return `<li class="flow-step flow-step--${status}"><span class="flow-step__status">${prefix}</span><span class="flow-step__label">${escapeHTML(safeLabel)}</span></li>`;
-      })
-      .join("");
+      }).join("");
+
+      return `<li class="flow-segment"><details open><summary class="flow-segment__title">${escapeHTML(segment.title)}</summary><ul class="flow-segment__items">${itemsHtml}</ul></details></li>`;
+    }).join("");
   } catch (error) {
     const signature = `error:${error.message}`;
     if (signature !== lastStepsSignature) {
@@ -1791,20 +1894,20 @@ async function refreshListEntries(type, options = {}) {
     }
     if (!data.present) {
       const nextText = "File missing.";
-      if (lastListTextByType[type] !== nextText) {
+      if (lastListTextByType[type] !== nextText || listViewOutput.textContent !== nextText) {
         listViewOutput.textContent = nextText;
         lastListTextByType[type] = nextText;
       }
       return;
     }
     const nextText = data.entries && data.entries.length ? data.entries.join("\n") : "No entries yet.";
-    if (lastListTextByType[type] !== nextText) {
+    if (lastListTextByType[type] !== nextText || listViewOutput.textContent !== nextText) {
       listViewOutput.textContent = nextText;
       lastListTextByType[type] = nextText;
     }
   } catch (error) {
     const nextText = `Error: ${error.message}`;
-    if (lastListTextByType[type] !== nextText) {
+    if (lastListTextByType[type] !== nextText || listViewOutput.textContent !== nextText) {
       listViewOutput.textContent = nextText;
       lastListTextByType[type] = nextText;
     }
@@ -1812,7 +1915,7 @@ async function refreshListEntries(type, options = {}) {
 }
 
 listViewSelect?.addEventListener("change", () => {
-  refreshListEntries(listViewSelect.value);
+  refreshListEntries(listViewSelect.value, { force: true });
 });
 
 if (listViewSelect?.value) {

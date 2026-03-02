@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -63,6 +64,7 @@ func New(cfg *config.Config) *Server {
 	s.mux.HandleFunc("/api/dorking/github/run", s.corsMiddleware(s.githubRunHandler))
 	s.mux.HandleFunc("/api/steps", s.corsMiddleware(s.stepsHandler))
 	s.mux.HandleFunc("/api/list", s.corsMiddleware(s.listHandler))
+	s.mux.HandleFunc("/api/tools", s.corsMiddleware(s.toolsHandler))
 	s.mux.HandleFunc("/api/live-webservers", s.corsMiddleware(s.liveWebserversHandler))
 	s.mux.HandleFunc("/api/amass-enum", s.corsMiddleware(s.amassEnumHandler))
 	s.mux.HandleFunc("/", s.corsMiddleware(s.rootHandler))
@@ -267,6 +269,14 @@ type amassEnumRow struct {
 	ASN    int    `json:"asn"`
 	Source string `json:"source"`
 	Tag    string `json:"tag"`
+}
+
+type toolStatus struct {
+	Name      string `json:"name"`
+	Installed bool   `json:"installed"`
+	Path      string `json:"path,omitempty"`
+	Required  bool   `json:"required"`
+	Notes     string `json:"notes,omitempty"`
 }
 
 func (s *Server) runHandler(w http.ResponseWriter, r *http.Request) {
@@ -521,6 +531,43 @@ func (s *Server) amassEnumHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func (s *Server) toolsHandler(w http.ResponseWriter, r *http.Request) {
+	tools := []toolStatus{
+		s.toolCheck("amass", true, ""),
+		s.toolCheck("sublist3r", false, "optional; flow can continue without it"),
+		s.toolCheck("assetfinder", true, ""),
+		s.toolCheck("gau", true, ""),
+		s.toolCheck("subfinder", true, ""),
+		s.toolCheck("httpx", true, ""),
+		s.toolCheck("ffuf", false, "needed for fuzz-docs/fuzz-dirs steps"),
+		s.toolCheck("cewl", false, "optional; flow can continue without it"),
+		s.toolCheck("httprobe", false, "used as fallback when httpx fails"),
+	}
+
+	missingRequired := 0
+	for _, t := range tools {
+		if t.Required && !t.Installed {
+			missingRequired++
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":               missingRequired == 0,
+		"missing_required": missingRequired,
+		"tools":            tools,
+	})
+}
+
+func (s *Server) toolCheck(name string, required bool, notes string) toolStatus {
+	status := toolStatus{Name: name, Required: required, Notes: notes}
+	if path, err := exec.LookPath(name); err == nil {
+		status.Installed = true
+		status.Path = path
+	}
+	return status
+}
+
 func (s *Server) recordLog(line string) {
 	s.logMu.Lock()
 	defer s.logMu.Unlock()
@@ -584,6 +631,9 @@ func (s *Server) startFlow() error {
 	if s.running {
 		return errors.New("flow already running")
 	}
+	if missing := s.missingRequiredToolsForRun(); len(missing) > 0 {
+		return fmt.Errorf("missing required tools for run: %s", strings.Join(missing, ", "))
+	}
 	s.running = true
 	s.status = "running"
 	s.resetSteps()
@@ -608,6 +658,22 @@ func (s *Server) startFlow() error {
 	}()
 
 	return nil
+}
+
+func (s *Server) missingRequiredToolsForRun() []string {
+	// Subdomain discovery pipeline only runs when wildcards are provided.
+	if len(readListLines(s.cfg.Lists.Wildcards)) == 0 {
+		return nil
+	}
+
+	required := []string{"amass", "assetfinder", "gau", "subfinder", "httpx"}
+	var missing []string
+	for _, name := range required {
+		if _, err := exec.LookPath(name); err != nil {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
 
 func (s *Server) listPath(name string) (string, error) {

@@ -105,14 +105,19 @@ type liveWebserverRecord struct {
 	ContentLength int
 }
 
+const (
+	defaultRetryAttempts = 2
+	defaultRetryBackoff  = 2 * time.Second
+	ctlRetryAttempts     = 3
+	ctlRetryBackoff      = 2 * time.Second
+)
+
 // New creates an orchestrator with the provided configuration.
 func New(cfg *config.Config, logger *log.Logger, logWriter io.Writer, stepUpdate func(id string, status StepStatus), configStore *configstore.Store) *App {
 	return &App{
-		cfg:    cfg,
-		logger: logger,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		cfg:         cfg,
+		logger:      logger,
+		httpClient:  &http.Client{},
 		logWriter:   logWriter,
 		stepUpdate:  stepUpdate,
 		configStore: configStore,
@@ -409,7 +414,9 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 	type toolRunner struct {
 		step       string
 		required   string
-		runForSeed func(seed string) ([]string, error)
+		attempts   int
+		backoff    time.Duration
+		runForSeed func(ctx context.Context, seed string) ([]string, error)
 	}
 
 	var amassFileMu sync.Mutex
@@ -417,7 +424,9 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		{
 			step:     StepAmass,
 			required: "amass",
-			runForSeed: func(seed string) ([]string, error) {
+			attempts: defaultRetryAttempts,
+			backoff:  defaultRetryBackoff,
+			runForSeed: func(ctx context.Context, seed string) ([]string, error) {
 				seedFile := sanitizeFilename(seed)
 				seedPrefix := filepath.Join(amassDir, seedFile)
 				seedJSON := seedPrefix + ".json"
@@ -449,18 +458,31 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		{
 			step:     StepSublist3r,
 			required: "sublist3r",
-			runForSeed: func(seed string) ([]string, error) {
-				stdout, err := a.runCommandCapture(ctx, "sublist3r", "-d", seed, "-o", "/dev/stdout")
+			attempts: defaultRetryAttempts,
+			backoff:  defaultRetryBackoff,
+			runForSeed: func(ctx context.Context, seed string) ([]string, error) {
+				// Sublist3r has unstable parsers for some engines (for example DNSdumpster/VirusTotal),
+				// so use a safer engine set and read results from file output.
+				outFile := filepath.Join(reconDir, fmt.Sprintf("sublist3r_%s.txt", sanitizeFilename(seed)))
+				_, err := a.runCommandCapture(
+					ctx,
+					"sublist3r",
+					"-d", seed,
+					"-e", "crtsh,netcraft,passivedns",
+					"-o", outFile,
+				)
 				if err != nil {
 					return nil, err
 				}
-				return parseDomainLines(stdout, seed), nil
+				return parseDomainLines(strings.Join(readSafeLines(outFile), "\n"), seed), nil
 			},
 		},
 		{
 			step:     StepAssetfinder,
 			required: "assetfinder",
-			runForSeed: func(seed string) ([]string, error) {
+			attempts: defaultRetryAttempts,
+			backoff:  defaultRetryBackoff,
+			runForSeed: func(ctx context.Context, seed string) ([]string, error) {
 				stdout, err := a.runCommandCapture(ctx, "assetfinder", "--subs-only", seed)
 				if err != nil {
 					return nil, err
@@ -471,7 +493,9 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		{
 			step:     StepGAU,
 			required: "gau",
-			runForSeed: func(seed string) ([]string, error) {
+			attempts: defaultRetryAttempts,
+			backoff:  defaultRetryBackoff,
+			runForSeed: func(ctx context.Context, seed string) ([]string, error) {
 				stdout, err := a.runCommandCapture(ctx, "gau", "--subs", seed)
 				if err != nil {
 					return nil, err
@@ -482,14 +506,18 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		{
 			step:     StepCTL,
 			required: "",
-			runForSeed: func(seed string) ([]string, error) {
+			attempts: ctlRetryAttempts,
+			backoff:  ctlRetryBackoff,
+			runForSeed: func(ctx context.Context, seed string) ([]string, error) {
 				return a.fetchCTLHosts(ctx, seed)
 			},
 		},
 		{
 			step:     StepSubfinder,
 			required: "subfinder",
-			runForSeed: func(seed string) ([]string, error) {
+			attempts: defaultRetryAttempts,
+			backoff:  defaultRetryBackoff,
+			runForSeed: func(ctx context.Context, seed string) ([]string, error) {
 				stdout, err := a.runCommandCapture(ctx, "subfinder", "-silent", "-d", seed)
 				if err != nil {
 					return nil, err
@@ -547,7 +575,9 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 				defer wg.Done()
 				start := time.Now()
 				a.logger.Printf("%s: starting seed=%s", r.step, seed)
-				hosts, err := r.runForSeed(seed)
+				hosts, err := a.runForSeedWithRetry(ctx, r.step, seed, r.attempts, r.backoff, func() ([]string, error) {
+					return r.runForSeed(ctx, seed)
+				})
 				if err != nil {
 					markFailed(r.step, fmt.Errorf("%s failed for %s: %w", r.step, seed, err))
 					a.logger.Printf("%s: error seed=%s: %v", r.step, seed, err)
@@ -883,7 +913,7 @@ func extractFFUFHitURLs(csvPath string) ([]string, error) {
 		if len(rec) <= urlIdx {
 			continue
 		}
-		u := strings.TrimSpace(rec[urlIdx])
+		u := normalizeFFUFHitURL(rec[urlIdx])
 		if u == "" {
 			continue
 		}
@@ -895,6 +925,35 @@ func extractFFUFHitURLs(csvPath string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func normalizeFFUFHitURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return ""
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return ""
+	}
+	if parsed.Host == "" {
+		return ""
+	}
+
+	// ffuf can emit URLs like https://host//docs when the wordlist entry starts with "/".
+	path := parsed.Path
+	for strings.Contains(path, "//") {
+		path = strings.ReplaceAll(path, "//", "/")
+	}
+	parsed.Path = path
+	if parsed.Path == "" {
+		parsed.Path = "/"
+	}
+	return parsed.String()
 }
 
 func dedupeAndSortFile(path string) error {
@@ -1371,7 +1430,7 @@ func (a *App) runCommandCapture(ctx context.Context, name string, args ...string
 	a.logger.Printf("exec: %s %s", name, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stdout strings.Builder
-	cmd.Stdout = &stdout
+	cmd.Stdout = io.MultiWriter(&stdout, a.commandOutput())
 	cmd.Stderr = a.commandOutput()
 	if err := cmd.Run(); err != nil {
 		a.logger.Printf("exec failed: %s (%s): %v", name, time.Since(start).Round(time.Second), err)
@@ -1379,6 +1438,49 @@ func (a *App) runCommandCapture(ctx context.Context, name string, args ...string
 	}
 	a.logger.Printf("exec done: %s (%s)", name, time.Since(start).Round(time.Second))
 	return stdout.String(), nil
+}
+
+func (a *App) runForSeedWithRetry(
+	ctx context.Context,
+	step string,
+	seed string,
+	attempts int,
+	backoff time.Duration,
+	fn func() ([]string, error),
+) ([]string, error) {
+	if attempts < 1 {
+		attempts = 1
+	}
+	if backoff <= 0 {
+		backoff = time.Second
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		hosts, err := fn()
+		if err == nil {
+			return hosts, nil
+		}
+		lastErr = err
+		if attempt >= attempts {
+			break
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		wait := backoff * time.Duration(1<<(attempt-1))
+		a.logger.Printf("%s: retry seed=%s attempt=%d/%d after error: %v", step, seed, attempt+1, attempts, err)
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+
+	return nil, lastErr
 }
 
 func parseDomainLines(output, seed string) []string {
