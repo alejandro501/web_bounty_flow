@@ -31,7 +31,7 @@ Legend:
 
 ### 1.2 Host and Surface Classification
 - [x] Derive API-like hosts into `data/apidomains` using naming heuristics.
-- [x] Probe live web servers via `httpx` and write `data/domains_http`.
+- [x] Probe live web servers via `httpx` and write live protocol URLs back to `data/domains`.
 - [x] Write normalized live web metadata CSV (`live-webservers.csv`).
 - [ ] Add non-API host segmentation (auth/admin/uploads/static/cdn) (Not Implemented).
 - [ ] Add technology-confidence scoring per host (Not Implemented).
@@ -82,20 +82,20 @@ Legend:
 - [x] Documentation endpoint fuzzing via `ffuf`.
 - [x] Directory/API path fuzzing via `ffuf` with merged wordlists.
 - [x] CeWL custom wordlist generation for project-specific fuzzing enrichment.
-- [ ] Request parameter fuzzing beyond path fuzz (`query`, `body`, `headers`, `cookies`) (Not Implemented).
+- [x] Request parameter fuzzing beyond path fuzz (`query`, `body`, `headers`, `cookies`).
 - [ ] Response-diff engine for anomaly clustering (status/length/keywords/timing) (Not Implemented).
 
 ### 4.2 Specific Injection Families
-- [ ] SQLi payload packs and detection heuristics (error/boolean/time-based) (Not Implemented).
-- [ ] NoSQL injection checks (Not Implemented).
-- [ ] XPath/LDAP injection checks (Not Implemented).
-- [ ] OS command injection checks (Not Implemented).
-- [ ] Path traversal checks (Not Implemented).
-- [ ] File inclusion checks (LFI/RFI) (Not Implemented).
-- [ ] XXE checks (Not Implemented).
-- [ ] SOAP/XML injection checks (Not Implemented).
-- [ ] SSRF/back-end request injection checks (Not Implemented).
-- [ ] SMTP/header injection checks (Not Implemented).
+- [x] SQLi payload packs and detection heuristics (error/boolean-based).
+- [x] NoSQL injection checks.
+- [x] XPath/LDAP injection checks.
+- [x] OS command injection checks.
+- [x] Path traversal checks.
+- [x] File inclusion checks (LFI/RFI).
+- [x] XXE checks.
+- [x] SOAP/XML injection checks.
+- [x] SSRF/back-end request injection checks.
+- [x] SMTP/header injection checks.
 
 ## 5) Chapter 11 - Application Logic Automation
 - [ ] Multi-step workflow state-machine runner (Not Implemented).
@@ -182,7 +182,7 @@ Legend:
 
 ### Segment B - Classification + Live Host Detection
 - [x] Build API-domain subset from discovered domains.
-- [x] Probe live hosts and write `domains_http`.
+- [x] Probe live hosts and write live protocol URLs to `domains`.
 - [x] Save `live-webservers.csv` artifact.
 
 ### Segment C - Fuzzing Bootstrap

@@ -37,8 +37,6 @@ const closeAmassEnum = document.getElementById("close-amass-enum");
 const amassSearchName = document.getElementById("amass-search-name");
 const amassSearchDomain = document.getElementById("amass-search-domain");
 const amassSearchIP = document.getElementById("amass-search-ip");
-const amassSearchSource = document.getElementById("amass-search-source");
-const amassFilterTag = document.getElementById("amass-filter-tag");
 const amassTableBody = document.getElementById("amass-table-body");
 const amassCount = document.getElementById("amass-count");
 const openLiveWebservers = document.getElementById("open-live-webservers");
@@ -51,6 +49,13 @@ const lwsSearchWebServer = document.getElementById("lws-search-webserver");
 const lwsSearchTech = document.getElementById("lws-search-tech");
 const lwsTableBody = document.getElementById("lws-table-body");
 const lwsCount = document.getElementById("lws-count");
+const manualDomainSelect = document.getElementById("manual-domain-select");
+const manualDomainStatusFilter = document.getElementById("manual-domain-status-filter");
+const manualDomainUrl = document.getElementById("manual-domain-url");
+const manualChecklistList = document.getElementById("manual-checklist-list");
+const manualChecklistProgress = document.getElementById("manual-checklist-progress");
+const hybridChecklistList = document.getElementById("hybrid-checklist-list");
+const hybridChecklistProgress = document.getElementById("hybrid-checklist-progress");
 const scopeCardNodes = new Map();
 
 let lastStatusText = "";
@@ -58,6 +63,7 @@ let lastStepsSignature = "";
 let lastLogsSignature = "";
 let lastScopeSignature = "";
 const lastListTextByType = {};
+let manualDomainOptions = [];
 
 const LIST_FILES = [
   { type: "wildcards", label: "Wildcards", uploadable: true },
@@ -67,6 +73,30 @@ const LIST_FILES = [
   { type: "ips", label: "IPs", uploadable: true },
   { type: "out_of_scope", label: "Out of scope", uploadable: true },
   { type: "live_webservers_csv", label: "Live Web Servers CSV", uploadable: false },
+  { type: "robots_urls", label: "Robots URLs", uploadable: false },
+  { type: "wayback_urls", label: "Wayback URLs", uploadable: false },
+  { type: "katana_urls", label: "Katana URLs", uploadable: false },
+  { type: "all_urls", label: "All URLs", uploadable: false },
+  { type: "params_candidates", label: "Param Candidates", uploadable: false },
+  { type: "param_fuzz_query_hits", label: "Param Fuzz Query Hits", uploadable: false },
+  { type: "param_fuzz_body_hits", label: "Param Fuzz Body Hits", uploadable: false },
+  { type: "param_fuzz_header_hits", label: "Param Fuzz Header Hits", uploadable: false },
+  { type: "param_fuzz_cookie_hits", label: "Param Fuzz Cookie Hits", uploadable: false },
+  { type: "param_fuzz_summary", label: "Param Fuzz Summary", uploadable: false },
+  { type: "injection_sqli_hits", label: "Injection SQLi Hits", uploadable: false },
+  { type: "injection_nosqli_hits", label: "Injection NoSQLi Hits", uploadable: false },
+  { type: "injection_xpath_hits", label: "Injection XPath Hits", uploadable: false },
+  { type: "injection_ldap_hits", label: "Injection LDAP Hits", uploadable: false },
+  { type: "injection_summary", label: "Injection Summary", uploadable: false },
+  { type: "server_input_os_command_hits", label: "Server Input OS Command Hits", uploadable: false },
+  { type: "server_input_path_traversal_hits", label: "Server Input Path Traversal Hits", uploadable: false },
+  { type: "server_input_file_inclusion_hits", label: "Server Input File Inclusion Hits", uploadable: false },
+  { type: "server_input_summary", label: "Server Input Summary", uploadable: false },
+  { type: "adv_injection_xxe_hits", label: "Advanced Injection XXE Hits", uploadable: false },
+  { type: "adv_injection_soap_hits", label: "Advanced Injection SOAP Hits", uploadable: false },
+  { type: "adv_injection_ssrf_hits", label: "Advanced Injection SSRF Hits", uploadable: false },
+  { type: "adv_injection_smtp_hits", label: "Advanced Injection SMTP Hits", uploadable: false },
+  { type: "adv_injection_summary", label: "Advanced Injection Summary", uploadable: false },
   { type: "fuzzing_doc_hits", label: "Fuzzing Doc Hits", uploadable: false },
   { type: "fuzzing_dir_hits", label: "Fuzzing Dir Hits", uploadable: false },
 ];
@@ -77,8 +107,6 @@ const FLOW_SEGMENTS = [
     items: [
       { label: "Load flow.yaml and initialize recon runtime.", stepId: "load-config", implemented: true },
       { label: "Validate scope readiness.", stepId: "validate-inputs", implemented: true },
-      { label: "Block run when required tools are missing.", implemented: true },
-      { label: "Retry policy with backoff for unstable sources.", implemented: true },
     ],
   },
   {
@@ -90,20 +118,20 @@ const FLOW_SEGMENTS = [
       { label: "Run gau in parallel with other passive tools.", stepId: "gau", implemented: true },
       { label: "Query certificate transparency logs in parallel.", stepId: "ctl", implemented: true },
       { label: "Run subfinder in parallel with other passive tools.", stepId: "subfinder", implemented: true },
+      { label: "Validate discovered hosts with dnsx before consolidation.", stepId: "dnsx-validate", implemented: true },
       { label: "Consolidate all discovered hosts and remove duplicates.", stepId: "consolidate", implemented: true },
-      { label: "Add dnsx validation stage before consolidation.", implemented: false },
-      { label: "Persist per-tool raw outputs in dedicated folders.", implemented: false },
+      { label: "Persist per-tool raw outputs in dedicated folders.", implemented: true },
     ],
   },
   {
     title: "2) Mapping - URL and Content Discovery (Chapter 4)",
     items: [
       { label: "Probe consolidated hosts with httpx for live web servers.", stepId: "httpx", implemented: true },
-      { label: "Run robots.txt and sitemap discovery in main flow.", implemented: false },
-      { label: "Integrate waybackurls into active flow.", implemented: false },
-      { label: "Integrate katana crawling into active flow.", implemented: false },
-      { label: "Consolidate URL corpus from all sources.", implemented: false },
-      { label: "Auto-generate dork links for org/wildcard/domain/api-domain seeds.", implemented: false },
+      { label: "Run robots.txt and sitemap discovery in main flow.", stepId: "robots-sitemaps", implemented: true },
+      { label: "Integrate waybackurls into active flow.", stepId: "waybackurls", implemented: true },
+      { label: "Integrate katana crawling into active flow.", stepId: "katana", implemented: true },
+      { label: "Consolidate URL corpus from all sources.", stepId: "url-corpus", implemented: true },
+      { label: "Auto-generate dork links for org/wildcard/domain/api-domain seeds.", stepId: "dork-links", implemented: true },
     ],
   },
   {
@@ -112,21 +140,17 @@ const FLOW_SEGMENTS = [
       { label: "Generate custom CeWL wordlist from live web servers.", stepId: "cewl", implemented: true },
       { label: "Run ffuf documentation endpoint fuzzing.", stepId: "fuzz-docs", implemented: true },
       { label: "Run ffuf directory/API path fuzzing.", stepId: "fuzz-dirs", implemented: true },
-      { label: "Fuzz query/body/header/cookie parameters.", implemented: false },
-      { label: "Automate SQLi/NoSQL/XPath/LDAP checks.", implemented: false },
-      { label: "Automate OS command/path traversal/file inclusion checks.", implemented: false },
-      { label: "Automate XXE/SOAP/SSRF/SMTP injection checks.", implemented: false },
+      { label: "Fuzz query/body/header/cookie parameters.", stepId: "param-fuzz", implemented: true },
+      { label: "Automate SQLi/NoSQL/XPath/LDAP checks.", stepId: "injection-checks", implemented: true },
+      { label: "Automate OS command/path traversal/file inclusion checks.", stepId: "server-input-checks", implemented: true },
+      { label: "Automate XXE/SOAP/SSRF/SMTP injection checks.", stepId: "adv-injection-checks", implemented: true },
     ],
   },
   {
     title: "4) Authentication, Session, Access Control (Chapters 6-8)",
     items: [
-      { label: "Automate username enumeration and password policy checks.", implemented: false },
-      { label: "Automate recovery/remember-me weakness testing.", implemented: false },
-      { label: "Automate session token entropy and cookie policy analysis.", implemented: false },
-      { label: "Automate session fixation and logout invalidation checks.", implemented: false },
-      { label: "Automate role-matrix authorization replay (BOLA/IDOR).", implemented: false },
-      { label: "Automate method-based access control mismatch checks.", implemented: false },
+      { label: "Role-matrix authorization replay (BOLA/IDOR) tracked in manual checklist.", implemented: true },
+      { label: "Method-based access control mismatch checks tracked in manual checklist.", implemented: true },
     ],
   },
   {
@@ -155,6 +179,52 @@ const FLOW_SEGMENTS = [
       { label: "Add run manifest, checkpointing, and export bundle.", implemented: false },
       { label: "Build chapter-aligned stage gates and completion scorecard.", implemented: false },
     ],
+  },
+];
+
+const MANUAL_DOMAIN_CHECKLIST_ITEMS = [
+  {
+    id: "username-policy",
+    label: "Username enumeration and password policy checks",
+  },
+  {
+    id: "recovery-rememberme",
+    label: "Recovery and remember-me weakness testing",
+  },
+  {
+    id: "session-entropy-cookie-policy",
+    label: "Session token entropy and cookie policy analysis",
+  },
+  {
+    id: "session-fixation-logout-invalidation",
+    label: "Session fixation and logout invalidation checks",
+  },
+  {
+    id: "authz-role-matrix-bola-idor",
+    label: "Role-matrix authorization replay (BOLA/IDOR)",
+  },
+  {
+    id: "authz-method-mismatch",
+    label: "Method-based access control mismatch checks",
+  },
+];
+
+const HYBRID_MANUAL_CHECKLIST_ITEMS = [
+  {
+    id: "hybrid-injection-sqli-nosqli-xpath-ldap",
+    label: "SQLi/NoSQL/XPath/LDAP: validate findings manually and confirm impact",
+  },
+  {
+    id: "hybrid-injection-os-path-file",
+    label: "OS command/path traversal/file inclusion: manual exploitability validation",
+  },
+  {
+    id: "hybrid-injection-xxe-soap-ssrf-smtp",
+    label: "XXE/SOAP/SSRF/SMTP: manual triage of automated findings",
+  },
+  {
+    id: "hybrid-xss",
+    label: "XSS (reflected/stored/DOM): manual verification and proof-of-impact",
   },
 ];
 
@@ -1176,6 +1246,270 @@ function initializeManualRecon() {
   }
 }
 
+function manualDomainChecklistStorageKey() {
+  return "bflow_manual_domain_checklist_v2";
+}
+
+function loadManualDomainChecklistState() {
+  try {
+    return JSON.parse(localStorage.getItem(manualDomainChecklistStorageKey()) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveManualDomainChecklistState(state) {
+  localStorage.setItem(manualDomainChecklistStorageKey(), JSON.stringify(state));
+}
+
+function hybridChecklistStorageKey() {
+  return "bflow_hybrid_manual_checklist_v1";
+}
+
+function loadHybridChecklistState() {
+  try {
+    return JSON.parse(localStorage.getItem(hybridChecklistStorageKey()) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveHybridChecklistState(state) {
+  localStorage.setItem(hybridChecklistStorageKey(), JSON.stringify(state));
+}
+
+function normalizeDomainEntry(entry) {
+  const value = String(entry || "").trim();
+  if (!value) {
+    return "";
+  }
+  if (/^https?:\/\//i.test(value)) {
+    return value;
+  }
+  return `https://${value}`;
+}
+
+function domainFromURL(urlText) {
+  const normalized = normalizeDomainEntry(urlText);
+  try {
+    return new URL(normalized).host.toLowerCase();
+  } catch {
+    return normalized.replace(/^https?:\/\//i, "").replace(/\/+$/, "").toLowerCase();
+  }
+}
+
+function selectedManualDomain() {
+  const value = manualDomainSelect?.value || "";
+  return value.trim();
+}
+
+function selectedManualStatusFilter() {
+  const value = manualDomainStatusFilter?.value || "";
+  return value.trim();
+}
+
+function updateManualStatusFilterOptions(rows) {
+  if (!manualDomainStatusFilter) {
+    return;
+  }
+  const current = manualDomainStatusFilter.value;
+  const statuses = [...new Set((rows || []).map((row) => String(row.status_code || "").trim()).filter(Boolean))]
+    .sort((a, b) => Number(a) - Number(b));
+  manualDomainStatusFilter.innerHTML = [
+    '<option value="">All status codes</option>',
+    ...statuses.map((status) => `<option value="${escapeHTML(status)}">${escapeHTML(status)}</option>`),
+  ].join("");
+  if (current && statuses.includes(current)) {
+    manualDomainStatusFilter.value = current;
+  }
+}
+
+function renderManualChecklist() {
+  if (!manualChecklistList || !manualChecklistProgress) {
+    return;
+  }
+
+  const selected = selectedManualDomain();
+  if (!selected) {
+    manualChecklistList.innerHTML = '<p class="muted">Select a domain to track manual testing.</p>';
+    manualChecklistProgress.textContent = "0 / 0 done";
+    if (manualDomainUrl) {
+      manualDomainUrl.textContent = "No domain selected";
+      manualDomainUrl.removeAttribute("href");
+    }
+    return;
+  }
+
+  const url = normalizeDomainEntry(selected);
+  const host = domainFromURL(url);
+  if (manualDomainUrl) {
+    manualDomainUrl.textContent = url;
+    manualDomainUrl.href = url;
+  }
+
+  const state = loadManualDomainChecklistState();
+  const domainState = state[host] || {};
+  let done = 0;
+
+  manualChecklistList.innerHTML = MANUAL_DOMAIN_CHECKLIST_ITEMS.map((item) => {
+    const checked = Boolean(domainState[item.id]);
+    if (checked) {
+      done += 1;
+    }
+    return `
+      <label class="manual-checklist-item">
+        <input type="checkbox" data-manual-item-id="${escapeHTML(item.id)}" ${checked ? "checked" : ""} />
+        <span>${escapeHTML(item.label)}</span>
+      </label>
+    `;
+  }).join("");
+
+  manualChecklistProgress.textContent = `${done} / ${MANUAL_DOMAIN_CHECKLIST_ITEMS.length} done`;
+}
+
+function renderHybridChecklist() {
+  if (!hybridChecklistList || !hybridChecklistProgress) {
+    return;
+  }
+
+  const selected = selectedManualDomain();
+  if (!selected) {
+    hybridChecklistList.innerHTML = '<p class="muted">Select a domain to track hybrid checks.</p>';
+    hybridChecklistProgress.textContent = "0 / 0 done";
+    return;
+  }
+
+  const host = domainFromURL(normalizeDomainEntry(selected));
+  const state = loadHybridChecklistState();
+  const domainState = state[host] || {};
+  let done = 0;
+
+  hybridChecklistList.innerHTML = HYBRID_MANUAL_CHECKLIST_ITEMS.map((item) => {
+    const checked = Boolean(domainState[item.id]);
+    if (checked) {
+      done += 1;
+    }
+    return `
+      <label class="manual-checklist-item">
+        <input type="checkbox" data-hybrid-item-id="${escapeHTML(item.id)}" ${checked ? "checked" : ""} />
+        <span>${escapeHTML(item.label)}</span>
+      </label>
+    `;
+  }).join("");
+
+  hybridChecklistProgress.textContent = `${done} / ${HYBRID_MANUAL_CHECKLIST_ITEMS.length} done`;
+}
+
+function populateManualDomainSelect(options) {
+  if (!manualDomainSelect) {
+    return;
+  }
+  const current = manualDomainSelect.value;
+  const normalized = [...new Set((options || []).map((entry) => normalizeDomainEntry(entry)).filter(Boolean))];
+  normalized.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  manualDomainOptions = normalized;
+  manualDomainSelect.innerHTML = [
+    '<option value="">Select domain...</option>',
+    ...normalized.map((entry) => `<option value="${escapeHTML(entry)}">${escapeHTML(entry)}</option>`),
+  ].join("");
+  if (current && normalized.includes(current)) {
+    manualDomainSelect.value = current;
+  } else if (!manualDomainSelect.value && normalized.length > 0) {
+    manualDomainSelect.value = normalized[0];
+  }
+  renderManualChecklist();
+  renderHybridChecklist();
+}
+
+async function refreshManualDomainOptions() {
+  const [liveData, domainsData] = await Promise.all([
+    fetchLiveWebservers().catch(() => ({ present: false, rows: [] })),
+    fetchListMeta("domains").catch(() => ({ present: false, entries: [] })),
+  ]);
+  const liveRows = Array.isArray(liveData.rows) ? liveData.rows : [];
+  updateManualStatusFilterOptions(liveRows);
+  const selectedStatus = selectedManualStatusFilter();
+  const statusFilteredRows = selectedStatus
+    ? liveRows.filter((row) => String(row.status_code || "").trim() === selectedStatus)
+    : liveRows;
+  const options = [];
+  if (statusFilteredRows.length > 0) {
+    options.push(...statusFilteredRows.map((row) => row.url).filter(Boolean));
+  }
+  if (Array.isArray(domainsData.entries) && domainsData.entries.length > 0) {
+    options.push(...domainsData.entries.map((entry) => normalizeDomainEntry(entry)));
+  }
+  const signature = [...new Set(options.map((entry) => normalizeDomainEntry(entry)).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+    .join("|");
+  const lastSignature = manualDomainOptions.join("|");
+  if (signature !== lastSignature) {
+    populateManualDomainSelect(options);
+  } else {
+    renderManualChecklist();
+    renderHybridChecklist();
+  }
+}
+
+function initializeManualDomainChecklist() {
+  if (!manualDomainSelect || !manualChecklistList) {
+    return;
+  }
+  manualDomainSelect.addEventListener("change", () => {
+    renderManualChecklist();
+    renderHybridChecklist();
+  });
+  manualDomainStatusFilter?.addEventListener("change", () => {
+    void refreshManualDomainOptions();
+  });
+
+  manualChecklistList.addEventListener("change", (event) => {
+    const input = event.target.closest("input[type='checkbox'][data-manual-item-id]");
+    if (!input) {
+      return;
+    }
+    const selected = selectedManualDomain();
+    if (!selected) {
+      return;
+    }
+    const host = domainFromURL(selected);
+    const itemID = input.dataset.manualItemId;
+    if (!itemID) {
+      return;
+    }
+    const state = loadManualDomainChecklistState();
+    state[host] = state[host] || {};
+    state[host][itemID] = Boolean(input.checked);
+    saveManualDomainChecklistState(state);
+    renderManualChecklist();
+  });
+
+  hybridChecklistList?.addEventListener("change", (event) => {
+    const input = event.target.closest("input[type='checkbox'][data-hybrid-item-id]");
+    if (!input) {
+      return;
+    }
+    const selected = selectedManualDomain();
+    if (!selected) {
+      return;
+    }
+    const host = domainFromURL(normalizeDomainEntry(selected));
+    const itemID = input.dataset.hybridItemId || "";
+    if (!itemID) {
+      return;
+    }
+    const state = loadHybridChecklistState();
+    if (!state[host]) {
+      state[host] = {};
+    }
+    state[host][itemID] = Boolean(input.checked);
+    saveHybridChecklistState(state);
+    renderHybridChecklist();
+  });
+
+  void refreshManualDomainOptions();
+}
+
 runButton?.addEventListener("click", async () => {
   flowStatus.textContent = "requesting run...";
   try {
@@ -1428,15 +1762,11 @@ function renderAmassTable() {
   const nameNeedle = normalizeFilterValue(amassSearchName?.value);
   const domainNeedle = normalizeFilterValue(amassSearchDomain?.value);
   const ipNeedle = normalizeFilterValue(amassSearchIP?.value);
-  const sourceNeedle = normalizeFilterValue(amassSearchSource?.value);
-  const tagNeedle = normalizeFilterValue(amassFilterTag?.value);
 
   const filtered = amassRows.filter((row) => (
     (!nameNeedle || normalizeFilterValue(row.name).includes(nameNeedle)) &&
     (!domainNeedle || normalizeFilterValue(row.domain).includes(domainNeedle)) &&
-    (!ipNeedle || normalizeFilterValue(row.ip).includes(ipNeedle)) &&
-    (!sourceNeedle || normalizeFilterValue(row.source).includes(sourceNeedle)) &&
-    (!tagNeedle || normalizeFilterValue(row.tag) === tagNeedle)
+    (!ipNeedle || normalizeFilterValue(row.ip).includes(ipNeedle))
   ));
 
   filtered.sort((a, b) => {
@@ -1456,8 +1786,6 @@ function renderAmassTable() {
       <td>${escapeHTML(row.domain || "")}</td>
       <td>${escapeHTML(row.ip || "")}</td>
       <td>${escapeHTML(String(row.asn || ""))}</td>
-      <td>${escapeHTML(row.source || "")}</td>
-      <td>${escapeHTML(row.tag || "")}</td>
     </tr>
   `).join("");
 }
@@ -1497,7 +1825,7 @@ function renderLiveWebserversTable() {
   lwsCount.textContent = `Showing ${filtered.length} of ${liveWebserverRows.length} rows`;
   lwsTableBody.innerHTML = filtered.map((row) => `
       <tr class="${liveStatusRowClass(row.status_code)}">
-        <td><code>${escapeHTML(row.url || "")}</code></td>
+        <td><a href="${escapeHTML(row.url || "")}" target="_blank" rel="noopener noreferrer"><code>${escapeHTML(row.url || "")}</code></a></td>
         <td>${escapeHTML(String(row.status_code || ""))}</td>
         <td>${escapeHTML(row.title || "")}</td>
         <td>${escapeHTML(row.web_server || "")}</td>
@@ -1513,15 +1841,6 @@ async function refreshAmassEnum(options = {}) {
     updateAmassEnumButton(Boolean(data.present), Number(data.count || 0));
     if (!options.renderOnlyIfOpen || (amassEnumModal && !amassEnumModal.hidden)) {
       amassRows = Array.isArray(data.rows) ? data.rows : [];
-      if (amassFilterTag) {
-        const tags = [...new Set(amassRows.map((r) => normalizeFilterValue(r.tag)).filter((t) => t))];
-        tags.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-        const current = normalizeFilterValue(amassFilterTag.value);
-        amassFilterTag.innerHTML = `<option value="">All tags</option>${tags.map((t) => `<option value="${escapeHTML(t)}">${escapeHTML(t)}</option>`).join("")}`;
-        if (tags.includes(current)) {
-          amassFilterTag.value = current;
-        }
-      }
       renderAmassTable();
     }
   } catch {
@@ -1613,7 +1932,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-[amassSearchName, amassSearchDomain, amassSearchIP, amassSearchSource, amassFilterTag].forEach((el) => {
+[amassSearchName, amassSearchDomain, amassSearchIP].forEach((el) => {
   el?.addEventListener("input", renderAmassTable);
   el?.addEventListener("change", renderAmassTable);
 });
@@ -1982,6 +2301,10 @@ refreshScopeCards();
 setInterval(() => {
   refreshScopeCards();
 }, 4000);
+initializeManualDomainChecklist();
+setInterval(() => {
+  refreshManualDomainOptions();
+}, 10000);
 refreshAmassEnum({ renderOnlyIfOpen: false });
 setInterval(() => {
   refreshAmassEnum({ renderOnlyIfOpen: true });

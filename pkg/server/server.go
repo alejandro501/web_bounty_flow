@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +40,7 @@ type Server struct {
 	stepMu      sync.Mutex
 	steps       []app.Step
 	stepState   map[string]app.StepStatus
+	stepsPath   string
 	configStore *configstore.Store
 }
 
@@ -48,6 +51,7 @@ func New(cfg *config.Config) *Server {
 		mux:    http.NewServeMux(),
 		status: "idle",
 	}
+	s.stepsPath = filepath.Join(cfg.Paths.LogsDir, "steps_state.json")
 	s.initSteps()
 	s.logger = log.New(io.MultiWriter(os.Stdout, s), "[bflow-server] ", log.LstdFlags)
 	s.initConfigStore()
@@ -306,6 +310,10 @@ func (s *Server) statusHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) stepsHandler(w http.ResponseWriter, r *http.Request) {
+	// Re-evaluate artifact-based completion continuously so UI reflects
+	// existing outputs even when they were produced before current process start.
+	s.inferCompletedStepsFromArtifacts()
+
 	s.stepMu.Lock()
 	steps := make([]stepResponse, 0, len(s.steps))
 	for _, step := range s.steps {
@@ -602,6 +610,8 @@ func (s *Server) initSteps() {
 	for _, step := range s.steps {
 		s.stepState[step.ID] = app.StepPending
 	}
+	s.loadPersistedStepState()
+	s.inferCompletedStepsFromArtifacts()
 }
 
 func (s *Server) resetSteps() {
@@ -610,6 +620,7 @@ func (s *Server) resetSteps() {
 		s.stepState[step.ID] = app.StepPending
 	}
 	s.stepMu.Unlock()
+	s.persistStepState()
 }
 
 func (s *Server) updateStep(id string, status app.StepStatus) {
@@ -618,6 +629,130 @@ func (s *Server) updateStep(id string, status app.StepStatus) {
 		s.stepState[id] = status
 	}
 	s.stepMu.Unlock()
+	s.persistStepState()
+}
+
+func (s *Server) loadPersistedStepState() {
+	if s.stepsPath == "" {
+		return
+	}
+	raw, err := os.ReadFile(s.stepsPath)
+	if err != nil {
+		return
+	}
+	var snapshot map[string]app.StepStatus
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		return
+	}
+	s.stepMu.Lock()
+	for _, step := range s.steps {
+		if st, ok := snapshot[step.ID]; ok {
+			if st == app.StepRunning {
+				st = app.StepPending
+			}
+			s.stepState[step.ID] = st
+		}
+	}
+	s.stepMu.Unlock()
+}
+
+func (s *Server) persistStepState() {
+	if s.stepsPath == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(s.stepsPath), 0o755); err != nil {
+		return
+	}
+	s.stepMu.Lock()
+	snapshot := make(map[string]app.StepStatus, len(s.stepState))
+	for k, v := range s.stepState {
+		snapshot[k] = v
+	}
+	s.stepMu.Unlock()
+	raw, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(s.stepsPath, raw, 0o644)
+}
+
+func (s *Server) inferCompletedStepsFromArtifacts() {
+	baseDir := filepath.Dir(s.cfg.Lists.Domains)
+	reconDir := filepath.Join(baseDir, "recon")
+	amassDir := filepath.Join(reconDir, "amass")
+	rawDir := filepath.Join(reconDir, "raw")
+
+	hasAnyScope := len(readListLines(s.cfg.Lists.Organizations)) > 0 ||
+		len(readListLines(s.cfg.Lists.Wildcards)) > 0 ||
+		len(readListLines(s.cfg.Lists.Domains)) > 0 ||
+		len(readListLines(s.cfg.Lists.APIDomains)) > 0 ||
+		len(readListLines(s.cfg.Lists.IPs)) > 0
+
+	doneIfPending := func(id string, cond bool) {
+		if !cond {
+			return
+		}
+		s.stepMu.Lock()
+		if s.stepState[id] == app.StepPending {
+			s.stepState[id] = app.StepDone
+		}
+		s.stepMu.Unlock()
+	}
+
+	doneIfPending("load-config", true)
+	doneIfPending("validate-inputs", hasAnyScope)
+	doneIfPending("amass", dirHasNonEmptyExt(amassDir, ".txt"))
+	doneIfPending("sublist3r",
+		dirHasNonEmptyExt(filepath.Join(rawDir, "sublist3r"), ".txt") ||
+			globHasNonEmpty(filepath.Join(reconDir, "sublist3r_*.txt")),
+	)
+	doneIfPending("assetfinder",
+		dirHasNonEmptyExt(filepath.Join(rawDir, "assetfinder"), ".txt") ||
+			globHasNonEmpty(filepath.Join(reconDir, "assetfinder_*.txt")),
+	)
+	doneIfPending("gau",
+		dirHasNonEmptyExt(filepath.Join(rawDir, "gau"), ".txt") ||
+			globHasNonEmpty(filepath.Join(reconDir, "gau_*.txt")),
+	)
+	doneIfPending("ctl",
+		dirHasNonEmptyExt(filepath.Join(rawDir, "ctl"), ".json") ||
+			globHasNonEmpty(filepath.Join(reconDir, "ctl_*.json")),
+	)
+	doneIfPending("subfinder",
+		dirHasNonEmptyExt(filepath.Join(rawDir, "subfinder"), ".txt") ||
+			globHasNonEmpty(filepath.Join(reconDir, "subfinder_*.txt")),
+	)
+	doneIfPending("dnsx-validate",
+		fileHasNonEmpty(filepath.Join(rawDir, "dnsx-validate", "validated_hosts.txt")) ||
+			fileHasNonEmpty(filepath.Join(reconDir, "dnsx_validated_hosts.txt")),
+	)
+	doneIfPending("consolidate", fileHasNonEmpty(s.cfg.Lists.Domains))
+	doneIfPending("httpx", fileHasNonEmpty(filepath.Join(baseDir, "live-webservers.csv")))
+	doneIfPending("robots-sitemaps", fileHasNonEmpty(filepath.Join(s.cfg.Paths.RobotsDir, "_hits.txt")) || fileHasNonEmpty(s.cfg.Paths.SitemapsFile))
+	doneIfPending("waybackurls",
+		fileExists(filepath.Join(reconDir, "waybackurls_urls.txt")) ||
+			fileExists(filepath.Join(reconDir, "urls_waybackurls.txt")),
+	)
+	doneIfPending("katana",
+		fileExists(filepath.Join(reconDir, "katana_urls.txt")) ||
+			fileExists(filepath.Join(reconDir, "urls_katana.txt")),
+	)
+	doneIfPending("url-corpus",
+		fileHasNonEmpty(filepath.Join(reconDir, "all_urls.txt")) ||
+			fileHasNonEmpty(filepath.Join(reconDir, "urls_all.txt")),
+	)
+	doneIfPending("param-fuzz", fileExists(filepath.Join(baseDir, "fuzzing", "params", "summary.csv")))
+	doneIfPending("injection-checks", fileExists(filepath.Join(baseDir, "fuzzing", "injection", "summary.csv")))
+	doneIfPending("server-input-checks", fileExists(filepath.Join(baseDir, "fuzzing", "server-input", "summary.csv")))
+	doneIfPending("adv-injection-checks", fileExists(filepath.Join(baseDir, "fuzzing", "adv-injection", "summary.csv")))
+	doneIfPending("dork-links", hasDorkLinkFiles(s.cfg.Paths.DorkingDir))
+	doneIfPending("cewl",
+		fileHasNonEmpty(filepath.Join(reconDir, "cewl_custom_wordlist.txt")) ||
+			fileHasNonEmpty(filepath.Join(baseDir, "cewl_custom_wordlist.txt")),
+	)
+	doneIfPending("fuzz-docs", fileExists(filepath.Join(baseDir, "fuzzing", "documentation", "doc_hits.txt")))
+	doneIfPending("fuzz-dirs", fileExists(filepath.Join(baseDir, "fuzzing", "ffuf", "dir_hits.txt")))
+	s.persistStepState()
 }
 
 func (s *Server) initConfigStore() {
@@ -704,6 +839,54 @@ func (s *Server) listPath(name string) (string, error) {
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "documentation", "doc_hits.txt"), nil
 	case "fuzzing_dir_hits":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "ffuf", "dir_hits.txt"), nil
+	case "robots_urls":
+		return filepath.Join(s.cfg.Paths.RobotsDir, "robots_urls.txt"), nil
+	case "wayback_urls":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "recon", "waybackurls_urls.txt"), nil
+	case "katana_urls":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "recon", "katana_urls.txt"), nil
+	case "all_urls":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "recon", "all_urls.txt"), nil
+	case "params_candidates":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "recon", "params_candidates.txt"), nil
+	case "param_fuzz_query_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "params", "query_hits.jsonl"), nil
+	case "param_fuzz_body_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "params", "body_hits.jsonl"), nil
+	case "param_fuzz_header_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "params", "header_hits.jsonl"), nil
+	case "param_fuzz_cookie_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "params", "cookie_hits.jsonl"), nil
+	case "param_fuzz_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "params", "summary.csv"), nil
+	case "injection_sqli_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "injection", "sqli_hits.jsonl"), nil
+	case "injection_nosqli_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "injection", "nosqli_hits.jsonl"), nil
+	case "injection_xpath_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "injection", "xpath_hits.jsonl"), nil
+	case "injection_ldap_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "injection", "ldap_hits.jsonl"), nil
+	case "injection_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "injection", "summary.csv"), nil
+	case "server_input_os_command_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "server-input", "os_command_hits.jsonl"), nil
+	case "server_input_path_traversal_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "server-input", "path_traversal_hits.jsonl"), nil
+	case "server_input_file_inclusion_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "server-input", "file_inclusion_hits.jsonl"), nil
+	case "server_input_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "server-input", "summary.csv"), nil
+	case "adv_injection_xxe_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "adv-injection", "xxe_hits.jsonl"), nil
+	case "adv_injection_soap_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "adv-injection", "soap_hits.jsonl"), nil
+	case "adv_injection_ssrf_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "adv-injection", "ssrf_hits.jsonl"), nil
+	case "adv_injection_smtp_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "adv-injection", "smtp_hits.jsonl"), nil
+	case "adv_injection_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "adv-injection", "summary.csv"), nil
 	default:
 		return "", fmt.Errorf("unsupported list_type %q", name)
 	}
@@ -877,6 +1060,7 @@ func readAmassEnumFromSeedText(dir string) ([]amassEnumRow, error) {
 	if err != nil {
 		return nil, err
 	}
+	hostIPs := readDNSXHostIPs(filepath.Join(filepath.Dir(dir), "raw", "dnsx-validate", "results.txt"))
 
 	var rows []amassEnumRow
 	seen := make(map[string]struct{})
@@ -898,20 +1082,161 @@ func readAmassEnumFromSeedText(dir string) ([]amassEnumRow, error) {
 			if host == "" {
 				continue
 			}
-			key := strings.ToLower(host) + "|" + strings.ToLower(seed)
-			if _, ok := seen[key]; ok {
+			ips := hostIPs[strings.ToLower(host)]
+			if len(ips) == 0 {
+				key := strings.ToLower(host) + "|" + strings.ToLower(seed) + "|"
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				rows = append(rows, amassEnumRow{
+					Name:   host,
+					Domain: seed,
+					Source: "amass",
+				})
 				continue
 			}
-			seen[key] = struct{}{}
-			rows = append(rows, amassEnumRow{
-				Name:   host,
-				Domain: seed,
-				Source: "amass",
-			})
+			for _, ip := range ips {
+				key := strings.ToLower(host) + "|" + strings.ToLower(seed) + "|" + ip
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				rows = append(rows, amassEnumRow{
+					Name:   host,
+					Domain: seed,
+					IP:     ip,
+					Source: "amass",
+				})
+			}
 		}
 	}
 
 	return rows, nil
+}
+
+func readDNSXHostIPs(path string) map[string][]string {
+	out := make(map[string][]string)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return out
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		host := strings.ToLower(strings.TrimSpace(fields[0]))
+		if host == "" {
+			continue
+		}
+		seenIPs := make(map[string]struct{})
+		for _, token := range fields[1:] {
+			clean := strings.Trim(token, "[],;()")
+			if ip := net.ParseIP(clean); ip != nil {
+				seenIPs[ip.String()] = struct{}{}
+			}
+		}
+		for ip := range seenIPs {
+			out[host] = append(out[host], ip)
+		}
+		sort.Strings(out[host])
+	}
+	return out
+}
+
+func fileHasNonEmpty(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return info.Size() > 0
+}
+
+func dirHasNonEmptyExt(dir string, ext string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	wantExt := strings.ToLower(strings.TrimSpace(ext))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if wantExt != "" && !strings.HasSuffix(strings.ToLower(entry.Name()), wantExt) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if info.Size() > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func globHasNonEmpty(pattern string) bool {
+	if strings.TrimSpace(pattern) == "" {
+		return false
+	}
+	paths, err := filepath.Glob(pattern)
+	if err != nil {
+		return false
+	}
+	for _, path := range paths {
+		if fileHasNonEmpty(path) {
+			return true
+		}
+	}
+	return false
+}
+
+func fileExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func hasDorkLinkFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subDir := filepath.Join(dir, entry.Name())
+			sub, subErr := os.ReadDir(subDir)
+			if subErr != nil {
+				continue
+			}
+			for _, f := range sub {
+				if f.IsDir() {
+					continue
+				}
+				name := strings.ToLower(strings.TrimSpace(f.Name()))
+				if strings.Contains(name, "dork") && strings.HasSuffix(name, ".txt") {
+					return true
+				}
+			}
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(entry.Name()))
+		if strings.Contains(name, "dork") && strings.HasSuffix(name, ".txt") {
+			return true
+		}
+	}
+	return false
 }
 
 func asRawString(value any) string {

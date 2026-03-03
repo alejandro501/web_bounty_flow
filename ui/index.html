@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bounty Flow UI</title>
-    <link rel="stylesheet" href="styles.css?v=20260302-1" />
+    <link rel="stylesheet" href="styles.css?v=20260303-1" />
   </head>
   <body data-backend-url="http://localhost:5050" data-active-view="flow">
     <main class="layout">
@@ -24,15 +24,57 @@
         <p id="scope-cards-status" class="muted">Checking files...</p>
       </section>
 
-        <section class="panel panel-flow">
+      <section class="panel panel-flow">
         <h2>Flow control</h2>
-        <button id="run-flow">Run recon (subdomain + URL discovery)</button>
-        <button id="open-amass-enum" type="button" disabled>Amass Enum</button>
-        <button id="open-live-webservers" type="button" disabled>Live Web Servers</button>
+        <div class="flow-actions">
+          <button id="run-flow">Run recon (subdomain + URL discovery)</button>
+          <button id="open-amass-enum" type="button" disabled>Amass Enum</button>
+          <button id="open-live-webservers" type="button" disabled>Live Web Servers</button>
+        </div>
         <p id="flow-status" class="muted">idle</p>
         <div class="flow-steps">
           <p class="muted">Flow order</p>
           <ul id="flow-steps-list"></ul>
+        </div>
+      </section>
+
+        <section class="panel panel-manual-domain">
+        <h2>Manual Testing Tracker</h2>
+        <div class="manual-domain-layout">
+          <section class="manual-domain-left">
+            <label>
+              Target domain
+              <select id="manual-domain-select">
+                <option value="">Select domain...</option>
+              </select>
+            </label>
+            <label>
+              Status code filter
+              <select id="manual-domain-status-filter">
+                <option value="">All status codes</option>
+              </select>
+            </label>
+            <p class="muted">Open selected target:</p>
+            <a id="manual-domain-url" class="manual-domain-url" href="#" target="_blank" rel="noopener noreferrer">No domain selected</a>
+          </section>
+          <section class="manual-domain-right">
+            <div class="manual-checklist-stack">
+              <div class="manual-checklist-block">
+                <div class="manual-checklist-header">
+                  <h3>Auth &amp; Session (Manual)</h3>
+                  <span id="manual-checklist-progress" class="muted">0 / 0 done</span>
+                </div>
+                <div id="manual-checklist-list" class="manual-checklist-list"></div>
+              </div>
+              <div class="manual-checklist-block">
+                <div class="manual-checklist-header">
+                  <h3>Manual + automated</h3>
+                  <span id="hybrid-checklist-progress" class="muted">0 / 0 done</span>
+                </div>
+                <div id="hybrid-checklist-list" class="manual-checklist-list"></div>
+              </div>
+            </div>
+          </section>
         </div>
       </section>
 
@@ -48,6 +90,30 @@
             <option value="ips">IPs</option>
             <option value="out_of_scope">Out of scope</option>
             <option value="live_webservers_csv">Live Web Servers CSV</option>
+            <option value="robots_urls">Robots URLs</option>
+            <option value="wayback_urls">Wayback URLs</option>
+            <option value="katana_urls">Katana URLs</option>
+            <option value="all_urls">All URLs</option>
+            <option value="params_candidates">Param Candidates</option>
+            <option value="param_fuzz_query_hits">Param Fuzz Query Hits</option>
+            <option value="param_fuzz_body_hits">Param Fuzz Body Hits</option>
+            <option value="param_fuzz_header_hits">Param Fuzz Header Hits</option>
+            <option value="param_fuzz_cookie_hits">Param Fuzz Cookie Hits</option>
+            <option value="param_fuzz_summary">Param Fuzz Summary</option>
+            <option value="injection_sqli_hits">Injection SQLi Hits</option>
+            <option value="injection_nosqli_hits">Injection NoSQLi Hits</option>
+            <option value="injection_xpath_hits">Injection XPath Hits</option>
+            <option value="injection_ldap_hits">Injection LDAP Hits</option>
+            <option value="injection_summary">Injection Summary</option>
+            <option value="server_input_os_command_hits">Server Input OS Command Hits</option>
+            <option value="server_input_path_traversal_hits">Server Input Path Traversal Hits</option>
+            <option value="server_input_file_inclusion_hits">Server Input File Inclusion Hits</option>
+            <option value="server_input_summary">Server Input Summary</option>
+            <option value="adv_injection_xxe_hits">Advanced Injection XXE Hits</option>
+            <option value="adv_injection_soap_hits">Advanced Injection SOAP Hits</option>
+            <option value="adv_injection_ssrf_hits">Advanced Injection SSRF Hits</option>
+            <option value="adv_injection_smtp_hits">Advanced Injection SMTP Hits</option>
+            <option value="adv_injection_summary">Advanced Injection Summary</option>
             <option value="fuzzing_doc_hits">Fuzzing Doc Hits</option>
             <option value="fuzzing_dir_hits">Fuzzing Dir Hits</option>
           </select>
@@ -515,10 +581,6 @@
             <input id="amass-search-name" type="text" placeholder="Search host..." />
             <input id="amass-search-domain" type="text" placeholder="Search root domain..." />
             <input id="amass-search-ip" type="text" placeholder="Search IP..." />
-            <input id="amass-search-source" type="text" placeholder="Search source..." />
-            <select id="amass-filter-tag">
-              <option value="">All tags</option>
-            </select>
           </div>
           <p id="amass-count" class="muted">No rows loaded.</p>
           <div class="modal-table-wrap">
@@ -529,8 +591,6 @@
                   <th data-amass-sort-key="domain">Domain</th>
                   <th data-amass-sort-key="ip">IP</th>
                   <th data-amass-sort-key="asn">ASN</th>
-                  <th data-amass-sort-key="source">Source</th>
-                  <th data-amass-sort-key="tag">Tag</th>
                 </tr>
               </thead>
               <tbody id="amass-table-body"></tbody>
@@ -549,6 +609,6 @@
         </div>
       </div>
     </main>
-    <script src="app.js?v=20260302-1"></script>
+    <script src="app.js?v=20260303-7"></script>
   </body>
 </html>

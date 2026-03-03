@@ -11,8 +11,8 @@ Go backend + static web UI for running recon flow tasks.
 - generate org-level dork links (API-focused)
 - run `subfinder`, `assetfinder`, and `amass` on wildcard entries and append to `data/domains`
 - filter out-of-scope domains from discovered results
-- resolve/live-check domains with `dnsx` + `httpx` (`httprobe` fallback) and build `data/domains_http`
-- select API-focused targets into `data/apidomains`
+- resolve/live-check domains with `dnsx` + `httpx` (`httprobe` fallback) and overwrite `data/domains` with live protocol URLs
+- derive API-focused live protocol targets into `data/apidomains`
 
 3. Passive recon enrichment
 - generate dork links for `wildcards`, `domains`, and `apidomains`

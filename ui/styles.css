@@ -110,7 +110,7 @@ main {
   grid-template-areas:
     "files files"
     "scope scope"
-    "flow flow"
+    "flow manual"
     "logs logs";
   grid-template-rows: auto minmax(0, 1fr) auto minmax(0, 1fr);
   gap: 1.5rem;
@@ -138,6 +138,10 @@ main {
   grid-area: flow;
 }
 
+.panel-manual-domain {
+  grid-area: manual;
+}
+
 .panel-scope {
   grid-area: scope;
   display: flex;
@@ -148,6 +152,73 @@ main {
   grid-area: logs;
   display: flex;
   flex-direction: column;
+}
+
+.manual-domain-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 1rem;
+}
+
+.manual-domain-left,
+.manual-domain-right {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0.9rem;
+}
+
+.manual-domain-url {
+  display: inline-block;
+  margin-top: 0.2rem;
+  color: #ffd7de;
+  word-break: break-all;
+}
+
+.manual-checklist-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.manual-checklist-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.manual-checklist-list {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.manual-checklist-stack {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.manual-checklist-block {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.015);
+  padding: 0.7rem;
+}
+
+.manual-checklist-item {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  padding: 0.55rem 0.65rem;
+  font-size: 0.86rem;
+}
+
+.manual-checklist-item input[type="checkbox"] {
+  margin-top: 0.1rem;
 }
 
 .panel-config {
@@ -615,11 +686,43 @@ button:active {
   border: 1px solid var(--border);
 }
 
+.flow-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.6rem;
+}
+
+#run-flow,
+#open-live-webservers,
+#open-amass-enum {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(135deg, #ff1f46, #e1062c);
+  box-shadow: 0 8px 18px rgba(225, 6, 44, 0.22);
+}
+
+#run-flow:hover,
+#open-live-webservers:hover,
+#open-amass-enum:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(225, 6, 44, 0.28);
+}
+
+#run-flow:focus-visible,
+#open-live-webservers:focus-visible,
+#open-amass-enum:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(225, 6, 44, 0.2), 0 10px 20px rgba(225, 6, 44, 0.24);
+}
+
 #open-live-webservers[disabled],
-#open-amass-enum[disabled] {
+#open-amass-enum[disabled],
+#run-flow[disabled] {
   opacity: 0.5;
   cursor: not-allowed;
   box-shadow: none;
+  transform: none;
 }
 
 .modal-shell {
@@ -699,6 +802,12 @@ button:active {
 
 .lws-table td code {
   color: #ffd7de;
+}
+
+.lws-table td a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .lws-table tr.lws-row.lws-status--2xx td {
@@ -840,6 +949,7 @@ button:active {
       "files"
       "scope"
       "flow"
+      "manual"
       "logs";
     grid-template-rows: auto;
     min-height: auto;
@@ -862,6 +972,10 @@ button:active {
   }
 
   .manual-recon {
+    grid-template-columns: 1fr;
+  }
+
+  .manual-domain-layout {
     grid-template-columns: 1fr;
   }
 
