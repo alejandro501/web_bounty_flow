@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bounty Flow UI</title>
-    <link rel="stylesheet" href="styles.css?v=20260303-1" />
+    <link rel="stylesheet" href="styles.css?v=20260303-2" />
   </head>
   <body data-backend-url="http://localhost:5050" data-active-view="flow">
     <main class="layout">
@@ -56,6 +56,15 @@
             </label>
             <p class="muted">Open selected target:</p>
             <a id="manual-domain-url" class="manual-domain-url" href="#" target="_blank" rel="noopener noreferrer">No domain selected</a>
+            <div class="manual-xss-runner">
+              <h3>XSS Playwright Runner</h3>
+              <label>
+                Auth header (optional)
+                <input id="manual-auth-header" type="text" placeholder="Authorization: Bearer eyJ..." />
+              </label>
+              <button id="manual-run-xss" type="button">Launch Playwright XSS</button>
+              <p id="manual-xss-status" class="muted">idle</p>
+            </div>
           </section>
           <section class="manual-domain-right">
             <div class="manual-checklist-stack">
@@ -114,6 +123,15 @@
             <option value="adv_injection_ssrf_hits">Advanced Injection SSRF Hits</option>
             <option value="adv_injection_smtp_hits">Advanced Injection SMTP Hits</option>
             <option value="adv_injection_summary">Advanced Injection Summary</option>
+            <option value="csrf_candidates">CSRF Candidates</option>
+            <option value="csrf_findings">CSRF Findings</option>
+            <option value="csrf_replay_log">CSRF Replay Log</option>
+            <option value="csrf_summary">CSRF Summary</option>
+            <option value="xss_reflected_hits">XSS Reflected Hits</option>
+            <option value="xss_dom_hits">XSS DOM Hits</option>
+            <option value="xss_stored_hits">XSS Stored Hits</option>
+            <option value="xss_summary">XSS Summary</option>
+            <option value="xss_scan_log">XSS Scan Log</option>
             <option value="fuzzing_doc_hits">Fuzzing Doc Hits</option>
             <option value="fuzzing_dir_hits">Fuzzing Dir Hits</option>
           </select>
@@ -609,6 +627,6 @@
         </div>
       </div>
     </main>
-    <script src="app.js?v=20260303-7"></script>
+    <script src="app.js?v=20260303-8"></script>
   </body>
 </html>

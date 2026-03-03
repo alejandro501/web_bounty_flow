@@ -4,6 +4,7 @@
   "assetfinder": "pending",
   "cewl": "pending",
   "consolidate": "done",
+  "csrf-checks": "pending",
   "ctl": "pending",
   "dnsx-validate": "pending",
   "dork-links": "done",

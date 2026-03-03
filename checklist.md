@@ -107,12 +107,12 @@ Legend:
 ## 6) Chapters 12-13 - Attacking Users (Client-Side)
 
 ### 6.1 XSS Automation
-- [ ] Reflected XSS context discovery and payload adaptation (Not Implemented).
-- [ ] Stored XSS sink crawler and replay checks (Not Implemented).
-- [ ] DOM XSS source-sink static + dynamic checks (Not Implemented).
+- [x] Reflected XSS context discovery and payload adaptation (manual Playwright runner + manual validation).
+- [x] Stored XSS sink crawler and replay checks (manual Playwright runner + manual validation).
+- [x] DOM XSS source-sink static + dynamic checks (manual Playwright runner + manual validation).
 
 ### 6.2 Other Client-Side Attack Automation
-- [ ] CSRF token presence/validation checks (Not Implemented).
+- [x] CSRF token presence/validation checks (baseline/cross-origin replay + manual validation).
 - [ ] Clickjacking header/frame policy checks (Not Implemented).
 - [ ] CORS/SOP misconfiguration scanner (Not Implemented).
 - [ ] Open redirect automated validation and chaining potential (Not Implemented).

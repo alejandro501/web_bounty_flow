@@ -62,6 +62,7 @@ const (
 	StepInjectionCheck = "injection-checks"
 	StepServerInputChk = "server-input-checks"
 	StepAdvInjection   = "adv-injection-checks"
+	StepCSRFChecks     = "csrf-checks"
 	StepDorkLinks      = "dork-links"
 	StepConsolidate    = "consolidate"
 	StepHTTPX          = "httpx"
@@ -91,6 +92,7 @@ var flowSteps = []Step{
 	{ID: StepInjectionCheck, Label: "Run baseline-diff SQLi/NoSQL/XPath/LDAP checks."},
 	{ID: StepServerInputChk, Label: "Run baseline-diff OS command/path traversal/file inclusion checks."},
 	{ID: StepAdvInjection, Label: "Run baseline-diff XXE/SOAP/SSRF/SMTP checks."},
+	{ID: StepCSRFChecks, Label: "Run CSRF token/origin/referer validation checks with replay diffs."},
 	{ID: StepDorkLinks, Label: "Auto-generate dork links for org/wildcard/domain/api-domain seeds."},
 	{ID: StepCeWL, Label: "Generate custom CeWL wordlist from live web servers."},
 	{ID: StepFuzzDocs, Label: "Run ffuf documentation endpoint fuzzing and collect hits."},
@@ -291,14 +293,14 @@ func (a *App) prepareDirectories() error {
 
 func (a *App) passiveRecon(ctx context.Context) error {
 	for _, step := range []string{
-		StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
+		StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
 	} {
 		a.updateStep(step, StepPending)
 	}
 
 	if !fileExists(a.cfg.Lists.Wildcards) || len(readSafeLines(a.cfg.Lists.Wildcards)) == 0 {
 		for _, step := range []string{
-			StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
+			StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
 		} {
 			a.skipStep(step)
 		}
@@ -795,6 +797,12 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		return err
 	}
 
+	if err := a.runStep(StepCSRFChecks, func() error {
+		return a.runCSRFChecks(ctx)
+	}); err != nil {
+		return err
+	}
+
 	if _, err := exec.LookPath("generate_dork_links"); err != nil {
 		a.skipStep(StepDorkLinks)
 		a.logger.Printf("%s: skipped (generate_dork_links not found)", StepDorkLinks)
@@ -992,12 +1000,13 @@ func (a *App) runFuzzDirectories(ctx context.Context) error {
 }
 
 type paramFuzzObservation struct {
-	StatusCode int
-	Length     int
-	DurationMS int64
-	Location   string
-	Snippet    string
-	Cookies    []string
+	StatusCode  int
+	Length      int
+	DurationMS  int64
+	Location    string
+	Snippet     string
+	Cookies     []string
+	TokenHeader string
 }
 
 type paramFuzzHit struct {
@@ -1039,6 +1048,40 @@ type injectionHit struct {
 	MutatedLoc   string   `json:"mutated_location"`
 }
 
+type csrfCandidate struct {
+	Endpoint    string   `json:"endpoint"`
+	Method      string   `json:"method"`
+	Source      string   `json:"source"`
+	QueryParams []string `json:"query_params,omitempty"`
+}
+
+type csrfReplayLog struct {
+	Timestamp   string   `json:"timestamp"`
+	Endpoint    string   `json:"endpoint"`
+	Case        string   `json:"case"`
+	Method      string   `json:"method"`
+	StatusCode  int      `json:"status_code"`
+	Length      int      `json:"length"`
+	DurationMS  int64    `json:"duration_ms"`
+	Location    string   `json:"location"`
+	SetCookies  []string `json:"set_cookies,omitempty"`
+	TokenHeader string   `json:"token_header,omitempty"`
+}
+
+type csrfFinding struct {
+	Timestamp       string   `json:"timestamp"`
+	Endpoint        string   `json:"endpoint"`
+	Method          string   `json:"method"`
+	Severity        string   `json:"severity"`
+	Reasons         []string `json:"reasons"`
+	BaselineCode    int      `json:"baseline_status_code"`
+	CrossOriginCode int      `json:"cross_origin_status_code"`
+	MissingOrigCode int      `json:"missing_origin_status_code"`
+	BaselineLen     int      `json:"baseline_length"`
+	CrossOriginLen  int      `json:"cross_origin_length"`
+	MissingOrigLen  int      `json:"missing_origin_length"`
+}
+
 type injectionFamilyConfig struct {
 	Name     string
 	Payloads []string
@@ -1057,6 +1100,7 @@ const (
 	serverInputMaxParamsPerEP     = 5
 	advInjectionMaxEndpoints      = 35
 	advInjectionMaxParamsPerEP    = 4
+	csrfMaxEndpoints              = 60
 )
 
 var (
@@ -1137,6 +1181,9 @@ var (
 			Payloads: []string{"test%0d%0aBcc:inject@local", "test\r\nBcc:inject@local", "x@y.com%0d%0aX-Test:1"},
 			Keywords: []string{"smtp", "mail", "header", "invalid address", "bcc"},
 		},
+	}
+	csrfTokenNames = []string{
+		"csrf", "csrf_token", "csrftoken", "xsrf-token", "x-csrf-token", "x-xsrf-token", "_token", "__requestverificationtoken",
 	}
 )
 
@@ -1964,6 +2011,231 @@ func (a *App) runAdvancedInjectionChecks(ctx context.Context) error {
 	return nil
 }
 
+func (a *App) runCSRFChecks(ctx context.Context) error {
+	baseDir := filepath.Dir(a.cfg.Lists.Domains)
+	reconDir := filepath.Join(baseDir, "recon")
+	outDir := filepath.Join(a.fuzzingBaseDir(), "csrf")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+
+	candidatesFile, err := os.Create(filepath.Join(outDir, "candidates.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer candidatesFile.Close()
+	findingsFile, err := os.Create(filepath.Join(outDir, "findings.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer findingsFile.Close()
+	replayFile, err := os.Create(filepath.Join(outDir, "replay_log.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer replayFile.Close()
+	candidateWriter := bufio.NewWriter(candidatesFile)
+	findingWriter := bufio.NewWriter(findingsFile)
+	replayWriter := bufio.NewWriter(replayFile)
+	defer candidateWriter.Flush()
+	defer findingWriter.Flush()
+	defer replayWriter.Flush()
+
+	endpoints := a.collectParamFuzzEndpoints(filepath.Join(reconDir, "all_urls.txt"))
+	endpoints = prioritizeCSRFCandidateEndpoints(endpoints)
+	if len(endpoints) > csrfMaxEndpoints {
+		a.logger.Printf("%s: limiting endpoints from %d to %d", StepCSRFChecks, len(endpoints), csrfMaxEndpoints)
+		endpoints = endpoints[:csrfMaxEndpoints]
+	}
+
+	globalParams := a.loadParamCandidates(filepath.Join(reconDir, "params_candidates.txt"))
+	if len(globalParams) == 0 {
+		globalParams = append([]string{}, paramFuzzCommonParams...)
+		sort.Strings(globalParams)
+	}
+
+	clients := &http.Client{
+		Timeout: paramFuzzRequestTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	lastByHost := make(map[string]time.Time)
+	metrics := map[string]int{
+		"candidates":            0,
+		"tested":                0,
+		"replay_requests":       0,
+		"token_signals":         0,
+		"potential_findings":    0,
+		"protected_by_origin":   0,
+		"protected_by_token":    0,
+		"cross_origin_accepted": 0,
+		"missing_origin_accept": 0,
+	}
+
+	for _, endpoint := range endpoints {
+		parsed, err := url.Parse(endpoint)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			continue
+		}
+
+		queryParams := make(map[string]struct{})
+		for key := range parsed.Query() {
+			name := normalizeParamName(key)
+			if name != "" {
+				queryParams[name] = struct{}{}
+			}
+		}
+		paramList := sortedParamKeys(queryParams)
+		source := "path"
+		if len(paramList) > 0 {
+			source = "query"
+		}
+		metrics["candidates"]++
+		_ = writeJSONLine(candidateWriter, csrfCandidate{
+			Endpoint:    endpoint,
+			Method:      http.MethodPost,
+			Source:      source,
+			QueryParams: paramList,
+		})
+
+		body := buildCSRFBaselineBody(paramList, globalParams).Encode()
+		origin := parsed.Scheme + "://" + parsed.Host
+		referer := strings.TrimRight(origin, "/") + parsed.Path
+
+		baseline, err := a.sendParamFuzzRequest(ctx, clients, lastByHost, endpoint, http.MethodPost, map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+			"Origin":       origin,
+			"Referer":      referer,
+		}, []byte(body), "")
+		if err != nil {
+			continue
+		}
+		metrics["tested"]++
+		metrics["replay_requests"]++
+		_ = writeJSONLine(replayWriter, csrfReplayLog{
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+			Endpoint:    endpoint,
+			Case:        "baseline_same_origin",
+			Method:      http.MethodPost,
+			StatusCode:  baseline.StatusCode,
+			Length:      baseline.Length,
+			DurationMS:  baseline.DurationMS,
+			Location:    baseline.Location,
+			SetCookies:  baseline.Cookies,
+			TokenHeader: baseline.TokenHeader,
+		})
+
+		crossOrigin, err := a.sendParamFuzzRequest(ctx, clients, lastByHost, endpoint, http.MethodPost, map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+			"Origin":       "https://evil.example",
+			"Referer":      "https://evil.example/poc",
+		}, []byte(body), "")
+		if err != nil {
+			continue
+		}
+		metrics["replay_requests"]++
+		_ = writeJSONLine(replayWriter, csrfReplayLog{
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+			Endpoint:    endpoint,
+			Case:        "cross_origin_no_token",
+			Method:      http.MethodPost,
+			StatusCode:  crossOrigin.StatusCode,
+			Length:      crossOrigin.Length,
+			DurationMS:  crossOrigin.DurationMS,
+			Location:    crossOrigin.Location,
+			SetCookies:  crossOrigin.Cookies,
+			TokenHeader: crossOrigin.TokenHeader,
+		})
+
+		missingOrigin, err := a.sendParamFuzzRequest(ctx, clients, lastByHost, endpoint, http.MethodPost, map[string]string{
+			"Content-Type": "application/x-www-form-urlencoded",
+		}, []byte(body), "")
+		if err != nil {
+			continue
+		}
+		metrics["replay_requests"]++
+		_ = writeJSONLine(replayWriter, csrfReplayLog{
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+			Endpoint:    endpoint,
+			Case:        "missing_origin_referer",
+			Method:      http.MethodPost,
+			StatusCode:  missingOrigin.StatusCode,
+			Length:      missingOrigin.Length,
+			DurationMS:  missingOrigin.DurationMS,
+			Location:    missingOrigin.Location,
+			SetCookies:  missingOrigin.Cookies,
+			TokenHeader: missingOrigin.TokenHeader,
+		})
+
+		tokenSignals := hasCSRFTokenSignals(baseline) || hasCSRFTokenSignals(crossOrigin) || hasCSRFTokenSignals(missingOrigin)
+		if tokenSignals {
+			metrics["token_signals"]++
+		}
+
+		crossAccepted := csrfLooksAccepted(baseline, crossOrigin)
+		missingAccepted := csrfLooksAccepted(baseline, missingOrigin)
+		if crossAccepted {
+			metrics["cross_origin_accepted"]++
+		}
+		if missingAccepted {
+			metrics["missing_origin_accept"]++
+		}
+
+		crossBlocked := csrfLooksBlocked(baseline, crossOrigin)
+		missingBlocked := csrfLooksBlocked(baseline, missingOrigin)
+		if crossBlocked || missingBlocked {
+			metrics["protected_by_origin"]++
+		}
+		if tokenSignals {
+			metrics["protected_by_token"]++
+		}
+
+		reasons := []string{}
+		if crossAccepted {
+			reasons = append(reasons, "cross_origin_request_accepted")
+		}
+		if missingAccepted {
+			reasons = append(reasons, "missing_origin_referer_accepted")
+		}
+		if !tokenSignals {
+			reasons = append(reasons, "no_observed_csrf_token_signal")
+		}
+		if len(reasons) == 0 {
+			continue
+		}
+
+		severity := "low"
+		if (crossAccepted || missingAccepted) && !tokenSignals {
+			severity = "medium"
+		}
+		if crossAccepted && missingAccepted && !tokenSignals {
+			severity = "high"
+		}
+		metrics["potential_findings"]++
+		_ = writeJSONLine(findingWriter, csrfFinding{
+			Timestamp:       time.Now().UTC().Format(time.RFC3339),
+			Endpoint:        endpoint,
+			Method:          http.MethodPost,
+			Severity:        severity,
+			Reasons:         unique(reasons),
+			BaselineCode:    baseline.StatusCode,
+			CrossOriginCode: crossOrigin.StatusCode,
+			MissingOrigCode: missingOrigin.StatusCode,
+			BaselineLen:     baseline.Length,
+			CrossOriginLen:  crossOrigin.Length,
+			MissingOrigLen:  missingOrigin.Length,
+		})
+	}
+
+	summaryPath := filepath.Join(outDir, "summary.csv")
+	if err := a.writeCSRFSummary(summaryPath, metrics); err != nil {
+		return err
+	}
+	a.logger.Printf("%s: summary written to %s", StepCSRFChecks, summaryPath)
+	return nil
+}
+
 func (a *App) writeParamFuzzSummary(path string, metrics map[string]struct {
 	requests int
 	hits     int
@@ -2209,6 +2481,143 @@ func (a *App) writeAdvInjectionSummary(path string, metrics map[string]struct {
 		}
 	}
 	return w.Error()
+}
+
+func (a *App) writeCSRFSummary(path string, metrics map[string]int) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := csv.NewWriter(f)
+	defer w.Flush()
+	if err := w.Write([]string{"metric", "value"}); err != nil {
+		return err
+	}
+	keys := []string{
+		"candidates",
+		"tested",
+		"replay_requests",
+		"token_signals",
+		"protected_by_origin",
+		"protected_by_token",
+		"cross_origin_accepted",
+		"missing_origin_accept",
+		"potential_findings",
+	}
+	for _, key := range keys {
+		if err := w.Write([]string{key, strconv.Itoa(metrics[key])}); err != nil {
+			return err
+		}
+	}
+	return w.Error()
+}
+
+func prioritizeCSRFCandidateEndpoints(endpoints []string) []string {
+	if len(endpoints) == 0 {
+		return nil
+	}
+	highTerms := []string{
+		"login", "logout", "signin", "signup", "register", "password", "reset",
+		"delete", "remove", "update", "change", "edit", "create", "invite",
+		"settings", "profile", "account", "checkout", "purchase", "order",
+		"billing", "payment", "transfer", "withdraw", "address", "email",
+	}
+	score := func(endpoint string) int {
+		parsed, err := url.Parse(endpoint)
+		if err != nil {
+			return 0
+		}
+		text := strings.ToLower(parsed.Path + "?" + parsed.RawQuery)
+		total := 0
+		for _, term := range highTerms {
+			if strings.Contains(text, term) {
+				total += 2
+			}
+		}
+		if parsed.RawQuery != "" {
+			total++
+		}
+		return total
+	}
+	out := append([]string{}, endpoints...)
+	sort.SliceStable(out, func(i, j int) bool {
+		si := score(out[i])
+		sj := score(out[j])
+		if si == sj {
+			return out[i] < out[j]
+		}
+		return si > sj
+	})
+	return out
+}
+
+func buildCSRFBaselineBody(endpointParams, globalParams []string) url.Values {
+	values := url.Values{}
+	selected := append([]string{}, endpointParams...)
+	if len(selected) == 0 {
+		selected = append(selected, globalParams...)
+	}
+	if len(selected) == 0 {
+		selected = []string{"id", "action"}
+	}
+	if len(selected) > 3 {
+		selected = selected[:3]
+	}
+	for _, key := range selected {
+		name := normalizeParamName(key)
+		if name == "" {
+			continue
+		}
+		values.Set(name, "1")
+	}
+	if len(values) == 0 {
+		values.Set("id", "1")
+	}
+	return values
+}
+
+func hasCSRFTokenSignals(obs paramFuzzObservation) bool {
+	if obs.TokenHeader != "" {
+		return true
+	}
+	for _, name := range obs.Cookies {
+		for _, tokenName := range csrfTokenNames {
+			if strings.Contains(strings.ToLower(name), tokenName) {
+				return true
+			}
+		}
+	}
+	for _, tokenName := range csrfTokenNames {
+		if strings.Contains(obs.Snippet, tokenName) {
+			return true
+		}
+	}
+	if strings.Contains(obs.Snippet, "authenticity_token") || strings.Contains(obs.Snippet, "__requestverificationtoken") {
+		return true
+	}
+	return false
+}
+
+func csrfLooksAccepted(base, mutated paramFuzzObservation) bool {
+	if base.StatusCode <= 0 || mutated.StatusCode <= 0 {
+		return false
+	}
+	if base.StatusCode >= 400 || mutated.StatusCode >= 400 {
+		return false
+	}
+	reasons := paramFuzzReasons(base, mutated)
+	return len(reasons) <= 1
+}
+
+func csrfLooksBlocked(base, mutated paramFuzzObservation) bool {
+	if base.StatusCode <= 0 || mutated.StatusCode <= 0 {
+		return false
+	}
+	if base.StatusCode < 400 && (mutated.StatusCode == http.StatusForbidden || mutated.StatusCode == http.StatusUnauthorized) {
+		return true
+	}
+	return false
 }
 
 func prioritizeServerInputParams(params []string) []string {
@@ -2463,6 +2872,13 @@ func (a *App) sendParamFuzzRequest(
 			DurationMS: time.Since(start).Milliseconds(),
 			Location:   strings.TrimSpace(resp.Header.Get("Location")),
 			Snippet:    strings.ToLower(string(bodyBytes)),
+		}
+		for k := range resp.Header {
+			lk := strings.ToLower(strings.TrimSpace(k))
+			if lk == "x-csrf-token" || lk == "x-xsrf-token" || lk == "csrf-token" {
+				obs.TokenHeader = k
+				break
+			}
 		}
 		for _, cookie := range resp.Cookies() {
 			name := normalizeParamName(cookie.Name)

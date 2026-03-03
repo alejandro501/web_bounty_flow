@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,6 +43,10 @@ type Server struct {
 	stepState   map[string]app.StepStatus
 	stepsPath   string
 	configStore *configstore.Store
+	xssMu       sync.Mutex
+	xssRunning  bool
+	xssStatus   string
+	xssLastRun  string
 }
 
 // New creates a new HTTP server wired to the bounty flow.
@@ -71,6 +76,8 @@ func New(cfg *config.Config) *Server {
 	s.mux.HandleFunc("/api/tools", s.corsMiddleware(s.toolsHandler))
 	s.mux.HandleFunc("/api/live-webservers", s.corsMiddleware(s.liveWebserversHandler))
 	s.mux.HandleFunc("/api/amass-enum", s.corsMiddleware(s.amassEnumHandler))
+	s.mux.HandleFunc("/api/manual/xss/run", s.corsMiddleware(s.manualXSSRunHandler))
+	s.mux.HandleFunc("/api/manual/xss/status", s.corsMiddleware(s.manualXSSStatusHandler))
 	s.mux.HandleFunc("/", s.corsMiddleware(s.rootHandler))
 
 	return s
@@ -281,6 +288,17 @@ type toolStatus struct {
 	Path      string `json:"path,omitempty"`
 	Required  bool   `json:"required"`
 	Notes     string `json:"notes,omitempty"`
+}
+
+type manualXSSRunRequest struct {
+	Target     string `json:"target"`
+	AuthHeader string `json:"auth_header"`
+}
+
+type manualXSSStatusResponse struct {
+	Running bool   `json:"running"`
+	Status  string `json:"status"`
+	LastRun string `json:"last_run"`
 }
 
 func (s *Server) runHandler(w http.ResponseWriter, r *http.Request) {
@@ -558,6 +576,7 @@ func (s *Server) toolsHandler(w http.ResponseWriter, r *http.Request) {
 		s.toolCheck("ffuf", false, "needed for fuzz-docs/fuzz-dirs steps"),
 		s.toolCheck("cewl", false, "optional; flow can continue without it"),
 		s.toolCheck("httprobe", false, "used as fallback when httpx fails"),
+		s.toolCheck("node", false, "required for manual Playwright XSS scan"),
 	}
 
 	missingRequired := 0
@@ -573,6 +592,142 @@ func (s *Server) toolsHandler(w http.ResponseWriter, r *http.Request) {
 		"missing_required": missingRequired,
 		"tools":            tools,
 	})
+}
+
+func (s *Server) manualXSSStatusHandler(w http.ResponseWriter, r *http.Request) {
+	s.xssMu.Lock()
+	resp := manualXSSStatusResponse{
+		Running: s.xssRunning,
+		Status:  s.xssStatus,
+		LastRun: s.xssLastRun,
+	}
+	s.xssMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) manualXSSRunHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req manualXSSRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	target := strings.TrimSpace(req.Target)
+	if target == "" {
+		http.Error(w, "target is required", http.StatusBadRequest)
+		return
+	}
+	parsed, err := url.Parse(target)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		http.Error(w, "target must be a valid http(s) URL", http.StatusBadRequest)
+		return
+	}
+
+	s.xssMu.Lock()
+	if s.xssRunning {
+		s.xssMu.Unlock()
+		http.Error(w, "manual xss scan already running", http.StatusConflict)
+		return
+	}
+	s.xssRunning = true
+	s.xssStatus = "queued"
+	s.xssMu.Unlock()
+
+	go s.runManualPlaywrightXSS(target, strings.TrimSpace(req.AuthHeader))
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+}
+
+func (s *Server) runManualPlaywrightXSS(target, authHeader string) {
+	s.setManualXSSStatus("running")
+	defer func() {
+		s.xssMu.Lock()
+		s.xssRunning = false
+		s.xssLastRun = time.Now().Format(time.RFC3339)
+		s.xssMu.Unlock()
+	}()
+
+	baseDir := filepath.Dir(s.cfg.Lists.Domains)
+	outDir := filepath.Join(baseDir, "fuzzing", "xss")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		s.setManualXSSStatus(fmt.Sprintf("error: failed creating output dir: %v", err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+	defer cancel()
+	nodeBin, err := resolveNodeBinary()
+	if err != nil {
+		s.setManualXSSStatus("error: node runtime not found in PATH or ~/.nvm; install Node.js or restart server with nvm loaded")
+		return
+	}
+	scriptPath := filepath.Join("scripts", "xss_playwright_scan.mjs")
+	args := []string{scriptPath, "--target", target, "--out-dir", outDir, "--max-pages", "30", "--max-clicks", "140"}
+	if authHeader != "" {
+		args = append(args, "--auth-header", authHeader)
+	}
+
+	cmd := exec.CommandContext(ctx, nodeBin, args...)
+	output, err := cmd.CombinedOutput()
+	logPath := filepath.Join(outDir, "scan.log")
+	_ = os.WriteFile(logPath, output, 0o644)
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			s.setManualXSSStatus("error: playwright xss scan timed out")
+			return
+		}
+		s.setManualXSSStatus(fmt.Sprintf("error: playwright scan failed (%v)", err))
+		return
+	}
+	s.setManualXSSStatus("done")
+}
+
+func resolveNodeBinary() (string, error) {
+	if path, err := exec.LookPath("node"); err == nil {
+		return path, nil
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", errors.New("unable to resolve home directory")
+	}
+
+	patterns := []string{
+		filepath.Join(home, ".nvm", "versions", "node", "*", "bin", "node"),
+		filepath.Join(home, ".volta", "bin", "node"),
+		filepath.Join(home, ".asdf", "shims", "node"),
+	}
+	var candidates []string
+	for _, pattern := range patterns {
+		matches, _ := filepath.Glob(pattern)
+		candidates = append(candidates, matches...)
+	}
+	sort.Strings(candidates)
+	for i := len(candidates) - 1; i >= 0; i-- {
+		candidate := candidates[i]
+		info, statErr := os.Stat(candidate)
+		if statErr != nil || info.IsDir() {
+			continue
+		}
+		if info.Mode()&0o111 == 0 {
+			continue
+		}
+		return candidate, nil
+	}
+	return "", errors.New("node binary not found")
+}
+
+func (s *Server) setManualXSSStatus(status string) {
+	s.xssMu.Lock()
+	s.xssStatus = status
+	s.xssMu.Unlock()
 }
 
 func (s *Server) toolCheck(name string, required bool, notes string) toolStatus {
@@ -745,6 +900,7 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 	doneIfPending("injection-checks", fileExists(filepath.Join(baseDir, "fuzzing", "injection", "summary.csv")))
 	doneIfPending("server-input-checks", fileExists(filepath.Join(baseDir, "fuzzing", "server-input", "summary.csv")))
 	doneIfPending("adv-injection-checks", fileExists(filepath.Join(baseDir, "fuzzing", "adv-injection", "summary.csv")))
+	doneIfPending("csrf-checks", fileExists(filepath.Join(baseDir, "fuzzing", "csrf", "summary.csv")))
 	doneIfPending("dork-links", hasDorkLinkFiles(s.cfg.Paths.DorkingDir))
 	doneIfPending("cewl",
 		fileHasNonEmpty(filepath.Join(reconDir, "cewl_custom_wordlist.txt")) ||
@@ -887,6 +1043,24 @@ func (s *Server) listPath(name string) (string, error) {
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "adv-injection", "smtp_hits.jsonl"), nil
 	case "adv_injection_summary":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "adv-injection", "summary.csv"), nil
+	case "csrf_candidates":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "csrf", "candidates.jsonl"), nil
+	case "csrf_findings":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "csrf", "findings.jsonl"), nil
+	case "csrf_replay_log":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "csrf", "replay_log.jsonl"), nil
+	case "csrf_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "csrf", "summary.csv"), nil
+	case "xss_reflected_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "xss", "reflected_hits.jsonl"), nil
+	case "xss_dom_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "xss", "dom_hits.jsonl"), nil
+	case "xss_stored_hits":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "xss", "stored_hits.jsonl"), nil
+	case "xss_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "xss", "summary.csv"), nil
+	case "xss_scan_log":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "xss", "scan.log"), nil
 	default:
 		return "", fmt.Errorf("unsupported list_type %q", name)
 	}

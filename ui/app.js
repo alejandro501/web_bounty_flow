@@ -52,6 +52,9 @@ const lwsCount = document.getElementById("lws-count");
 const manualDomainSelect = document.getElementById("manual-domain-select");
 const manualDomainStatusFilter = document.getElementById("manual-domain-status-filter");
 const manualDomainUrl = document.getElementById("manual-domain-url");
+const manualAuthHeader = document.getElementById("manual-auth-header");
+const manualRunXSS = document.getElementById("manual-run-xss");
+const manualXSSStatus = document.getElementById("manual-xss-status");
 const manualChecklistList = document.getElementById("manual-checklist-list");
 const manualChecklistProgress = document.getElementById("manual-checklist-progress");
 const hybridChecklistList = document.getElementById("hybrid-checklist-list");
@@ -97,6 +100,15 @@ const LIST_FILES = [
   { type: "adv_injection_ssrf_hits", label: "Advanced Injection SSRF Hits", uploadable: false },
   { type: "adv_injection_smtp_hits", label: "Advanced Injection SMTP Hits", uploadable: false },
   { type: "adv_injection_summary", label: "Advanced Injection Summary", uploadable: false },
+  { type: "csrf_candidates", label: "CSRF Candidates", uploadable: false },
+  { type: "csrf_findings", label: "CSRF Findings", uploadable: false },
+  { type: "csrf_replay_log", label: "CSRF Replay Log", uploadable: false },
+  { type: "csrf_summary", label: "CSRF Summary", uploadable: false },
+  { type: "xss_reflected_hits", label: "XSS Reflected Hits", uploadable: false },
+  { type: "xss_dom_hits", label: "XSS DOM Hits", uploadable: false },
+  { type: "xss_stored_hits", label: "XSS Stored Hits", uploadable: false },
+  { type: "xss_summary", label: "XSS Summary", uploadable: false },
+  { type: "xss_scan_log", label: "XSS Scan Log", uploadable: false },
   { type: "fuzzing_doc_hits", label: "Fuzzing Doc Hits", uploadable: false },
   { type: "fuzzing_dir_hits", label: "Fuzzing Dir Hits", uploadable: false },
 ];
@@ -156,8 +168,8 @@ const FLOW_SEGMENTS = [
   {
     title: "5) Client-Side Attack Classes (Chapters 12-13)",
     items: [
-      { label: "Automate reflected/stored/DOM XSS testing.", implemented: false },
-      { label: "Automate CSRF token validation checks.", implemented: false },
+      { label: "Reflected/stored/DOM XSS tracked in Manual + automated (Playwright launcher + manual validation).", implemented: true },
+      { label: "Automate CSRF token validation checks.", stepId: "csrf-checks", implemented: true },
       { label: "Automate clickjacking and frame policy checks.", implemented: false },
       { label: "Automate CORS/SOP misconfiguration scanning.", implemented: false },
       { label: "Automate open redirect validation and chaining checks.", implemented: false },
@@ -225,6 +237,10 @@ const HYBRID_MANUAL_CHECKLIST_ITEMS = [
   {
     id: "hybrid-xss",
     label: "XSS (reflected/stored/DOM): manual verification and proof-of-impact",
+  },
+  {
+    id: "hybrid-csrf",
+    label: "CSRF: validate automated findings with authenticated/manual replay PoC",
   },
 ];
 
@@ -1337,6 +1353,9 @@ function renderManualChecklist() {
       manualDomainUrl.textContent = "No domain selected";
       manualDomainUrl.removeAttribute("href");
     }
+    if (manualRunXSS) {
+      manualRunXSS.disabled = true;
+    }
     return;
   }
 
@@ -1345,6 +1364,9 @@ function renderManualChecklist() {
   if (manualDomainUrl) {
     manualDomainUrl.textContent = url;
     manualDomainUrl.href = url;
+  }
+  if (manualRunXSS) {
+    manualRunXSS.disabled = false;
   }
 
   const state = loadManualDomainChecklistState();
@@ -1365,6 +1387,37 @@ function renderManualChecklist() {
   }).join("");
 
   manualChecklistProgress.textContent = `${done} / ${MANUAL_DOMAIN_CHECKLIST_ITEMS.length} done`;
+}
+
+function updateManualXSSStatusText(statusData) {
+  if (!manualXSSStatus) {
+    return;
+  }
+  const status = String(statusData?.status || "idle");
+  const running = Boolean(statusData?.running);
+  const lastRun = String(statusData?.last_run || "");
+  const lastRunText = lastRun ? ` | last run: ${new Date(lastRun).toLocaleString()}` : "";
+  manualXSSStatus.textContent = running ? `running: ${status}${lastRunText}` : `${status}${lastRunText}`;
+}
+
+async function refreshManualXSSStatus() {
+  if (!manualXSSStatus) {
+    return;
+  }
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/manual/xss/status`);
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
+    const data = await res.json();
+    updateManualXSSStatusText(data);
+    if (manualRunXSS) {
+      manualRunXSS.disabled = Boolean(data.running) || !selectedManualDomain();
+      manualRunXSS.textContent = data.running ? "Playwright running..." : "Launch Playwright XSS";
+    }
+  } catch (error) {
+    manualXSSStatus.textContent = `status error: ${error.message}`;
+  }
 }
 
 function renderHybridChecklist() {
@@ -1458,6 +1511,7 @@ function initializeManualDomainChecklist() {
   manualDomainSelect.addEventListener("change", () => {
     renderManualChecklist();
     renderHybridChecklist();
+    void refreshManualXSSStatus();
   });
   manualDomainStatusFilter?.addEventListener("change", () => {
     void refreshManualDomainOptions();
@@ -1507,7 +1561,48 @@ function initializeManualDomainChecklist() {
     renderHybridChecklist();
   });
 
+  manualRunXSS?.addEventListener("click", async () => {
+    const target = selectedManualDomain();
+    if (!target) {
+      if (manualXSSStatus) {
+        manualXSSStatus.textContent = "Select a target domain first.";
+      }
+      return;
+    }
+    const authHeader = (manualAuthHeader?.value || "").trim();
+    if (manualRunXSS) {
+      manualRunXSS.disabled = true;
+      manualRunXSS.textContent = "Launching...";
+    }
+    if (manualXSSStatus) {
+      manualXSSStatus.textContent = "queued";
+    }
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/manual/xss/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: normalizeDomainEntry(target), auth_header: authHeader }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      await refreshManualXSSStatus();
+      if (listViewSelect?.value && listViewSelect.value.startsWith("xss_")) {
+        await refreshListEntries(listViewSelect.value, { force: true });
+      }
+    } catch (error) {
+      if (manualXSSStatus) {
+        manualXSSStatus.textContent = `launch failed: ${error.message}`;
+      }
+      if (manualRunXSS) {
+        manualRunXSS.disabled = !selectedManualDomain();
+        manualRunXSS.textContent = "Launch Playwright XSS";
+      }
+    }
+  });
+
   void refreshManualDomainOptions();
+  void refreshManualXSSStatus();
 }
 
 runButton?.addEventListener("click", async () => {
@@ -2305,6 +2400,9 @@ initializeManualDomainChecklist();
 setInterval(() => {
   refreshManualDomainOptions();
 }, 10000);
+setInterval(() => {
+  refreshManualXSSStatus();
+}, 5000);
 refreshAmassEnum({ renderOnlyIfOpen: false });
 setInterval(() => {
   refreshAmassEnum({ renderOnlyIfOpen: true });
