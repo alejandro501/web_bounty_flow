@@ -2,12 +2,16 @@ const BACKEND_URL = document.body.dataset.backendUrl || "http://localhost:8080";
 
 const runButton = document.getElementById("run-flow");
 const flowStatus = document.getElementById("flow-status");
-const listViewSelect = document.getElementById("list-view-select");
-const listViewOutput = document.getElementById("list-view-output");
 const flowLogOutput = document.getElementById("flow-log-output");
 const flowStepsList = document.getElementById("flow-steps-list");
+const subdomainProgressBar = document.getElementById("subdomain-progress-bar");
+const subdomainProgressText = document.getElementById("subdomain-progress-text");
 const menuItems = document.querySelectorAll(".menu-item");
 const views = document.querySelectorAll(".view");
+const torRouteToggle = document.getElementById("tor-route-toggle");
+const leadsStatus = document.getElementById("leads-status");
+const leadsSummary = document.getElementById("leads-summary");
+const leadsWildcards = document.getElementById("leads-wildcards");
 const strideTabs = document.querySelectorAll(".stride-tab");
 const strideSections = document.querySelectorAll(".stride-section");
 const learnQuestion = document.getElementById("learn-question");
@@ -31,6 +35,7 @@ const fileViewerModal = document.getElementById("file-viewer-modal");
 const fileViewerTitle = document.getElementById("file-viewer-title");
 const fileViewerContent = document.getElementById("file-viewer-content");
 const closeFileViewer = document.getElementById("close-file-viewer");
+const exportFileViewer = document.getElementById("export-file-viewer");
 const openAmassEnum = document.getElementById("open-amass-enum");
 const amassEnumModal = document.getElementById("amass-enum-modal");
 const closeAmassEnum = document.getElementById("close-amass-enum");
@@ -65,8 +70,11 @@ let lastStatusText = "";
 let lastStepsSignature = "";
 let lastLogsSignature = "";
 let lastScopeSignature = "";
-const lastListTextByType = {};
+let lastLeadsSignature = "";
 let manualDomainOptions = [];
+let currentFileModalType = "";
+let currentFileModalLabel = "";
+let currentFileModalLines = [];
 
 const LIST_FILES = [
   { type: "wildcards", label: "Wildcards", uploadable: true },
@@ -104,6 +112,36 @@ const LIST_FILES = [
   { type: "csrf_findings", label: "CSRF Findings", uploadable: false },
   { type: "csrf_replay_log", label: "CSRF Replay Log", uploadable: false },
   { type: "csrf_summary", label: "CSRF Summary", uploadable: false },
+  { type: "clickjacking_headers", label: "Clickjacking Headers", uploadable: false },
+  { type: "clickjacking_findings", label: "Clickjacking Findings", uploadable: false },
+  { type: "clickjacking_summary", label: "Clickjacking Summary", uploadable: false },
+  { type: "cors_replay_log", label: "CORS Replay Log", uploadable: false },
+  { type: "cors_findings", label: "CORS Findings", uploadable: false },
+  { type: "cors_summary", label: "CORS Summary", uploadable: false },
+  { type: "open_redirect_candidates", label: "Open Redirect Candidates", uploadable: false },
+  { type: "open_redirect_replay_log", label: "Open Redirect Replay Log", uploadable: false },
+  { type: "open_redirect_findings", label: "Open Redirect Findings", uploadable: false },
+  { type: "open_redirect_summary", label: "Open Redirect Summary", uploadable: false },
+  { type: "workflow_logic_candidates", label: "Workflow Logic Candidates", uploadable: false },
+  { type: "workflow_logic_findings", label: "Workflow Logic Findings", uploadable: false },
+  { type: "workflow_logic_replay_log", label: "Workflow Logic Replay Log", uploadable: false },
+  { type: "workflow_logic_summary", label: "Workflow Logic Summary", uploadable: false },
+  { type: "smuggling_stack_tool_runs", label: "Smuggling Stack Tool Runs", uploadable: false },
+  { type: "smuggling_stack_findings", label: "Smuggling Stack Findings", uploadable: false },
+  { type: "smuggling_stack_summary", label: "Smuggling Stack Summary", uploadable: false },
+  { type: "nmap_targets", label: "Nmap Targets", uploadable: false },
+  { type: "nmap_services", label: "Nmap Services", uploadable: false },
+  { type: "nmap_searchsploit", label: "Nmap Searchsploit Correlation", uploadable: false },
+  { type: "nmap_summary", label: "Nmap Summary", uploadable: false },
+  { type: "tier_isolation_ip_map", label: "Tier Isolation IP Map", uploadable: false },
+  { type: "tier_isolation_findings", label: "Tier Isolation Findings", uploadable: false },
+  { type: "tier_isolation_summary", label: "Tier Isolation Summary", uploadable: false },
+  { type: "static_review_semgrep", label: "Static Review Semgrep", uploadable: false },
+  { type: "static_review_gosec", label: "Static Review Gosec", uploadable: false },
+  { type: "static_review_correlated", label: "Static Review Correlated", uploadable: false },
+  { type: "static_review_summary", label: "Static Review Summary", uploadable: false },
+  { type: "runops_scorecard_json", label: "RunOps Scorecard JSON", uploadable: false },
+  { type: "runops_scorecard_md", label: "RunOps Scorecard Markdown", uploadable: false },
   { type: "xss_reflected_hits", label: "XSS Reflected Hits", uploadable: false },
   { type: "xss_dom_hits", label: "XSS DOM Hits", uploadable: false },
   { type: "xss_stored_hits", label: "XSS Stored Hits", uploadable: false },
@@ -170,26 +208,27 @@ const FLOW_SEGMENTS = [
     items: [
       { label: "Reflected/stored/DOM XSS tracked in Manual + automated (Playwright launcher + manual validation).", implemented: true },
       { label: "Automate CSRF token validation checks.", stepId: "csrf-checks", implemented: true },
-      { label: "Automate clickjacking and frame policy checks.", implemented: false },
-      { label: "Automate CORS/SOP misconfiguration scanning.", implemented: false },
-      { label: "Automate open redirect validation and chaining checks.", implemented: false },
+      { label: "Automate clickjacking and frame policy checks.", stepId: "clickjacking-checks", implemented: true },
+      { label: "Automate CORS/SOP misconfiguration scanning.", stepId: "cors-checks", implemented: true },
+      { label: "Automate open redirect validation and chaining checks.", stepId: "open-redirect-checks", implemented: true },
     ],
   },
   {
     title: "6) Logic, Architecture, and Server Platform (Chapters 11, 16-18)",
     items: [
-      { label: "Automate multi-step workflow and race-condition logic checks.", implemented: false },
-      { label: "Integrate request smuggling/h2c/hop-by-hop/SSI-ESI checks into main flow.", implemented: false },
-      { label: "Reintroduce automated Nmap scan + service enrichment + searchsploit.", implemented: false },
-      { label: "Automate tier-segmentation and shared-hosting isolation checks.", implemented: false },
+      { label: "Semi-automate multi-step workflow logic checks.", stepId: "workflow-logic-checks", implemented: true },
+      { label: "Race-condition checks tracked in manual checklist.", implemented: true },
+      { label: "Semi-automate request smuggling/h2c/hop-by-hop/SSI-ESI checks in main flow.", stepId: "smuggling-stack-checks", implemented: true },
+      { label: "Reintroduce automated Nmap scan + service enrichment + searchsploit.", stepId: "nmap-enrichment-checks", implemented: true },
+      { label: "Semi-automate tier-segmentation and shared-hosting isolation checks.", stepId: "tier-isolation-checks", implemented: true },
     ],
   },
   {
     title: "7) Source Review and Methodology Orchestration (Chapters 19-21)",
     items: [
-      { label: "Integrate semgrep/gosec and correlate static findings with live endpoints.", implemented: false },
-      { label: "Add run manifest, checkpointing, and export bundle.", implemented: false },
-      { label: "Build chapter-aligned stage gates and completion scorecard.", implemented: false },
+      { label: "Integrate semgrep/gosec and correlate static findings with live endpoints.", stepId: "static-review-correlation", implemented: true },
+      { label: "Add run manifest, checkpointing, and export bundle.", stepId: "runops-manifest-export", implemented: true },
+      { label: "Build chapter-aligned stage gates and completion scorecard.", stepId: "stage-gates-scorecard", implemented: true },
     ],
   },
 ];
@@ -219,6 +258,10 @@ const MANUAL_DOMAIN_CHECKLIST_ITEMS = [
     id: "authz-method-mismatch",
     label: "Method-based access control mismatch checks",
   },
+  {
+    id: "logic-race-conditions",
+    label: "Race-condition checks on critical state transitions",
+  },
 ];
 
 const HYBRID_MANUAL_CHECKLIST_ITEMS = [
@@ -241,6 +284,30 @@ const HYBRID_MANUAL_CHECKLIST_ITEMS = [
   {
     id: "hybrid-csrf",
     label: "CSRF: validate automated findings with authenticated/manual replay PoC",
+  },
+  {
+    id: "hybrid-clickjacking",
+    label: "Clickjacking: confirm exploitable UI redress on sensitive actions",
+  },
+  {
+    id: "hybrid-cors",
+    label: "CORS/SOP: validate data-read impact with authenticated browser context",
+  },
+  {
+    id: "hybrid-open-redirect",
+    label: "Open redirect: manually test OAuth/phishing/chaining impact",
+  },
+  {
+    id: "hybrid-workflow-logic",
+    label: "Workflow logic: validate semi-automated step/sequence findings manually",
+  },
+  {
+    id: "hybrid-smuggling-stack",
+    label: "Request smuggling/h2c/hop-by-hop/SSI-ESI: confirm exploitability manually",
+  },
+  {
+    id: "hybrid-tier-isolation",
+    label: "Tier-segmentation/shared-hosting: verify trust-boundary impact manually",
   },
 ];
 
@@ -823,18 +890,6 @@ function escapeHTML(value) {
     .replace(/\"/g, "&quot;");
 }
 
-function hasSelectionInside(element) {
-  if (!element || !window.getSelection) {
-    return false;
-  }
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-    return false;
-  }
-  const range = selection.getRangeAt(0);
-  return element.contains(range.commonAncestorContainer);
-}
-
 menuItems.forEach((item) => {
   item.addEventListener("click", () => {
     menuItems.forEach((btn) => btn.classList.remove("is-active"));
@@ -844,6 +899,9 @@ menuItems.forEach((item) => {
     const active = document.querySelector(`.view-${view}`);
     if (active) {
       active.classList.add("is-active");
+    }
+    if (view === "leads") {
+      void refreshLeads({ force: true });
     }
   });
 });
@@ -1587,9 +1645,6 @@ function initializeManualDomainChecklist() {
         throw new Error(await response.text());
       }
       await refreshManualXSSStatus();
-      if (listViewSelect?.value && listViewSelect.value.startsWith("xss_")) {
-        await refreshListEntries(listViewSelect.value, { force: true });
-      }
     } catch (error) {
       if (manualXSSStatus) {
         manualXSSStatus.textContent = `launch failed: ${error.message}`;
@@ -1661,7 +1716,6 @@ async function handleScopeUpload(type, file) {
 
   await Promise.all([
     refreshScopeCards(),
-    listViewSelect?.value ? refreshListEntries(listViewSelect.value, { force: true }) : Promise.resolve(),
   ]);
 
   if (scopeCardsStatus) {
@@ -1674,7 +1728,7 @@ function initializeScopeCards() {
     return;
   }
 
-  scopeCards.innerHTML = LIST_FILES.map(({ type, label, uploadable }) => {
+  const renderCard = ({ type, label, uploadable }) => {
     const inputId = `scope-upload-${type}`;
 
     return `
@@ -1685,7 +1739,25 @@ function initializeScopeCards() {
         ${uploadable ? `<button type="button" class="scope-card__upload" data-input-id="${inputId}">Upload</button>` : '<p class="muted">Auto-generated by flow.</p>'}
       </article>
     `;
-  }).join("");
+  };
+
+  const uploadableCards = LIST_FILES.filter((item) => item.uploadable).map(renderCard).join("");
+  const generatedCards = LIST_FILES.filter((item) => !item.uploadable).map(renderCard).join("");
+
+  scopeCards.innerHTML = `
+    <section class="scope-group">
+      <h3 class="scope-group__title">Manual / Uploadable</h3>
+      <div class="scope-group__grid">
+        ${uploadableCards}
+      </div>
+    </section>
+    <details class="scope-group scope-group--generated">
+      <summary class="scope-group__summary">Auto-generated</summary>
+      <div class="scope-group__grid">
+        ${generatedCards}
+      </div>
+    </details>
+  `;
 
   scopeCards.querySelectorAll(".scope-card").forEach((card) => {
     const type = card.dataset.type;
@@ -1747,6 +1819,9 @@ async function openScopeFileModal(type, label) {
   if (!fileViewerModal || !fileViewerContent || !fileViewerTitle) {
     return;
   }
+  currentFileModalType = type || "";
+  currentFileModalLabel = label || type || "file";
+  currentFileModalLines = [];
   fileViewerTitle.textContent = label;
   fileViewerContent.textContent = "Loading...";
   fileViewerModal.hidden = false;
@@ -1756,6 +1831,7 @@ async function openScopeFileModal(type, label) {
       fileViewerContent.textContent = "File missing.";
       return;
     }
+    currentFileModalLines = Array.isArray(data.entries) ? data.entries : [];
     fileViewerContent.textContent = data.entries && data.entries.length
       ? data.entries.join("\n")
       : "No entries yet.";
@@ -1806,6 +1882,170 @@ async function fetchAmassEnum() {
     throw new Error(await response.text());
   }
   return response.json();
+}
+
+async function fetchSubdomainProgress() {
+  const response = await fetch(`${BACKEND_URL}/api/progress/subdomain`);
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
+async function fetchNetworkSettings() {
+  const response = await fetch(`${BACKEND_URL}/api/network`);
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
+async function updateNetworkSettings(payload) {
+  const response = await fetch(`${BACKEND_URL}/api/network`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
+function renderSubdomainProgress(data) {
+  if (!subdomainProgressBar || !subdomainProgressText) {
+    return;
+  }
+  const total = Number(data?.total_wildcards || 0);
+  const done = Number(data?.overall_done || 0);
+  const percent = Number(data?.overall_percent || 0);
+  subdomainProgressBar.value = Math.max(0, Math.min(100, percent));
+  subdomainProgressText.textContent = `${done} / ${total} (${percent}%)`;
+}
+
+async function refreshSubdomainProgress() {
+  try {
+    const data = await fetchSubdomainProgress();
+    renderSubdomainProgress(data);
+  } catch {
+    if (subdomainProgressBar) {
+      subdomainProgressBar.value = 0;
+    }
+    if (subdomainProgressText) {
+      subdomainProgressText.textContent = "0 / 0";
+    }
+  }
+}
+
+async function fetchLeads() {
+  const response = await fetch(`${BACKEND_URL}/api/leads`);
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
+function severityPillClass(severity) {
+  const normalized = normalizeFilterValue(severity);
+  if (normalized === "high" || normalized === "critical") {
+    return "lead-severity--high";
+  }
+  if (normalized === "medium") {
+    return "lead-severity--medium";
+  }
+  return "lead-severity--low";
+}
+
+function renderLeads(data) {
+  if (!leadsStatus || !leadsSummary || !leadsWildcards) {
+    return;
+  }
+
+  const wildcards = Array.isArray(data?.wildcards) ? data.wildcards : [];
+  const updated = data?.updated_at ? `Last update: ${data.updated_at}` : "No findings yet.";
+  leadsStatus.textContent = updated;
+  leadsSummary.innerHTML = `
+    <div class="lead-summary-card">
+      <span class="muted">Total Leads</span>
+      <strong>${escapeHTML(String(data?.total_leads || 0))}</strong>
+    </div>
+    <div class="lead-summary-card">
+      <span class="muted">Total ROI</span>
+      <strong>${escapeHTML(String(data?.total_roi || 0))}</strong>
+    </div>
+    <div class="lead-summary-card">
+      <span class="muted">Wildcards</span>
+      <strong>${escapeHTML(String(wildcards.length))}</strong>
+    </div>
+  `;
+
+  if (!wildcards.length) {
+    leadsWildcards.innerHTML = '<p class="muted">No leads found yet. Run the flow to populate semi-automated findings.</p>';
+    return;
+  }
+
+  leadsWildcards.innerHTML = wildcards.map((wc) => {
+    const domains = Array.isArray(wc.domains) ? wc.domains : [];
+    const domainHtml = domains.map((domain) => {
+      const leads = Array.isArray(domain.leads) ? domain.leads : [];
+      const leadsHtml = leads.map((lead) => `
+        <article class="lead-item">
+          <div class="lead-item__top">
+            <span class="lead-roi">ROI ${escapeHTML(String(lead.roi || 0))}</span>
+            <span class="lead-severity ${severityPillClass(lead.severity)}">${escapeHTML((lead.severity || "low").toUpperCase())}</span>
+            <span class="lead-category">${escapeHTML(lead.category || "unknown")}${lead.family ? `/${escapeHTML(lead.family)}` : ""}</span>
+          </div>
+          <div class="lead-item__target"><code>${escapeHTML(lead.target || "")}</code></div>
+          ${Array.isArray(lead.reasons) && lead.reasons.length ? `<div class="lead-item__reasons">${lead.reasons.slice(0, 4).map((reason) => `<span>${escapeHTML(reason)}</span>`).join("")}</div>` : ""}
+          ${lead.manual_action ? `<p class="muted">${escapeHTML(lead.manual_action)}</p>` : ""}
+        </article>
+      `).join("");
+      return `
+        <details class="lead-domain-card" open>
+          <summary>
+            <span><strong>${escapeHTML(domain.domain || "")}</strong></span>
+            <span class="lead-domain-meta">ROI ${escapeHTML(String(domain.roi || 0))} | Leads ${escapeHTML(String(domain.lead_count || 0))} | H:${escapeHTML(String(domain.high_count || 0))} M:${escapeHTML(String(domain.medium_count || 0))} L:${escapeHTML(String(domain.low_count || 0))}</span>
+          </summary>
+          <div class="lead-domain-items">${leadsHtml}</div>
+        </details>
+      `;
+    }).join("");
+
+    return `
+      <section class="lead-wildcard-card">
+        <h3>${escapeHTML(wc.wildcard || "(unmapped)")}</h3>
+        <p class="muted">ROI ${escapeHTML(String(wc.roi || 0))} | Domains ${escapeHTML(String(wc.domain_count || 0))} | Leads ${escapeHTML(String(wc.lead_count || 0))}</p>
+        <div class="lead-domain-list">${domainHtml}</div>
+      </section>
+    `;
+  }).join("");
+}
+
+async function refreshLeads(options = {}) {
+  if (!leadsStatus || !leadsSummary || !leadsWildcards) {
+    return;
+  }
+  try {
+    const data = await fetchLeads();
+    const signature = JSON.stringify({
+      total_leads: data?.total_leads || 0,
+      total_roi: data?.total_roi || 0,
+      updated_at: data?.updated_at || "",
+      wildcards: (data?.wildcards || []).map((wc) => ({
+        wildcard: wc.wildcard,
+        roi: wc.roi,
+        lead_count: wc.lead_count,
+        domain_count: wc.domain_count,
+      })),
+    });
+    if (!options.force && signature === lastLeadsSignature) {
+      return;
+    }
+    lastLeadsSignature = signature;
+    renderLeads(data);
+  } catch (error) {
+    leadsStatus.textContent = `Leads fetch error: ${error.message}`;
+  }
 }
 
 function updateAmassEnumButton(present, count) {
@@ -1984,6 +2224,33 @@ closeFileViewer?.addEventListener("click", () => {
   }
 });
 
+exportFileViewer?.addEventListener("click", async () => {
+  const type = currentFileModalType;
+  if (!type) {
+    return;
+  }
+  try {
+    const data = await fetchListMeta(type);
+    const lines = Array.isArray(data.entries) ? data.entries : currentFileModalLines;
+    const text = lines.length ? lines.join("\n") : "";
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const base = (currentFileModalLabel || type || "export")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    anchor.href = url;
+    anchor.download = `${base || "export"}.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    fileViewerContent.textContent = `Export failed: ${error.message}`;
+  }
+});
+
 fileViewerModal?.addEventListener("click", (event) => {
   if (event.target === fileViewerModal) {
     fileViewerModal.hidden = true;
@@ -2116,6 +2383,8 @@ async function refreshStatus() {
 
 refreshStatus();
 setInterval(refreshStatus, 5000);
+refreshSubdomainProgress();
+setInterval(refreshSubdomainProgress, 4000);
 
 function stepPrefix(status) {
   switch (status) {
@@ -2277,6 +2546,29 @@ githubAutoRun?.addEventListener("change", async () => {
   }
 });
 
+async function loadNetworkSettings() {
+  if (!torRouteToggle) {
+    return;
+  }
+  try {
+    const data = await fetchNetworkSettings();
+    torRouteToggle.checked = Boolean(data.tor_enabled);
+  } catch {
+    torRouteToggle.checked = false;
+  }
+}
+
+torRouteToggle?.addEventListener("change", async () => {
+  try {
+    await updateNetworkSettings({ tor_enabled: Boolean(torRouteToggle.checked) });
+  } catch (error) {
+    torRouteToggle.checked = !torRouteToggle.checked;
+    if (flowStatus) {
+      flowStatus.textContent = `Network toggle failed: ${error.message}`;
+    }
+  }
+});
+
 githubKeysList?.addEventListener("click", async (event) => {
   const target = event.target;
   const row = target.closest(".config-row");
@@ -2318,45 +2610,7 @@ githubKeysList?.addEventListener("click", async (event) => {
 });
 
 loadConfig();
-
-async function refreshListEntries(type, options = {}) {
-  if (!listViewOutput) {
-    return;
-  }
-  try {
-    const data = await fetchListMeta(type);
-    if (!options.force && hasSelectionInside(listViewOutput)) {
-      return;
-    }
-    if (!data.present) {
-      const nextText = "File missing.";
-      if (lastListTextByType[type] !== nextText || listViewOutput.textContent !== nextText) {
-        listViewOutput.textContent = nextText;
-        lastListTextByType[type] = nextText;
-      }
-      return;
-    }
-    const nextText = data.entries && data.entries.length ? data.entries.join("\n") : "No entries yet.";
-    if (lastListTextByType[type] !== nextText || listViewOutput.textContent !== nextText) {
-      listViewOutput.textContent = nextText;
-      lastListTextByType[type] = nextText;
-    }
-  } catch (error) {
-    const nextText = `Error: ${error.message}`;
-    if (lastListTextByType[type] !== nextText || listViewOutput.textContent !== nextText) {
-      listViewOutput.textContent = nextText;
-      lastListTextByType[type] = nextText;
-    }
-  }
-}
-
-listViewSelect?.addEventListener("change", () => {
-  refreshListEntries(listViewSelect.value, { force: true });
-});
-
-if (listViewSelect?.value) {
-  refreshListEntries(listViewSelect.value);
-}
+loadNetworkSettings();
 
 async function refreshLogs() {
   if (!flowLogOutput) {
@@ -2411,6 +2665,10 @@ refreshLiveWebservers({ renderOnlyIfOpen: false });
 setInterval(() => {
   refreshLiveWebservers({ renderOnlyIfOpen: true });
 }, 5000);
+refreshLeads({ force: true });
+setInterval(() => {
+  refreshLeads({ force: false });
+}, 7000);
 
 renderStrideLearning();
 loadStrideAnswer();

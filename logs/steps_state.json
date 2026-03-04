@@ -3,7 +3,9 @@
   "amass": "done",
   "assetfinder": "pending",
   "cewl": "pending",
+  "clickjacking-checks": "pending",
   "consolidate": "done",
+  "cors-checks": "pending",
   "csrf-checks": "pending",
   "ctl": "pending",
   "dnsx-validate": "pending",
@@ -15,12 +17,17 @@
   "injection-checks": "pending",
   "katana": "pending",
   "load-config": "done",
+  "nmap-enrichment-checks": "pending",
+  "open-redirect-checks": "pending",
   "param-fuzz": "pending",
   "robots-sitemaps": "pending",
   "server-input-checks": "pending",
+  "smuggling-stack-checks": "pending",
   "subfinder": "pending",
   "sublist3r": "done",
+  "tier-isolation-checks": "pending",
   "url-corpus": "pending",
   "validate-inputs": "done",
-  "waybackurls": "pending"
+  "waybackurls": "pending",
+  "workflow-logic-checks": "pending"
 }

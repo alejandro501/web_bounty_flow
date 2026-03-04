@@ -98,11 +98,11 @@ Legend:
 - [x] SMTP/header injection checks.
 
 ## 5) Chapter 11 - Application Logic Automation
-- [ ] Multi-step workflow state-machine runner (Not Implemented).
+- [x] Multi-step workflow state-machine runner (semi-automated signals + manual validation).
 - [ ] Sequence enforcement and step-skipping checks (Not Implemented).
 - [ ] Incomplete-input and boundary-condition logic checks (Not Implemented).
 - [ ] Business limit abuse automation (quantity/discount/rate/credit) (Not Implemented).
-- [ ] Race-condition harness for concurrent state transitions (Not Implemented).
+- [ ] Race-condition checks tracked as manual testing item (Manual-first; helper automation only).
 
 ## 6) Chapters 12-13 - Attacking Users (Client-Side)
 
@@ -113,9 +113,9 @@ Legend:
 
 ### 6.2 Other Client-Side Attack Automation
 - [x] CSRF token presence/validation checks (baseline/cross-origin replay + manual validation).
-- [ ] Clickjacking header/frame policy checks (Not Implemented).
-- [ ] CORS/SOP misconfiguration scanner (Not Implemented).
-- [ ] Open redirect automated validation and chaining potential (Not Implemented).
+- [x] Clickjacking header/frame policy checks.
+- [x] CORS/SOP misconfiguration scanner.
+- [x] Open redirect automated validation and chaining potential.
 - [ ] Client-side privacy exposure checks (cache/autocomplete/storage artifacts) (Not Implemented).
 
 ## 7) Chapter 14 - Automating Customized Attacks
@@ -137,36 +137,36 @@ Legend:
 
 ### 9.1 Server/Infrastructure Checks
 - [x] Utilities exist for request smuggling/h2c/hop-by-hop/toxicache/SSI-ESI/cloudflare checks.
-- [ ] Integrate `utils/*` checks into active orchestrated flow (Not Implemented).
+- [x] Integrate `utils/*` checks into active orchestrated flow (Semi-automated: machine detection + manual exploit validation).
 - [ ] Normalize utility outputs into machine-readable findings JSON (Not Implemented).
 - [ ] Add dangerous HTTP method scanner (`OPTIONS/TRACE/PUT/DELETE`) (Not Implemented).
 - [ ] Add default-content/default-credential probes for known server panels (Not Implemented).
 
 ### 9.2 Nmap/Service Correlation
-- [ ] Reintroduce automated Nmap scans in active flow (Not Implemented).
-- [ ] Parse `.gnmap` outputs into service summaries and pointers (Not Implemented).
-- [ ] Run `searchsploit` enrichment automatically on discovered services (Not Implemented).
+- [x] Reintroduce automated Nmap scans in active flow.
+- [x] Parse `.gnmap` outputs into service summaries and pointers.
+- [x] Run `searchsploit` enrichment automatically on discovered services.
 
 ### 9.3 Architecture/Segmentation
-- [ ] Tier-segmentation verification checks (edge/app/data trust boundaries) (Not Implemented).
-- [ ] Shared-hosting and virtual-host isolation checks (Not Implemented).
+- [x] Tier-segmentation verification checks (edge/app/data trust boundaries) (semi-automated + manual validation).
+- [x] Shared-hosting and virtual-host isolation checks (semi-automated + manual validation).
 
 ## 10) Chapter 19 - Source Code Review Automation
-- [ ] Integrate `semgrep` rules by WAHH category (Not Implemented).
-- [ ] Integrate language-specific SAST (`gosec`, etc.) (Not Implemented).
-- [ ] Correlate static findings with live endpoints/parameters (Not Implemented).
+- [x] Integrate `semgrep` rules by WAHH category.
+- [x] Integrate language-specific SAST (`gosec`, etc.).
+- [x] Correlate static findings with live endpoints/parameters.
 
 ## 11) Chapter 20 - Toolkit and Workflow Orchestration
 - [x] Dockerized toolchain and backend API orchestration.
 - [x] UI views for scope, run status, logs, and artifacts.
-- [ ] Add run manifest (tool versions + params + hashes) (Not Implemented).
-- [ ] Add resumable runs/checkpoints for long workflows (Not Implemented).
-- [ ] Add export bundle (JSON + Markdown + CSV) per run (Not Implemented).
+- [x] Add run manifest (tool versions + params + hashes).
+- [x] Add resumable runs/checkpoints for long workflows (step-state snapshots).
+- [x] Add export bundle (JSON + Markdown + CSV) per run.
 
 ## 12) Chapter 21 - Integrated Methodology Runner
 - [x] Early methodology stages automated (mapping + host discovery + probing + fuzzing bootstrap).
-- [ ] Build chapter-aligned stage gates with required evidence per gate (Not Implemented).
-- [ ] Completion scorecard by chapter and subchapter (Not Implemented).
+- [x] Build chapter-aligned stage gates with required evidence per gate.
+- [x] Completion scorecard by chapter and subchapter.
 - [ ] Auto-generate analyst action queue from failed/missing automation stages (Not Implemented).
 
 ## Current Active Flow (Segmented Summary)

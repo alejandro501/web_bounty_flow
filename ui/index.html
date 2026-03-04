@@ -4,14 +4,20 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bounty Flow UI</title>
-    <link rel="stylesheet" href="styles.css?v=20260303-2" />
+    <link rel="stylesheet" href="styles.css?v=20260304-3" />
   </head>
   <body data-backend-url="http://localhost:5050" data-active-view="flow">
     <main class="layout">
+      <label class="tor-switch tor-switch--floating">
+        <input id="tor-route-toggle" type="checkbox" />
+        <span class="tor-switch__slider"></span>
+        <span class="tor-switch__label">Route Through Tor</span>
+      </label>
       <aside class="sidebar">
         <h1 class="brand">alejandro501<span class="brand-accent">_</span></h1>
         <nav class="menu">
           <button class="menu-item is-active" data-view="flow">Flow</button>
+          <button class="menu-item" data-view="leads">Leads</button>
           <button class="menu-item" data-view="stride">STRIDE Threat Model</button>
           <button class="menu-item" data-view="config">Configuration</button>
         </nav>
@@ -32,6 +38,13 @@
           <button id="open-live-webservers" type="button" disabled>Live Web Servers</button>
         </div>
         <p id="flow-status" class="muted">idle</p>
+        <div class="subdomain-progress">
+          <div class="subdomain-progress__header">
+            <span>Subdomain Enumeration Progress</span>
+            <span id="subdomain-progress-text" class="muted">0 / 0</span>
+          </div>
+          <progress id="subdomain-progress-bar" value="0" max="100"></progress>
+        </div>
         <div class="flow-steps">
           <p class="muted">Flow order</p>
           <ul id="flow-steps-list"></ul>
@@ -87,62 +100,19 @@
         </div>
       </section>
 
-        <section class="panel panel-scope">
-        <h2>Scope entries</h2>
-        <label>
-          Current list
-          <select id="list-view-select">
-            <option value="wildcards">Wildcards</option>
-            <option value="domains">Domains</option>
-            <option value="apidomains">API Domains</option>
-            <option value="organizations">Organizations</option>
-            <option value="ips">IPs</option>
-            <option value="out_of_scope">Out of scope</option>
-            <option value="live_webservers_csv">Live Web Servers CSV</option>
-            <option value="robots_urls">Robots URLs</option>
-            <option value="wayback_urls">Wayback URLs</option>
-            <option value="katana_urls">Katana URLs</option>
-            <option value="all_urls">All URLs</option>
-            <option value="params_candidates">Param Candidates</option>
-            <option value="param_fuzz_query_hits">Param Fuzz Query Hits</option>
-            <option value="param_fuzz_body_hits">Param Fuzz Body Hits</option>
-            <option value="param_fuzz_header_hits">Param Fuzz Header Hits</option>
-            <option value="param_fuzz_cookie_hits">Param Fuzz Cookie Hits</option>
-            <option value="param_fuzz_summary">Param Fuzz Summary</option>
-            <option value="injection_sqli_hits">Injection SQLi Hits</option>
-            <option value="injection_nosqli_hits">Injection NoSQLi Hits</option>
-            <option value="injection_xpath_hits">Injection XPath Hits</option>
-            <option value="injection_ldap_hits">Injection LDAP Hits</option>
-            <option value="injection_summary">Injection Summary</option>
-            <option value="server_input_os_command_hits">Server Input OS Command Hits</option>
-            <option value="server_input_path_traversal_hits">Server Input Path Traversal Hits</option>
-            <option value="server_input_file_inclusion_hits">Server Input File Inclusion Hits</option>
-            <option value="server_input_summary">Server Input Summary</option>
-            <option value="adv_injection_xxe_hits">Advanced Injection XXE Hits</option>
-            <option value="adv_injection_soap_hits">Advanced Injection SOAP Hits</option>
-            <option value="adv_injection_ssrf_hits">Advanced Injection SSRF Hits</option>
-            <option value="adv_injection_smtp_hits">Advanced Injection SMTP Hits</option>
-            <option value="adv_injection_summary">Advanced Injection Summary</option>
-            <option value="csrf_candidates">CSRF Candidates</option>
-            <option value="csrf_findings">CSRF Findings</option>
-            <option value="csrf_replay_log">CSRF Replay Log</option>
-            <option value="csrf_summary">CSRF Summary</option>
-            <option value="xss_reflected_hits">XSS Reflected Hits</option>
-            <option value="xss_dom_hits">XSS DOM Hits</option>
-            <option value="xss_stored_hits">XSS Stored Hits</option>
-            <option value="xss_summary">XSS Summary</option>
-            <option value="xss_scan_log">XSS Scan Log</option>
-            <option value="fuzzing_doc_hits">Fuzzing Doc Hits</option>
-            <option value="fuzzing_dir_hits">Fuzzing Dir Hits</option>
-          </select>
-        </label>
-        <pre id="list-view-output" class="log-view">Select a list to show entries.</pre>
-      </section>
-
         <section class="panel panel-logs">
         <h2>Flow logs</h2>
         <pre id="flow-log-output" class="log-view log-view--tall">Logs appear here when you start the flow.</pre>
       </section>
+      </section>
+
+      <section class="view view-leads">
+        <h2 class="page-title">Leads ROI Report</h2>
+        <section class="panel">
+          <p id="leads-status" class="muted">Loading leads...</p>
+          <div id="leads-summary" class="leads-summary"></div>
+          <div id="leads-wildcards" class="leads-wildcards"></div>
+        </section>
       </section>
 
       <section class="view view-stride">
@@ -621,12 +591,15 @@
         <div class="modal-panel modal-panel--file">
           <div class="modal-header">
             <h3 id="file-viewer-title">Scope File</h3>
-            <button id="close-file-viewer" type="button">Close</button>
+            <div class="modal-actions">
+              <button id="export-file-viewer" type="button">Export</button>
+              <button id="close-file-viewer" type="button">Close</button>
+            </div>
           </div>
           <pre id="file-viewer-content" class="log-view log-view--tall">Loading...</pre>
         </div>
       </div>
     </main>
-    <script src="app.js?v=20260303-8"></script>
+    <script src="app.js?v=20260304-3"></script>
   </body>
 </html>

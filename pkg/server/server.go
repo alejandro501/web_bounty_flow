@@ -47,6 +47,7 @@ type Server struct {
 	xssRunning  bool
 	xssStatus   string
 	xssLastRun  string
+	torEnabled  bool
 }
 
 // New creates a new HTTP server wired to the bounty flow.
@@ -70,12 +71,15 @@ func New(cfg *config.Config) *Server {
 	s.mux.HandleFunc("/api/logs", s.corsMiddleware(s.logsHandler))
 	s.mux.HandleFunc("/api/config", s.corsMiddleware(s.configHandler))
 	s.mux.HandleFunc("/api/config/providers/", s.corsMiddleware(s.providerConfigHandler))
+	s.mux.HandleFunc("/api/network", s.corsMiddleware(s.networkHandler))
 	s.mux.HandleFunc("/api/dorking/github/run", s.corsMiddleware(s.githubRunHandler))
 	s.mux.HandleFunc("/api/steps", s.corsMiddleware(s.stepsHandler))
 	s.mux.HandleFunc("/api/list", s.corsMiddleware(s.listHandler))
 	s.mux.HandleFunc("/api/tools", s.corsMiddleware(s.toolsHandler))
 	s.mux.HandleFunc("/api/live-webservers", s.corsMiddleware(s.liveWebserversHandler))
 	s.mux.HandleFunc("/api/amass-enum", s.corsMiddleware(s.amassEnumHandler))
+	s.mux.HandleFunc("/api/progress/subdomain", s.corsMiddleware(s.subdomainProgressHandler))
+	s.mux.HandleFunc("/api/leads", s.corsMiddleware(s.leadsHandler))
 	s.mux.HandleFunc("/api/manual/xss/run", s.corsMiddleware(s.manualXSSRunHandler))
 	s.mux.HandleFunc("/api/manual/xss/status", s.corsMiddleware(s.manualXSSStatusHandler))
 	s.mux.HandleFunc("/", s.corsMiddleware(s.rootHandler))
@@ -102,6 +106,14 @@ type keyPayload struct {
 
 type settingsPayload struct {
 	AutoRun bool `json:"auto_run"`
+}
+
+type networkResponse struct {
+	TorEnabled bool `json:"tor_enabled"`
+}
+
+type networkPayload struct {
+	TorEnabled bool `json:"tor_enabled"`
 }
 
 // ListenAndServe starts the configured HTTP server.
@@ -264,6 +276,20 @@ type amassEnumResponse struct {
 	Rows    []amassEnumRow `json:"rows"`
 }
 
+type subdomainToolProgress struct {
+	Name    string `json:"name"`
+	Done    int    `json:"done"`
+	Total   int    `json:"total"`
+	Percent int    `json:"percent"`
+}
+
+type subdomainProgressResponse struct {
+	TotalWildcards int                     `json:"total_wildcards"`
+	OverallDone    int                     `json:"overall_done"`
+	OverallPercent int                     `json:"overall_percent"`
+	Tools          []subdomainToolProgress `json:"tools"`
+}
+
 type liveWebserverRow struct {
 	URL           string   `json:"url"`
 	StatusCode    int      `json:"status_code"`
@@ -280,6 +306,48 @@ type amassEnumRow struct {
 	ASN    int    `json:"asn"`
 	Source string `json:"source"`
 	Tag    string `json:"tag"`
+}
+
+type leadItem struct {
+	ID           string   `json:"id"`
+	Category     string   `json:"category"`
+	Family       string   `json:"family,omitempty"`
+	Severity     string   `json:"severity"`
+	ROI          int      `json:"roi"`
+	Wildcard     string   `json:"wildcard"`
+	Domain       string   `json:"domain"`
+	Target       string   `json:"target"`
+	Reasons      []string `json:"reasons,omitempty"`
+	ManualAction string   `json:"manual_action,omitempty"`
+	Source       string   `json:"source"`
+	Timestamp    string   `json:"timestamp,omitempty"`
+}
+
+type leadsDomainGroup struct {
+	Domain      string     `json:"domain"`
+	Wildcard    string     `json:"wildcard"`
+	ROI         int        `json:"roi"`
+	LeadCount   int        `json:"lead_count"`
+	HighCount   int        `json:"high_count"`
+	MediumCount int        `json:"medium_count"`
+	LowCount    int        `json:"low_count"`
+	Leads       []leadItem `json:"leads"`
+}
+
+type leadsWildcardGroup struct {
+	Wildcard    string             `json:"wildcard"`
+	ROI         int                `json:"roi"`
+	LeadCount   int                `json:"lead_count"`
+	DomainCount int                `json:"domain_count"`
+	Domains     []leadsDomainGroup `json:"domains"`
+}
+
+type leadsResponse struct {
+	Present    bool                 `json:"present"`
+	UpdatedAt  string               `json:"updated_at"`
+	TotalLeads int                  `json:"total_leads"`
+	TotalROI   int                  `json:"total_roi"`
+	Wildcards  []leadsWildcardGroup `json:"wildcards"`
 }
 
 type toolStatus struct {
@@ -374,6 +442,37 @@ func (s *Server) configHandler(w http.ResponseWriter, r *http.Request) {
 	resp := configResponse{Version: cfg.Version, Providers: cfg.Providers}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) networkHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		enabled := s.loadTorEnabled()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(networkResponse{TorEnabled: enabled})
+		return
+	case http.MethodPut:
+		var payload networkPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		s.torEnabled = payload.TorEnabled
+		if s.configStore != nil {
+			if err := s.configStore.UpdateProviderSettings("network", payload.TorEnabled); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		if s.app != nil {
+			s.app.SetTorEnabled(payload.TorEnabled)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(networkResponse{TorEnabled: payload.TorEnabled})
+		return
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *Server) providerConfigHandler(w http.ResponseWriter, r *http.Request) {
@@ -563,6 +662,204 @@ func (s *Server) amassEnumHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) subdomainProgressHandler(w http.ResponseWriter, r *http.Request) {
+	wildcards := readListLines(s.cfg.Lists.Wildcards)
+	total := len(uniqueNormalizedSeeds(wildcards))
+	rawRoot := filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "recon", "raw")
+
+	toolCounts := []struct {
+		name string
+		dir  string
+		ext  string
+	}{
+		{name: "amass", dir: filepath.Join(rawRoot, "amass"), ext: ".txt"},
+		{name: "sublist3r", dir: filepath.Join(rawRoot, "sublist3r"), ext: ".txt"},
+		{name: "assetfinder", dir: filepath.Join(rawRoot, "assetfinder"), ext: ".txt"},
+		{name: "gau", dir: filepath.Join(rawRoot, "gau"), ext: ".txt"},
+		{name: "ctl", dir: filepath.Join(rawRoot, "ctl"), ext: ".json"},
+		{name: "subfinder", dir: filepath.Join(rawRoot, "subfinder"), ext: ".txt"},
+	}
+
+	resp := subdomainProgressResponse{TotalWildcards: total}
+	if total <= 0 {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	sumPercent := 0
+	minDone := total
+	for _, tool := range toolCounts {
+		done := countFilesByExt(tool.dir, tool.ext)
+		if done > total {
+			done = total
+		}
+		percent := int(float64(done) * 100.0 / float64(total))
+		sumPercent += percent
+		if done < minDone {
+			minDone = done
+		}
+		resp.Tools = append(resp.Tools, subdomainToolProgress{
+			Name:    tool.name,
+			Done:    done,
+			Total:   total,
+			Percent: percent,
+		})
+	}
+
+	resp.OverallDone = minDone
+	resp.OverallPercent = int(float64(sumPercent) / float64(len(toolCounts)))
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) leadsHandler(w http.ResponseWriter, r *http.Request) {
+	baseDir := filepath.Dir(s.cfg.Lists.Domains)
+	fuzzDir := filepath.Join(baseDir, "fuzzing")
+	roots := readListLines(s.cfg.Lists.Wildcards)
+
+	specs := []struct {
+		category string
+		source   string
+		path     string
+	}{
+		{category: "injection", source: "injection/sqli_hits.jsonl", path: filepath.Join(fuzzDir, "injection", "sqli_hits.jsonl")},
+		{category: "injection", source: "injection/nosqli_hits.jsonl", path: filepath.Join(fuzzDir, "injection", "nosqli_hits.jsonl")},
+		{category: "injection", source: "injection/xpath_hits.jsonl", path: filepath.Join(fuzzDir, "injection", "xpath_hits.jsonl")},
+		{category: "injection", source: "injection/ldap_hits.jsonl", path: filepath.Join(fuzzDir, "injection", "ldap_hits.jsonl")},
+		{category: "server-input", source: "server-input/os_command_hits.jsonl", path: filepath.Join(fuzzDir, "server-input", "os_command_hits.jsonl")},
+		{category: "server-input", source: "server-input/path_traversal_hits.jsonl", path: filepath.Join(fuzzDir, "server-input", "path_traversal_hits.jsonl")},
+		{category: "server-input", source: "server-input/file_inclusion_hits.jsonl", path: filepath.Join(fuzzDir, "server-input", "file_inclusion_hits.jsonl")},
+		{category: "adv-injection", source: "adv-injection/xxe_hits.jsonl", path: filepath.Join(fuzzDir, "adv-injection", "xxe_hits.jsonl")},
+		{category: "adv-injection", source: "adv-injection/soap_hits.jsonl", path: filepath.Join(fuzzDir, "adv-injection", "soap_hits.jsonl")},
+		{category: "adv-injection", source: "adv-injection/ssrf_hits.jsonl", path: filepath.Join(fuzzDir, "adv-injection", "ssrf_hits.jsonl")},
+		{category: "adv-injection", source: "adv-injection/smtp_hits.jsonl", path: filepath.Join(fuzzDir, "adv-injection", "smtp_hits.jsonl")},
+		{category: "csrf", source: "csrf/findings.jsonl", path: filepath.Join(fuzzDir, "csrf", "findings.jsonl")},
+		{category: "clickjacking", source: "clickjacking/findings.jsonl", path: filepath.Join(fuzzDir, "clickjacking", "findings.jsonl")},
+		{category: "cors", source: "cors/findings.jsonl", path: filepath.Join(fuzzDir, "cors", "findings.jsonl")},
+		{category: "open-redirect", source: "open-redirect/findings.jsonl", path: filepath.Join(fuzzDir, "open-redirect", "findings.jsonl")},
+		{category: "xss", source: "xss/reflected_hits.jsonl", path: filepath.Join(fuzzDir, "xss", "reflected_hits.jsonl")},
+		{category: "xss", source: "xss/dom_hits.jsonl", path: filepath.Join(fuzzDir, "xss", "dom_hits.jsonl")},
+		{category: "xss", source: "xss/stored_hits.jsonl", path: filepath.Join(fuzzDir, "xss", "stored_hits.jsonl")},
+	}
+
+	var leads []leadItem
+	latest := time.Time{}
+	for _, spec := range specs {
+		rows, modTime := readJSONLRecords(spec.path)
+		if modTime.After(latest) {
+			latest = modTime
+		}
+		for _, row := range rows {
+			lead := buildLeadItem(spec.category, spec.source, row, roots)
+			if lead.ID == "" || lead.Domain == "" {
+				continue
+			}
+			leads = append(leads, lead)
+		}
+	}
+
+	dedup := make(map[string]leadItem, len(leads))
+	for _, lead := range leads {
+		if current, ok := dedup[lead.ID]; ok {
+			if lead.ROI > current.ROI {
+				dedup[lead.ID] = lead
+			}
+			continue
+		}
+		dedup[lead.ID] = lead
+	}
+
+	uniqueLeads := make([]leadItem, 0, len(dedup))
+	for _, lead := range dedup {
+		uniqueLeads = append(uniqueLeads, lead)
+	}
+	sort.Slice(uniqueLeads, func(i, j int) bool {
+		if uniqueLeads[i].ROI == uniqueLeads[j].ROI {
+			return uniqueLeads[i].ID < uniqueLeads[j].ID
+		}
+		return uniqueLeads[i].ROI > uniqueLeads[j].ROI
+	})
+
+	wildcardBuckets := make(map[string]map[string][]leadItem)
+	totalROI := 0
+	for _, lead := range uniqueLeads {
+		totalROI += lead.ROI
+		wc := lead.Wildcard
+		if wc == "" {
+			wc = "(unmapped)"
+		}
+		if wildcardBuckets[wc] == nil {
+			wildcardBuckets[wc] = make(map[string][]leadItem)
+		}
+		wildcardBuckets[wc][lead.Domain] = append(wildcardBuckets[wc][lead.Domain], lead)
+	}
+
+	var wildcardGroups []leadsWildcardGroup
+	for wildcard, domains := range wildcardBuckets {
+		group := leadsWildcardGroup{Wildcard: wildcard}
+		var domainGroups []leadsDomainGroup
+		for domain, items := range domains {
+			dg := leadsDomainGroup{
+				Domain:    domain,
+				Wildcard:  wildcard,
+				Leads:     append([]leadItem{}, items...),
+				LeadCount: len(items),
+			}
+			sort.Slice(dg.Leads, func(i, j int) bool {
+				if dg.Leads[i].ROI == dg.Leads[j].ROI {
+					return dg.Leads[i].ID < dg.Leads[j].ID
+				}
+				return dg.Leads[i].ROI > dg.Leads[j].ROI
+			})
+			for _, lead := range dg.Leads {
+				dg.ROI += lead.ROI
+				switch strings.ToLower(strings.TrimSpace(lead.Severity)) {
+				case "high", "critical":
+					dg.HighCount++
+				case "medium":
+					dg.MediumCount++
+				default:
+					dg.LowCount++
+				}
+			}
+			domainGroups = append(domainGroups, dg)
+		}
+		sort.Slice(domainGroups, func(i, j int) bool {
+			if domainGroups[i].ROI == domainGroups[j].ROI {
+				return domainGroups[i].Domain < domainGroups[j].Domain
+			}
+			return domainGroups[i].ROI > domainGroups[j].ROI
+		})
+		group.Domains = domainGroups
+		group.DomainCount = len(domainGroups)
+		for _, dg := range domainGroups {
+			group.ROI += dg.ROI
+			group.LeadCount += dg.LeadCount
+		}
+		wildcardGroups = append(wildcardGroups, group)
+	}
+	sort.Slice(wildcardGroups, func(i, j int) bool {
+		if wildcardGroups[i].ROI == wildcardGroups[j].ROI {
+			return wildcardGroups[i].Wildcard < wildcardGroups[j].Wildcard
+		}
+		return wildcardGroups[i].ROI > wildcardGroups[j].ROI
+	})
+
+	resp := leadsResponse{
+		Present:    len(uniqueLeads) > 0,
+		UpdatedAt:  latest.UTC().Format(time.RFC3339),
+		TotalLeads: len(uniqueLeads),
+		TotalROI:   totalROI,
+		Wildcards:  wildcardGroups,
+	}
+	if latest.IsZero() {
+		resp.UpdatedAt = ""
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) toolsHandler(w http.ResponseWriter, r *http.Request) {
@@ -901,6 +1198,16 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 	doneIfPending("server-input-checks", fileExists(filepath.Join(baseDir, "fuzzing", "server-input", "summary.csv")))
 	doneIfPending("adv-injection-checks", fileExists(filepath.Join(baseDir, "fuzzing", "adv-injection", "summary.csv")))
 	doneIfPending("csrf-checks", fileExists(filepath.Join(baseDir, "fuzzing", "csrf", "summary.csv")))
+	doneIfPending("clickjacking-checks", fileExists(filepath.Join(baseDir, "fuzzing", "clickjacking", "summary.csv")))
+	doneIfPending("cors-checks", fileExists(filepath.Join(baseDir, "fuzzing", "cors", "summary.csv")))
+	doneIfPending("open-redirect-checks", fileExists(filepath.Join(baseDir, "fuzzing", "open-redirect", "summary.csv")))
+	doneIfPending("workflow-logic-checks", fileExists(filepath.Join(baseDir, "fuzzing", "workflow-logic", "summary.csv")))
+	doneIfPending("smuggling-stack-checks", fileExists(filepath.Join(baseDir, "fuzzing", "smuggling-stack", "summary.csv")))
+	doneIfPending("nmap-enrichment-checks", fileExists(filepath.Join(baseDir, "fuzzing", "nmap", "summary.csv")))
+	doneIfPending("tier-isolation-checks", fileExists(filepath.Join(baseDir, "fuzzing", "tier-isolation", "summary.csv")))
+	doneIfPending("static-review-correlation", fileExists(filepath.Join(baseDir, "fuzzing", "static-review", "summary.csv")))
+	doneIfPending("runops-manifest-export", globHasNonEmpty(filepath.Join(s.cfg.Paths.LogsDir, "runops", "manifest_*.json")))
+	doneIfPending("stage-gates-scorecard", fileExists(filepath.Join(s.cfg.Paths.LogsDir, "runops", "scorecard.json")))
 	doneIfPending("dork-links", hasDorkLinkFiles(s.cfg.Paths.DorkingDir))
 	doneIfPending("cewl",
 		fileHasNonEmpty(filepath.Join(reconDir, "cewl_custom_wordlist.txt")) ||
@@ -922,6 +1229,24 @@ func (s *Server) initConfigStore() {
 		return
 	}
 	s.configStore = store
+	if s.app != nil {
+		s.app.SetTorEnabled(s.loadTorEnabled())
+	}
+}
+
+func (s *Server) loadTorEnabled() bool {
+	if s.configStore == nil {
+		return s.torEnabled
+	}
+	cfg, err := s.configStore.LoadDecrypted()
+	if err != nil {
+		return s.torEnabled
+	}
+	network := cfg.Providers["network"]
+	if network == nil {
+		return s.torEnabled
+	}
+	return network.AutoRun
 }
 
 func (s *Server) startFlow() error {
@@ -936,6 +1261,9 @@ func (s *Server) startFlow() error {
 	s.running = true
 	s.status = "running"
 	s.resetSteps()
+	if s.app != nil {
+		s.app.SetTorEnabled(s.loadTorEnabled())
+	}
 
 	go func() {
 		defer func() {
@@ -1051,6 +1379,66 @@ func (s *Server) listPath(name string) (string, error) {
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "csrf", "replay_log.jsonl"), nil
 	case "csrf_summary":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "csrf", "summary.csv"), nil
+	case "clickjacking_headers":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "clickjacking", "headers.jsonl"), nil
+	case "clickjacking_findings":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "clickjacking", "findings.jsonl"), nil
+	case "clickjacking_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "clickjacking", "summary.csv"), nil
+	case "cors_replay_log":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "cors", "replay_log.jsonl"), nil
+	case "cors_findings":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "cors", "findings.jsonl"), nil
+	case "cors_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "cors", "summary.csv"), nil
+	case "open_redirect_candidates":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "open-redirect", "candidates.jsonl"), nil
+	case "open_redirect_replay_log":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "open-redirect", "replay_log.jsonl"), nil
+	case "open_redirect_findings":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "open-redirect", "findings.jsonl"), nil
+	case "open_redirect_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "open-redirect", "summary.csv"), nil
+	case "workflow_logic_candidates":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "workflow-logic", "candidates.jsonl"), nil
+	case "workflow_logic_findings":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "workflow-logic", "findings.jsonl"), nil
+	case "workflow_logic_replay_log":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "workflow-logic", "replay_log.jsonl"), nil
+	case "workflow_logic_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "workflow-logic", "summary.csv"), nil
+	case "smuggling_stack_tool_runs":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "smuggling-stack", "tool_runs.jsonl"), nil
+	case "smuggling_stack_findings":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "smuggling-stack", "findings.jsonl"), nil
+	case "smuggling_stack_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "smuggling-stack", "summary.csv"), nil
+	case "nmap_targets":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "nmap", "targets.txt"), nil
+	case "nmap_services":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "nmap", "services.csv"), nil
+	case "nmap_searchsploit":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "nmap", "searchsploit.txt"), nil
+	case "nmap_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "nmap", "summary.csv"), nil
+	case "tier_isolation_ip_map":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "tier-isolation", "ip_map.jsonl"), nil
+	case "tier_isolation_findings":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "tier-isolation", "findings.jsonl"), nil
+	case "tier_isolation_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "tier-isolation", "summary.csv"), nil
+	case "static_review_semgrep":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "static-review", "semgrep.json"), nil
+	case "static_review_gosec":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "static-review", "gosec.json"), nil
+	case "static_review_correlated":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "static-review", "correlated_findings.jsonl"), nil
+	case "static_review_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "static-review", "summary.csv"), nil
+	case "runops_scorecard_json":
+		return filepath.Join(s.cfg.Paths.LogsDir, "runops", "scorecard.json"), nil
+	case "runops_scorecard_md":
+		return filepath.Join(s.cfg.Paths.LogsDir, "runops", "scorecard.md"), nil
 	case "xss_reflected_hits":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "xss", "reflected_hits.jsonl"), nil
 	case "xss_dom_hits":
@@ -1321,6 +1709,302 @@ func readDNSXHostIPs(path string) map[string][]string {
 		sort.Strings(out[host])
 	}
 	return out
+}
+
+func uniqueNormalizedSeeds(lines []string) []string {
+	set := make(map[string]struct{})
+	for _, line := range lines {
+		seed := strings.ToLower(strings.TrimSpace(line))
+		seed = strings.TrimPrefix(seed, "*.")
+		seed = strings.TrimPrefix(seed, ".")
+		if seed == "" {
+			continue
+		}
+		set[seed] = struct{}{}
+	}
+	out := make([]string, 0, len(set))
+	for seed := range set {
+		out = append(out, seed)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func countFilesByExt(dir string, ext string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	want := strings.ToLower(strings.TrimSpace(ext))
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(entry.Name()))
+		if want != "" && !strings.HasSuffix(name, want) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || info.Size() == 0 {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func readJSONLRecords(path string) ([]map[string]any, time.Time) {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return nil, time.Time{}
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, time.Time{}
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	records := []map[string]any{}
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var row map[string]any
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			continue
+		}
+		records = append(records, row)
+	}
+	return records, info.ModTime()
+}
+
+func buildLeadItem(category, source string, row map[string]any, roots []string) leadItem {
+	target := strings.TrimSpace(firstNonEmptyString(
+		asRawString(row["endpoint"]),
+		asRawString(row["url"]),
+		asRawString(row["mutated_url"]),
+	))
+	if target == "" {
+		return leadItem{}
+	}
+	host := extractHost(target)
+	if host == "" {
+		return leadItem{}
+	}
+	domain := strings.ToLower(strings.TrimSpace(host))
+	wildcard := matchWildcard(domain, roots)
+	if wildcard == "" {
+		wildcard = guessWildcardFromDomain(domain)
+	}
+
+	family := strings.TrimSpace(firstNonEmptyString(asRawString(row["family"]), asRawString(row["mode"])))
+	severity := strings.ToLower(strings.TrimSpace(asRawString(row["severity"])))
+	if severity == "" {
+		severity = deriveSeverity(category, row)
+	}
+	reasons := asStringSlice(row["reasons"])
+	manualAction := strings.TrimSpace(asRawString(row["manual_action"]))
+	roi := computeLeadROI(category, severity, reasons, row)
+
+	id := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		category,
+		family,
+		domain,
+		asRawString(row["param"]),
+		asRawString(row["payload"]),
+		target,
+		strings.Join(reasons, "|"),
+	}, "|")))
+	if id == "||||||" || id == "" {
+		return leadItem{}
+	}
+	return leadItem{
+		ID:           id,
+		Category:     category,
+		Family:       family,
+		Severity:     severity,
+		ROI:          roi,
+		Wildcard:     wildcard,
+		Domain:       domain,
+		Target:       target,
+		Reasons:      reasons,
+		ManualAction: manualAction,
+		Source:       source,
+		Timestamp:    strings.TrimSpace(asRawString(row["timestamp"])),
+	}
+}
+
+func deriveSeverity(category string, row map[string]any) string {
+	status := asRawInt(row["status_code"])
+	reasons := strings.ToLower(strings.Join(asStringSlice(row["reasons"]), " "))
+	switch category {
+	case "server-input":
+		if strings.Contains(reasons, "family_keyword") || strings.Contains(reasons, "server_error_on_payload") {
+			return "high"
+		}
+		return "medium"
+	case "injection", "adv-injection":
+		if strings.Contains(reasons, "family_keyword") || status >= 500 {
+			return "high"
+		}
+		return "medium"
+	case "open-redirect":
+		chain := strings.Join(asStringSlice(row["chain_signals"]), ",")
+		if strings.TrimSpace(chain) != "" {
+			return "high"
+		}
+		return "medium"
+	case "cors":
+		if strings.Contains(reasons, "credentials_allowed") &&
+			(strings.Contains(reasons, "arbitrary_origin_reflection") || strings.Contains(reasons, "wildcard_acao")) {
+			return "high"
+		}
+		return "medium"
+	case "csrf":
+		if strings.Contains(reasons, "cross_origin_request_accepted") || strings.Contains(reasons, "missing_origin_referer_accepted") {
+			return "high"
+		}
+		return "medium"
+	case "clickjacking":
+		if strings.Contains(reasons, "missing_x_frame_options") && strings.Contains(reasons, "missing_csp_frame_ancestors") {
+			return "high"
+		}
+		return "medium"
+	case "xss":
+		if strings.Contains(strings.ToLower(asRawString(row["mode"])), "stored") || strings.Contains(strings.ToLower(asRawString(row["family"])), "stored") {
+			return "high"
+		}
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+func computeLeadROI(category, severity string, reasons []string, row map[string]any) int {
+	base := map[string]int{"critical": 100, "high": 85, "medium": 55, "low": 30}[severity]
+	if base == 0 {
+		base = 35
+	}
+	categoryBoost := map[string]int{
+		"injection":     18,
+		"server-input":  24,
+		"adv-injection": 20,
+		"csrf":          16,
+		"clickjacking":  10,
+		"cors":          22,
+		"open-redirect": 22,
+		"xss":           20,
+	}[category]
+	score := base + categoryBoost
+	reasonText := strings.ToLower(strings.Join(reasons, " "))
+	if strings.Contains(reasonText, "family_keyword") {
+		score += 10
+	}
+	if strings.Contains(reasonText, "server_error_on_payload") {
+		score += 8
+	}
+	if strings.Contains(reasonText, "cross_origin_request_accepted") || strings.Contains(reasonText, "arbitrary_origin_reflection") {
+		score += 12
+	}
+	if strings.Contains(reasonText, "credentials_allowed") {
+		score += 12
+	}
+	if len(asStringSlice(row["chain_signals"])) > 0 {
+		score += 20
+	}
+	if score > 100 {
+		score = 100
+	}
+	if score < 1 {
+		score = 1
+	}
+	return score
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func extractHost(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err == nil && parsed.Hostname() != "" {
+		return parsed.Hostname()
+	}
+	candidate := strings.TrimSpace(raw)
+	if strings.Contains(candidate, "://") {
+		return ""
+	}
+	if strings.Contains(candidate, "/") {
+		candidate = strings.Split(candidate, "/")[0]
+	}
+	if strings.Contains(candidate, ":") {
+		candidate = strings.Split(candidate, ":")[0]
+	}
+	return strings.TrimSpace(candidate)
+}
+
+func matchWildcard(domain string, roots []string) string {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	best := ""
+	for _, root := range roots {
+		root = strings.ToLower(strings.TrimSpace(root))
+		if root == "" {
+			continue
+		}
+		if strings.HasPrefix(root, "*.") {
+			root = strings.TrimPrefix(root, "*.")
+		}
+		if domain == root || strings.HasSuffix(domain, "."+root) {
+			if len(root) > len(best) {
+				best = root
+			}
+		}
+	}
+	return best
+}
+
+func guessWildcardFromDomain(domain string) string {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(domain)), ".")
+	if len(parts) < 2 {
+		return domain
+	}
+	if len(parts) == 2 {
+		return domain
+	}
+	return strings.Join(parts[len(parts)-2:], ".")
+}
+
+func asStringSlice(value any) []string {
+	switch v := value.(type) {
+	case []string:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			item = strings.TrimSpace(item)
+			if item != "" {
+				out = append(out, item)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			text := strings.TrimSpace(asRawString(item))
+			if text != "" {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func fileHasNonEmpty(path string) bool {

@@ -1,13 +1,17 @@
 package app
 
 import (
+	"archive/zip"
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -16,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -63,6 +68,16 @@ const (
 	StepServerInputChk = "server-input-checks"
 	StepAdvInjection   = "adv-injection-checks"
 	StepCSRFChecks     = "csrf-checks"
+	StepClickjacking   = "clickjacking-checks"
+	StepCORSChecks     = "cors-checks"
+	StepOpenRedirect   = "open-redirect-checks"
+	StepWorkflowLogic  = "workflow-logic-checks"
+	StepSmugglingStack = "smuggling-stack-checks"
+	StepNmapEnrich     = "nmap-enrichment-checks"
+	StepTierIsolation  = "tier-isolation-checks"
+	StepStaticReview   = "static-review-correlation"
+	StepRunOpsBundle   = "runops-manifest-export"
+	StepStageScorecard = "stage-gates-scorecard"
 	StepDorkLinks      = "dork-links"
 	StepConsolidate    = "consolidate"
 	StepHTTPX          = "httpx"
@@ -93,6 +108,16 @@ var flowSteps = []Step{
 	{ID: StepServerInputChk, Label: "Run baseline-diff OS command/path traversal/file inclusion checks."},
 	{ID: StepAdvInjection, Label: "Run baseline-diff XXE/SOAP/SSRF/SMTP checks."},
 	{ID: StepCSRFChecks, Label: "Run CSRF token/origin/referer validation checks with replay diffs."},
+	{ID: StepClickjacking, Label: "Run clickjacking and frame policy checks with manual validation cues."},
+	{ID: StepCORSChecks, Label: "Run CORS/SOP misconfiguration checks with origin replay diffs."},
+	{ID: StepOpenRedirect, Label: "Run open redirect validation and chaining signal checks."},
+	{ID: StepWorkflowLogic, Label: "Run semi-automated multi-step workflow logic checks."},
+	{ID: StepSmugglingStack, Label: "Run semi-automated request smuggling/h2c/hop-by-hop/SSI-ESI checks."},
+	{ID: StepNmapEnrich, Label: "Run automated nmap scan + service enrichment + searchsploit correlation."},
+	{ID: StepTierIsolation, Label: "Run semi-automated tier-segmentation and shared-hosting isolation checks."},
+	{ID: StepStaticReview, Label: "Run semgrep/gosec and correlate static findings with live endpoints."},
+	{ID: StepRunOpsBundle, Label: "Generate run manifest, checkpoint snapshot, and export bundle."},
+	{ID: StepStageScorecard, Label: "Compute chapter-aligned stage gates and completion scorecard."},
 	{ID: StepDorkLinks, Label: "Auto-generate dork links for org/wildcard/domain/api-domain seeds."},
 	{ID: StepCeWL, Label: "Generate custom CeWL wordlist from live web servers."},
 	{ID: StepFuzzDocs, Label: "Run ffuf documentation endpoint fuzzing and collect hits."},
@@ -115,6 +140,7 @@ type App struct {
 	logWriter   io.Writer
 	stepUpdate  func(id string, status StepStatus)
 	configStore *configstore.Store
+	torEnabled  bool
 }
 
 type liveWebserverRecord struct {
@@ -196,6 +222,16 @@ func (a *App) runStep(id string, fn func() error) error {
 
 func (a *App) skipStep(id string) {
 	a.updateStep(id, StepSkipped)
+}
+
+// SetTorEnabled toggles routing tool/network requests through torify/proxy env.
+func (a *App) SetTorEnabled(enabled bool) {
+	a.torEnabled = enabled
+	if enabled {
+		a.logger.Printf("network mode: tor enabled")
+	} else {
+		a.logger.Printf("network mode: direct")
+	}
 }
 
 func (a *App) githubDorking(ctx context.Context) error {
@@ -293,14 +329,14 @@ func (a *App) prepareDirectories() error {
 
 func (a *App) passiveRecon(ctx context.Context) error {
 	for _, step := range []string{
-		StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
+		StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepClickjacking, StepCORSChecks, StepOpenRedirect, StepWorkflowLogic, StepSmugglingStack, StepNmapEnrich, StepTierIsolation, StepStaticReview, StepRunOpsBundle, StepStageScorecard, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
 	} {
 		a.updateStep(step, StepPending)
 	}
 
 	if !fileExists(a.cfg.Lists.Wildcards) || len(readSafeLines(a.cfg.Lists.Wildcards)) == 0 {
 		for _, step := range []string{
-			StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
+			StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepClickjacking, StepCORSChecks, StepOpenRedirect, StepWorkflowLogic, StepSmugglingStack, StepNmapEnrich, StepTierIsolation, StepStaticReview, StepRunOpsBundle, StepStageScorecard, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
 		} {
 			a.skipStep(step)
 		}
@@ -803,6 +839,69 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		return err
 	}
 
+	if err := a.runStep(StepClickjacking, func() error {
+		return a.runClickjackingChecks(ctx)
+	}); err != nil {
+		return err
+	}
+
+	if err := a.runStep(StepCORSChecks, func() error {
+		return a.runCORSChecks(ctx)
+	}); err != nil {
+		return err
+	}
+
+	if err := a.runStep(StepOpenRedirect, func() error {
+		return a.runOpenRedirectChecks(ctx)
+	}); err != nil {
+		return err
+	}
+
+	if err := a.runStep(StepWorkflowLogic, func() error {
+		return a.runWorkflowLogicChecks(ctx)
+	}); err != nil {
+		return err
+	}
+
+	if err := a.runStep(StepSmugglingStack, func() error {
+		return a.runSmugglingStackChecks(ctx)
+	}); err != nil {
+		return err
+	}
+
+	if _, err := exec.LookPath("nmap"); err != nil {
+		a.skipStep(StepNmapEnrich)
+		a.logger.Printf("%s: skipped (nmap not found)", StepNmapEnrich)
+	} else if err := a.runStep(StepNmapEnrich, func() error {
+		return a.runNmapEnrichmentChecks(ctx)
+	}); err != nil {
+		return err
+	}
+
+	if err := a.runStep(StepTierIsolation, func() error {
+		return a.runTierIsolationChecks(ctx)
+	}); err != nil {
+		return err
+	}
+
+	if err := a.runStep(StepStaticReview, func() error {
+		return a.runStaticReviewCorrelation(ctx)
+	}); err != nil {
+		return err
+	}
+
+	if err := a.runStep(StepRunOpsBundle, func() error {
+		return a.runManifestCheckpointExport(ctx)
+	}); err != nil {
+		return err
+	}
+
+	if err := a.runStep(StepStageScorecard, func() error {
+		return a.runStageGatesScorecard(ctx)
+	}); err != nil {
+		return err
+	}
+
 	if _, err := exec.LookPath("generate_dork_links"); err != nil {
 		a.skipStep(StepDorkLinks)
 		a.logger.Printf("%s: skipped (generate_dork_links not found)", StepDorkLinks)
@@ -1082,6 +1181,66 @@ type csrfFinding struct {
 	MissingOrigLen  int      `json:"missing_origin_length"`
 }
 
+type clickjackingHeaderRecord struct {
+	Timestamp         string `json:"timestamp"`
+	URL               string `json:"url"`
+	StatusCode        int    `json:"status_code"`
+	XFrameOptions     string `json:"x_frame_options"`
+	CSP               string `json:"content_security_policy"`
+	FrameAncestorsRaw string `json:"frame_ancestors"`
+}
+
+type clickjackingFinding struct {
+	Timestamp      string   `json:"timestamp"`
+	URL            string   `json:"url"`
+	Severity       string   `json:"severity"`
+	Reasons        []string `json:"reasons"`
+	XFrameOptions  string   `json:"x_frame_options"`
+	FrameAncestors string   `json:"frame_ancestors"`
+	ManualAction   string   `json:"manual_action"`
+}
+
+type corsReplayLog struct {
+	Timestamp        string `json:"timestamp"`
+	Endpoint         string `json:"endpoint"`
+	Case             string `json:"case"`
+	RequestOrigin    string `json:"request_origin"`
+	StatusCode       int    `json:"status_code"`
+	Length           int    `json:"length"`
+	AllowOrigin      string `json:"access_control_allow_origin"`
+	AllowCredentials string `json:"access_control_allow_credentials"`
+	AllowMethods     string `json:"access_control_allow_methods"`
+	Vary             string `json:"vary"`
+}
+
+type corsFinding struct {
+	Timestamp        string   `json:"timestamp"`
+	Endpoint         string   `json:"endpoint"`
+	Severity         string   `json:"severity"`
+	Reasons          []string `json:"reasons"`
+	AllowOrigin      string   `json:"access_control_allow_origin"`
+	AllowCredentials string   `json:"access_control_allow_credentials"`
+	ManualAction     string   `json:"manual_action"`
+}
+
+type openRedirectCandidate struct {
+	Endpoint string `json:"endpoint"`
+	Param    string `json:"param"`
+}
+
+type openRedirectFinding struct {
+	Timestamp    string   `json:"timestamp"`
+	Endpoint     string   `json:"endpoint"`
+	Param        string   `json:"param"`
+	Severity     string   `json:"severity"`
+	Reasons      []string `json:"reasons"`
+	Payload      string   `json:"payload"`
+	Location     string   `json:"location"`
+	StatusCode   int      `json:"status_code"`
+	ChainSignals []string `json:"chain_signals"`
+	ManualAction string   `json:"manual_action"`
+}
+
 type injectionFamilyConfig struct {
 	Name     string
 	Payloads []string
@@ -1101,6 +1260,9 @@ const (
 	advInjectionMaxEndpoints      = 35
 	advInjectionMaxParamsPerEP    = 4
 	csrfMaxEndpoints              = 60
+	clickjackingMaxTargets        = 120
+	corsMaxEndpoints              = 80
+	openRedirectMaxCandidates     = 120
 )
 
 var (
@@ -1184,6 +1346,12 @@ var (
 	}
 	csrfTokenNames = []string{
 		"csrf", "csrf_token", "csrftoken", "xsrf-token", "x-csrf-token", "x-xsrf-token", "_token", "__requestverificationtoken",
+	}
+	openRedirectParamNames = []string{
+		"redirect", "redirect_url", "redirect_uri", "return", "return_to", "return_url", "next", "continue", "dest", "destination", "url", "target", "callback", "callback_url",
+	}
+	openRedirectPathHints = []string{
+		"redirect", "return", "callback", "oauth", "sso", "signin", "login", "logout", "continue", "out",
 	}
 )
 
@@ -2236,6 +2404,1129 @@ func (a *App) runCSRFChecks(ctx context.Context) error {
 	return nil
 }
 
+func (a *App) runClickjackingChecks(ctx context.Context) error {
+	outDir := filepath.Join(a.fuzzingBaseDir(), "clickjacking")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+
+	headersFile, err := os.Create(filepath.Join(outDir, "headers.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer headersFile.Close()
+	findingsFile, err := os.Create(filepath.Join(outDir, "findings.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer findingsFile.Close()
+	headersWriter := bufio.NewWriter(headersFile)
+	findingsWriter := bufio.NewWriter(findingsFile)
+	defer headersWriter.Flush()
+	defer findingsWriter.Flush()
+
+	targets := normalizeHTTPSTargets(readSafeLines(a.httpListOrDefault(a.cfg.Lists.Domains)))
+	if len(targets) > clickjackingMaxTargets {
+		targets = targets[:clickjackingMaxTargets]
+	}
+
+	client := &http.Client{
+		Timeout: paramFuzzRequestTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	metrics := map[string]int{
+		"targets_tested":          0,
+		"protected":               0,
+		"potential_findings":      0,
+		"missing_x_frame_options": 0,
+		"missing_frame_ancestors": 0,
+		"weak_x_frame_options":    0,
+		"weak_frame_ancestors":    0,
+	}
+
+	for _, target := range targets {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+		if err != nil {
+			continue
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		_ = resp.Body.Close()
+		_ = body
+
+		xfoRaw := strings.TrimSpace(resp.Header.Get("X-Frame-Options"))
+		cspRaw := strings.TrimSpace(strings.Join(resp.Header.Values("Content-Security-Policy"), "; "))
+		frameAncestors := extractFrameAncestorsDirective(cspRaw)
+
+		metrics["targets_tested"]++
+		_ = writeJSONLine(headersWriter, clickjackingHeaderRecord{
+			Timestamp:         time.Now().UTC().Format(time.RFC3339),
+			URL:               target,
+			StatusCode:        resp.StatusCode,
+			XFrameOptions:     xfoRaw,
+			CSP:               cspRaw,
+			FrameAncestorsRaw: frameAncestors,
+		})
+
+		xfoStrong, xfoWeak := evaluateXFrameOptions(xfoRaw)
+		faStrong, faWeak := evaluateFrameAncestors(frameAncestors)
+		if xfoRaw == "" {
+			metrics["missing_x_frame_options"]++
+		}
+		if frameAncestors == "" {
+			metrics["missing_frame_ancestors"]++
+		}
+		if xfoWeak {
+			metrics["weak_x_frame_options"]++
+		}
+		if faWeak {
+			metrics["weak_frame_ancestors"]++
+		}
+
+		protected := xfoStrong || faStrong
+		if protected {
+			metrics["protected"]++
+			continue
+		}
+
+		var reasons []string
+		if xfoRaw == "" {
+			reasons = append(reasons, "missing_x_frame_options")
+		}
+		if frameAncestors == "" {
+			reasons = append(reasons, "missing_csp_frame_ancestors")
+		}
+		if xfoWeak {
+			reasons = append(reasons, "weak_x_frame_options")
+		}
+		if faWeak {
+			reasons = append(reasons, "weak_csp_frame_ancestors")
+		}
+		if len(reasons) == 0 {
+			reasons = append(reasons, "no_strong_framing_protection_detected")
+		}
+
+		severity := "medium"
+		if xfoRaw == "" && frameAncestors == "" {
+			severity = "high"
+		}
+		metrics["potential_findings"]++
+		_ = writeJSONLine(findingsWriter, clickjackingFinding{
+			Timestamp:      time.Now().UTC().Format(time.RFC3339),
+			URL:            target,
+			Severity:       severity,
+			Reasons:        unique(reasons),
+			XFrameOptions:  xfoRaw,
+			FrameAncestors: frameAncestors,
+			ManualAction:   "Attempt sensitive action UI redress in an iframe PoC and confirm browser-specific behavior.",
+		})
+	}
+
+	summaryPath := filepath.Join(outDir, "summary.csv")
+	if err := writeMetricSummaryCSV(summaryPath, []string{
+		"targets_tested",
+		"protected",
+		"potential_findings",
+		"missing_x_frame_options",
+		"missing_frame_ancestors",
+		"weak_x_frame_options",
+		"weak_frame_ancestors",
+	}, metrics); err != nil {
+		return err
+	}
+	a.logger.Printf("%s: summary written to %s", StepClickjacking, summaryPath)
+	return nil
+}
+
+func (a *App) runCORSChecks(ctx context.Context) error {
+	baseDir := filepath.Dir(a.cfg.Lists.Domains)
+	reconDir := filepath.Join(baseDir, "recon")
+	outDir := filepath.Join(a.fuzzingBaseDir(), "cors")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+
+	replayFile, err := os.Create(filepath.Join(outDir, "replay_log.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer replayFile.Close()
+	findingsFile, err := os.Create(filepath.Join(outDir, "findings.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer findingsFile.Close()
+	replayWriter := bufio.NewWriter(replayFile)
+	findingsWriter := bufio.NewWriter(findingsFile)
+	defer replayWriter.Flush()
+	defer findingsWriter.Flush()
+
+	endpoints := collectCORSEndpoints(a.collectParamFuzzEndpoints(filepath.Join(reconDir, "all_urls.txt")))
+	if len(endpoints) > corsMaxEndpoints {
+		endpoints = endpoints[:corsMaxEndpoints]
+	}
+
+	clients := &http.Client{
+		Timeout: paramFuzzRequestTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	lastByHost := make(map[string]time.Time)
+	metrics := map[string]int{
+		"endpoints_tested":    0,
+		"responses_with_acao": 0,
+		"reflected_origin":    0,
+		"wildcard_origin":     0,
+		"null_origin":         0,
+		"credentialed":        0,
+		"potential_findings":  0,
+	}
+
+	for _, endpoint := range endpoints {
+		parsed, err := url.Parse(endpoint)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			continue
+		}
+		sameOrigin := parsed.Scheme + "://" + parsed.Host
+
+		baseline, err := a.sendCORSProbeRequest(ctx, clients, lastByHost, endpoint, "")
+		if err != nil {
+			continue
+		}
+		evil, err := a.sendCORSProbeRequest(ctx, clients, lastByHost, endpoint, "https://evil.example")
+		if err != nil {
+			continue
+		}
+		nullOrigin, err := a.sendCORSProbeRequest(ctx, clients, lastByHost, endpoint, "null")
+		if err != nil {
+			continue
+		}
+
+		metrics["endpoints_tested"]++
+		if evil.AllowOrigin != "" {
+			metrics["responses_with_acao"]++
+		}
+		if strings.EqualFold(evil.AllowOrigin, "https://evil.example") {
+			metrics["reflected_origin"]++
+		}
+		if evil.AllowOrigin == "*" {
+			metrics["wildcard_origin"]++
+		}
+		if strings.EqualFold(nullOrigin.AllowOrigin, "null") {
+			metrics["null_origin"]++
+		}
+		if strings.EqualFold(evil.AllowCredentials, "true") {
+			metrics["credentialed"]++
+		}
+
+		for _, entry := range []struct {
+			name   string
+			origin string
+			resp   corsProbeResult
+		}{
+			{name: "baseline_no_origin", origin: "", resp: baseline},
+			{name: "evil_origin", origin: "https://evil.example", resp: evil},
+			{name: "null_origin", origin: "null", resp: nullOrigin},
+			{name: "same_origin", origin: sameOrigin, resp: corsProbeResult{}},
+		} {
+			r := entry.resp
+			if entry.name == "same_origin" {
+				r, _ = a.sendCORSProbeRequest(ctx, clients, lastByHost, endpoint, sameOrigin)
+			}
+			_ = writeJSONLine(replayWriter, corsReplayLog{
+				Timestamp:        time.Now().UTC().Format(time.RFC3339),
+				Endpoint:         endpoint,
+				Case:             entry.name,
+				RequestOrigin:    entry.origin,
+				StatusCode:       r.StatusCode,
+				Length:           r.Length,
+				AllowOrigin:      r.AllowOrigin,
+				AllowCredentials: r.AllowCredentials,
+				AllowMethods:     r.AllowMethods,
+				Vary:             r.Vary,
+			})
+		}
+
+		var reasons []string
+		if strings.EqualFold(evil.AllowOrigin, "https://evil.example") {
+			reasons = append(reasons, "arbitrary_origin_reflection")
+		}
+		if evil.AllowOrigin == "*" {
+			reasons = append(reasons, "wildcard_acao")
+		}
+		if strings.EqualFold(nullOrigin.AllowOrigin, "null") {
+			reasons = append(reasons, "null_origin_allowed")
+		}
+		if strings.EqualFold(evil.AllowCredentials, "true") {
+			reasons = append(reasons, "credentials_allowed")
+		}
+		if len(reasons) == 0 {
+			continue
+		}
+
+		severity := "low"
+		if containsAll(reasons, "arbitrary_origin_reflection", "credentials_allowed") || containsAll(reasons, "wildcard_acao", "credentials_allowed") {
+			severity = "high"
+		} else if containsAny(reasons, "arbitrary_origin_reflection", "wildcard_acao", "null_origin_allowed") {
+			severity = "medium"
+		}
+		metrics["potential_findings"]++
+		_ = writeJSONLine(findingsWriter, corsFinding{
+			Timestamp:        time.Now().UTC().Format(time.RFC3339),
+			Endpoint:         endpoint,
+			Severity:         severity,
+			Reasons:          unique(reasons),
+			AllowOrigin:      evil.AllowOrigin,
+			AllowCredentials: evil.AllowCredentials,
+			ManualAction:     "Replay with authenticated context and verify sensitive response data is readable cross-origin.",
+		})
+	}
+
+	summaryPath := filepath.Join(outDir, "summary.csv")
+	if err := writeMetricSummaryCSV(summaryPath, []string{
+		"endpoints_tested",
+		"responses_with_acao",
+		"reflected_origin",
+		"wildcard_origin",
+		"null_origin",
+		"credentialed",
+		"potential_findings",
+	}, metrics); err != nil {
+		return err
+	}
+	a.logger.Printf("%s: summary written to %s", StepCORSChecks, summaryPath)
+	return nil
+}
+
+func (a *App) runOpenRedirectChecks(ctx context.Context) error {
+	baseDir := filepath.Dir(a.cfg.Lists.Domains)
+	reconDir := filepath.Join(baseDir, "recon")
+	outDir := filepath.Join(a.fuzzingBaseDir(), "open-redirect")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+
+	candidatesFile, err := os.Create(filepath.Join(outDir, "candidates.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer candidatesFile.Close()
+	findingsFile, err := os.Create(filepath.Join(outDir, "findings.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer findingsFile.Close()
+	replayFile, err := os.Create(filepath.Join(outDir, "replay_log.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer replayFile.Close()
+	candidateWriter := bufio.NewWriter(candidatesFile)
+	findingsWriter := bufio.NewWriter(findingsFile)
+	replayWriter := bufio.NewWriter(replayFile)
+	defer candidateWriter.Flush()
+	defer findingsWriter.Flush()
+	defer replayWriter.Flush()
+
+	candidates := collectOpenRedirectCandidates(a.collectParamFuzzEndpoints(filepath.Join(reconDir, "all_urls.txt")))
+	if len(candidates) > openRedirectMaxCandidates {
+		candidates = candidates[:openRedirectMaxCandidates]
+	}
+
+	client := &http.Client{
+		Timeout: paramFuzzRequestTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	payloads := []string{
+		"https://evil.example/bflow",
+		"//evil.example/bflow",
+	}
+	metrics := map[string]int{
+		"candidates":            len(candidates),
+		"payload_replays":       0,
+		"external_redirects":    0,
+		"potential_findings":    0,
+		"chain_signal_findings": 0,
+	}
+
+	for _, candidate := range candidates {
+		_ = writeJSONLine(candidateWriter, candidate)
+		for _, payload := range payloads {
+			mutated := mutateURLQuery(candidate.Endpoint, candidate.Param, payload)
+			if mutated == "" {
+				continue
+			}
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, mutated, nil)
+			if err != nil {
+				continue
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				continue
+			}
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+			_ = resp.Body.Close()
+			metrics["payload_replays"]++
+
+			location := strings.TrimSpace(resp.Header.Get("Location"))
+			bodyLower := strings.ToLower(string(body))
+			externalHeaderRedirect := resp.StatusCode >= 300 && resp.StatusCode < 400 && strings.Contains(strings.ToLower(location), "evil.example")
+			clientSideRedirect := strings.Contains(bodyLower, "evil.example") &&
+				(strings.Contains(bodyLower, "http-equiv=\"refresh\"") ||
+					strings.Contains(bodyLower, "window.location") ||
+					strings.Contains(bodyLower, "location.href") ||
+					strings.Contains(bodyLower, "location.replace"))
+			externalAccepted := externalHeaderRedirect || clientSideRedirect
+			_ = writeJSONLine(replayWriter, map[string]any{
+				"timestamp":   time.Now().UTC().Format(time.RFC3339),
+				"endpoint":    candidate.Endpoint,
+				"param":       candidate.Param,
+				"payload":     payload,
+				"mutated_url": mutated,
+				"status_code": resp.StatusCode,
+				"location":    location,
+			})
+
+			if !externalAccepted {
+				continue
+			}
+
+			metrics["external_redirects"]++
+			chainSignals := detectOpenRedirectChainSignals(candidate.Endpoint, candidate.Param)
+			if len(chainSignals) > 0 {
+				metrics["chain_signal_findings"]++
+			}
+			severity := "medium"
+			if len(chainSignals) > 0 {
+				severity = "high"
+			}
+			metrics["potential_findings"]++
+			_ = writeJSONLine(findingsWriter, openRedirectFinding{
+				Timestamp:    time.Now().UTC().Format(time.RFC3339),
+				Endpoint:     candidate.Endpoint,
+				Param:        candidate.Param,
+				Severity:     severity,
+				Reasons:      []string{"external_redirect_target_accepted"},
+				Payload:      payload,
+				Location:     location,
+				StatusCode:   resp.StatusCode,
+				ChainSignals: chainSignals,
+				ManualAction: "Attempt chaining into OAuth/OIDC callbacks, auth flows, or trusted-domain bypass scenarios.",
+			})
+		}
+	}
+
+	summaryPath := filepath.Join(outDir, "summary.csv")
+	if err := writeMetricSummaryCSV(summaryPath, []string{
+		"candidates",
+		"payload_replays",
+		"external_redirects",
+		"potential_findings",
+		"chain_signal_findings",
+	}, metrics); err != nil {
+		return err
+	}
+	a.logger.Printf("%s: summary written to %s", StepOpenRedirect, summaryPath)
+	return nil
+}
+
+func (a *App) runWorkflowLogicChecks(ctx context.Context) error {
+	baseDir := filepath.Dir(a.cfg.Lists.Domains)
+	reconDir := filepath.Join(baseDir, "recon")
+	outDir := filepath.Join(a.fuzzingBaseDir(), "workflow-logic")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+
+	candidatesFile, err := os.Create(filepath.Join(outDir, "candidates.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer candidatesFile.Close()
+	findingsFile, err := os.Create(filepath.Join(outDir, "findings.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer findingsFile.Close()
+	replayFile, err := os.Create(filepath.Join(outDir, "replay_log.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer replayFile.Close()
+	candidateWriter := bufio.NewWriter(candidatesFile)
+	findingWriter := bufio.NewWriter(findingsFile)
+	replayWriter := bufio.NewWriter(replayFile)
+	defer candidateWriter.Flush()
+	defer findingWriter.Flush()
+	defer replayWriter.Flush()
+
+	endpoints := prioritizeWorkflowEndpoints(a.collectParamFuzzEndpoints(filepath.Join(reconDir, "all_urls.txt")))
+	if len(endpoints) > 80 {
+		endpoints = endpoints[:80]
+	}
+
+	clients := &http.Client{
+		Timeout: paramFuzzRequestTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	lastByHost := make(map[string]time.Time)
+	metrics := map[string]int{
+		"candidates":             0,
+		"tested":                 0,
+		"replay_requests":        0,
+		"potential_findings":     0,
+		"step_skip_signals":      0,
+		"sequence_bypass_signal": 0,
+	}
+
+	for _, endpoint := range endpoints {
+		parsed, err := url.Parse(endpoint)
+		if err != nil {
+			continue
+		}
+		stepParam := findWorkflowStepParam(parsed.Query())
+		source := "query"
+		if stepParam == "" {
+			stepParam = "step"
+			source = "path-heuristic"
+		}
+
+		metrics["candidates"]++
+		_ = writeJSONLine(candidateWriter, map[string]any{
+			"endpoint": endpoint,
+			"param":    stepParam,
+			"source":   source,
+		})
+
+		baseline, err := a.sendParamFuzzRequest(ctx, clients, lastByHost, endpoint, http.MethodGet, nil, nil, "")
+		if err != nil {
+			continue
+		}
+		metrics["tested"]++
+		reasons := []string{}
+
+		if source == "query" {
+			removedURL := removeQueryParam(endpoint, stepParam)
+			if removedURL != "" {
+				removedObs, reqErr := a.sendParamFuzzRequest(ctx, clients, lastByHost, removedURL, http.MethodGet, nil, nil, "")
+				if reqErr == nil {
+					metrics["replay_requests"]++
+					_ = writeJSONLine(replayWriter, map[string]any{
+						"endpoint":    endpoint,
+						"case":        "removed_step_param",
+						"mutated_url": removedURL,
+						"status_code": removedObs.StatusCode,
+						"length":      removedObs.Length,
+					})
+					if baseline.StatusCode < 400 && removedObs.StatusCode < 400 && len(paramFuzzReasons(baseline, removedObs)) <= 1 {
+						reasons = append(reasons, "removed_step_parameter_still_accepted")
+						metrics["step_skip_signals"]++
+					}
+				}
+			}
+		}
+
+		advancedURL := mutateURLQuery(endpoint, stepParam, "9999")
+		if advancedURL != "" {
+			advancedObs, reqErr := a.sendParamFuzzRequest(ctx, clients, lastByHost, advancedURL, http.MethodGet, nil, nil, "")
+			if reqErr == nil {
+				metrics["replay_requests"]++
+				_ = writeJSONLine(replayWriter, map[string]any{
+					"endpoint":    endpoint,
+					"case":        "forced_step_high_value",
+					"mutated_url": advancedURL,
+					"status_code": advancedObs.StatusCode,
+					"length":      advancedObs.Length,
+				})
+				if baseline.StatusCode < 400 && advancedObs.StatusCode < 400 && len(paramFuzzReasons(baseline, advancedObs)) <= 1 {
+					reasons = append(reasons, "forced_step_value_accepted")
+					metrics["sequence_bypass_signal"]++
+				}
+			}
+		}
+
+		if len(reasons) == 0 {
+			continue
+		}
+		metrics["potential_findings"]++
+		severity := "medium"
+		if containsAny(reasons, "removed_step_parameter_still_accepted", "forced_step_value_accepted") {
+			severity = "high"
+		}
+		_ = writeJSONLine(findingWriter, map[string]any{
+			"timestamp":       time.Now().UTC().Format(time.RFC3339),
+			"endpoint":        endpoint,
+			"param":           stepParam,
+			"severity":        severity,
+			"reasons":         unique(reasons),
+			"manual_action":   "Replay authenticated business flow and verify server-side state machine cannot be skipped.",
+			"baseline_code":   baseline.StatusCode,
+			"baseline_length": baseline.Length,
+		})
+	}
+
+	summaryPath := filepath.Join(outDir, "summary.csv")
+	if err := writeMetricSummaryCSV(summaryPath, []string{
+		"candidates",
+		"tested",
+		"replay_requests",
+		"step_skip_signals",
+		"sequence_bypass_signal",
+		"potential_findings",
+	}, metrics); err != nil {
+		return err
+	}
+	a.logger.Printf("%s: summary written to %s", StepWorkflowLogic, summaryPath)
+	return nil
+}
+
+func (a *App) runSmugglingStackChecks(ctx context.Context) error {
+	baseDir := filepath.Dir(a.cfg.Lists.Domains)
+	outDir := filepath.Join(a.fuzzingBaseDir(), "smuggling-stack")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+
+	hosts := collectUniqueHostsFromLists(a.cfg.Lists.Domains, a.cfg.Lists.APIDomains)
+	if len(hosts) == 0 {
+		hosts = collectUniqueHostsFromLines(readSafeLines(a.httpListOrDefault(a.cfg.Lists.Domains)))
+	}
+	targetsFile := filepath.Join(outDir, "targets.txt")
+	if err := os.WriteFile(targetsFile, []byte(strings.Join(hosts, "\n")), 0o644); err != nil {
+		return err
+	}
+
+	replayFile, err := os.Create(filepath.Join(outDir, "tool_runs.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer replayFile.Close()
+	findingsFile, err := os.Create(filepath.Join(outDir, "findings.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer findingsFile.Close()
+	replayWriter := bufio.NewWriter(replayFile)
+	findingsWriter := bufio.NewWriter(findingsFile)
+	defer replayWriter.Flush()
+	defer findingsWriter.Flush()
+
+	type toolSpec struct {
+		name string
+		cmd  string
+		args []string
+	}
+	scripts := []toolSpec{
+		{name: "request_smuggling", cmd: "python3", args: []string{"utils/request_smuggling.py", "--file", targetsFile}},
+		{name: "hop_by_hop", cmd: "python3", args: []string{"utils/hop_by_hop_checker.py", "--list", targetsFile, "--threads", "8"}},
+		{name: "h2c", cmd: "bash", args: []string{"utils/h2csmuggler.sh", "--input", targetsFile, "--output", filepath.Join(outDir, "h2c_results.txt")}},
+		{name: "ssi_esi", cmd: "bash", args: []string{"utils/ssi_esi.sh", "--input", targetsFile, "--output", filepath.Join(outDir, "ssi_esi_results.txt")}},
+	}
+
+	metrics := map[string]int{
+		"targets":                len(hosts),
+		"tools_available":        0,
+		"tools_executed":         0,
+		"tools_failed":           0,
+		"potential_findings":     0,
+		"request_smuggling_hits": 0,
+		"hop_by_hop_hits":        0,
+		"h2c_hits":               0,
+		"ssi_esi_hits":           0,
+	}
+
+	for _, spec := range scripts {
+		if _, err := exec.LookPath(spec.cmd); err != nil {
+			_ = writeJSONLine(replayWriter, map[string]any{
+				"tool":   spec.name,
+				"status": "skipped",
+				"reason": spec.cmd + "_not_found",
+			})
+			continue
+		}
+		metrics["tools_available"]++
+		stdout, err := a.runCommandCapture(ctx, spec.cmd, spec.args...)
+		_ = os.WriteFile(filepath.Join(outDir, spec.name+"_stdout.log"), []byte(stdout), 0o644)
+		if err != nil {
+			metrics["tools_failed"]++
+			_ = writeJSONLine(replayWriter, map[string]any{
+				"tool":   spec.name,
+				"status": "error",
+				"error":  err.Error(),
+			})
+			continue
+		}
+		metrics["tools_executed"]++
+		_ = writeJSONLine(replayWriter, map[string]any{
+			"tool":   spec.name,
+			"status": "done",
+		})
+	}
+
+	artifactSignals := []struct {
+		tool   string
+		path   string
+		metric string
+	}{
+		{tool: "request_smuggling", path: filepath.Join(baseDir, "logs", "request_smuggling", "request_smuggling_basic.log"), metric: "request_smuggling_hits"},
+		{tool: "request_smuggling", path: filepath.Join(baseDir, "logs", "request_smuggling", "request_smuggling_advanced.log"), metric: "request_smuggling_hits"},
+		{tool: "hop_by_hop", path: filepath.Join(baseDir, "logs", "hop_by_hop", "hop_by_hop.txt"), metric: "hop_by_hop_hits"},
+		{tool: "hop_by_hop", path: filepath.Join(baseDir, "logs", "hop_by_hop", "hop_by_hop_differing_status.txt"), metric: "hop_by_hop_hits"},
+		{tool: "h2c", path: filepath.Join(outDir, "h2c_results.txt"), metric: "h2c_hits"},
+		{tool: "ssi_esi", path: filepath.Join(outDir, "ssi_esi_results.txt"), metric: "ssi_esi_hits"},
+	}
+	for _, signal := range artifactSignals {
+		hits := countSecuritySignalLines(signal.path)
+		if hits == 0 {
+			continue
+		}
+		metrics[signal.metric] += hits
+		metrics["potential_findings"] += hits
+		_ = writeJSONLine(findingsWriter, map[string]any{
+			"timestamp":     time.Now().UTC().Format(time.RFC3339),
+			"tool":          signal.tool,
+			"artifact":      signal.path,
+			"signal_count":  hits,
+			"severity":      "medium",
+			"manual_action": "Validate exploitability and impact with controlled PoC before reporting.",
+		})
+	}
+
+	summaryPath := filepath.Join(outDir, "summary.csv")
+	if err := writeMetricSummaryCSV(summaryPath, []string{
+		"targets",
+		"tools_available",
+		"tools_executed",
+		"tools_failed",
+		"request_smuggling_hits",
+		"hop_by_hop_hits",
+		"h2c_hits",
+		"ssi_esi_hits",
+		"potential_findings",
+	}, metrics); err != nil {
+		return err
+	}
+	a.logger.Printf("%s: summary written to %s", StepSmugglingStack, summaryPath)
+	return nil
+}
+
+func (a *App) runNmapEnrichmentChecks(ctx context.Context) error {
+	outDir := filepath.Join(a.fuzzingBaseDir(), "nmap")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+
+	targets := collectUniqueHostsFromLists(a.cfg.Lists.Domains, a.cfg.Lists.APIDomains, a.cfg.Lists.IPs)
+	if len(targets) > 64 {
+		targets = targets[:64]
+	}
+	targetsFile := filepath.Join(outDir, "targets.txt")
+	if err := os.WriteFile(targetsFile, []byte(strings.Join(targets, "\n")), 0o644); err != nil {
+		return err
+	}
+
+	metrics := map[string]int{
+		"targets":                     len(targets),
+		"open_service_rows":           0,
+		"unique_service_fingerprints": 0,
+		"searchsploit_lines":          0,
+	}
+	if len(targets) == 0 {
+		return writeMetricSummaryCSV(filepath.Join(outDir, "summary.csv"), []string{
+			"targets", "open_service_rows", "unique_service_fingerprints", "searchsploit_lines",
+		}, metrics)
+	}
+
+	prefix := filepath.Join(outDir, "scan")
+	stdout, err := a.runCommandCapture(ctx, "nmap", "-sV", "-Pn", "--open", "-iL", targetsFile, "-oA", prefix)
+	_ = os.WriteFile(filepath.Join(outDir, "nmap_stdout.log"), []byte(stdout), 0o644)
+	if err != nil {
+		a.logger.Printf("%s: nmap execution error: %v", StepNmapEnrich, err)
+	}
+
+	serviceRows := parseNmapGNMAP(filepath.Join(outDir, "scan.gnmap"))
+	serviceCSV := filepath.Join(outDir, "services.csv")
+	if err := writeNmapServiceCSV(serviceCSV, serviceRows); err != nil {
+		return err
+	}
+	metrics["open_service_rows"] = len(serviceRows)
+	metrics["unique_service_fingerprints"] = countUniqueNmapFingerprints(serviceRows)
+
+	if _, lookupErr := exec.LookPath("searchsploit"); lookupErr == nil && fileExists(filepath.Join(outDir, "scan.xml")) {
+		ssStdout, ssErr := a.runCommandCapture(ctx, "searchsploit", "--nmap", filepath.Join(outDir, "scan.xml"))
+		_ = os.WriteFile(filepath.Join(outDir, "searchsploit.txt"), []byte(ssStdout), 0o644)
+		if ssErr != nil {
+			a.logger.Printf("%s: searchsploit correlation error: %v", StepNmapEnrich, ssErr)
+		}
+		metrics["searchsploit_lines"] = countNonEmptyLines(ssStdout)
+	}
+
+	summaryPath := filepath.Join(outDir, "summary.csv")
+	if err := writeMetricSummaryCSV(summaryPath, []string{
+		"targets",
+		"open_service_rows",
+		"unique_service_fingerprints",
+		"searchsploit_lines",
+	}, metrics); err != nil {
+		return err
+	}
+	a.logger.Printf("%s: summary written to %s", StepNmapEnrich, summaryPath)
+	return nil
+}
+
+func (a *App) runTierIsolationChecks(ctx context.Context) error {
+	_ = ctx
+	outDir := filepath.Join(a.fuzzingBaseDir(), "tier-isolation")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+
+	domains := collectUniqueHostsFromLists(a.cfg.Lists.Domains, a.cfg.Lists.APIDomains)
+	roots := normalizeRootDomains(readSafeLines(a.cfg.Lists.Wildcards))
+	ipMap := make(map[string][]string)
+	metrics := map[string]int{
+		"domains_considered":        len(domains),
+		"domains_resolved":          0,
+		"unique_ips":                0,
+		"shared_hosting_candidates": 0,
+		"tier_overlap_candidates":   0,
+		"potential_findings":        0,
+	}
+
+	ipMapFile, err := os.Create(filepath.Join(outDir, "ip_map.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer ipMapFile.Close()
+	findingsFile, err := os.Create(filepath.Join(outDir, "findings.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer findingsFile.Close()
+	ipMapWriter := bufio.NewWriter(ipMapFile)
+	findingsWriter := bufio.NewWriter(findingsFile)
+	defer ipMapWriter.Flush()
+	defer findingsWriter.Flush()
+
+	resolver := net.DefaultResolver
+	for _, domain := range domains {
+		ctxLookup, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		ips, lookupErr := resolver.LookupIPAddr(ctxLookup, domain)
+		cancel()
+		if lookupErr != nil || len(ips) == 0 {
+			continue
+		}
+		metrics["domains_resolved"]++
+		seen := make(map[string]struct{})
+		for _, ip := range ips {
+			ipStr := strings.TrimSpace(ip.IP.String())
+			if ipStr == "" {
+				continue
+			}
+			if _, ok := seen[ipStr]; ok {
+				continue
+			}
+			seen[ipStr] = struct{}{}
+			ipMap[ipStr] = append(ipMap[ipStr], domain)
+		}
+	}
+	for ip, ds := range ipMap {
+		sort.Strings(ds)
+		ipMap[ip] = unique(ds)
+		_ = writeJSONLine(ipMapWriter, map[string]any{"ip": ip, "domains": ipMap[ip]})
+	}
+	metrics["unique_ips"] = len(ipMap)
+
+	for ip, ds := range ipMap {
+		if len(ds) < 2 {
+			continue
+		}
+		rootSet := make(map[string]struct{})
+		hasSensitive := false
+		hasPublic := false
+		for _, domain := range ds {
+			root := matchDomainToRoot(domain, roots)
+			if root == "" {
+				root = guessWildcardFromDomainForApp(domain)
+			}
+			rootSet[root] = struct{}{}
+			label := leadingLabel(domain, root)
+			if looksSensitiveTierLabel(label) {
+				hasSensitive = true
+			} else {
+				hasPublic = true
+			}
+		}
+		if len(rootSet) > 1 {
+			metrics["shared_hosting_candidates"]++
+			metrics["potential_findings"]++
+			_ = writeJSONLine(findingsWriter, map[string]any{
+				"timestamp":     time.Now().UTC().Format(time.RFC3339),
+				"type":          "shared_hosting_candidate",
+				"severity":      "medium",
+				"ip":            ip,
+				"domains":       ds,
+				"manual_action": "Validate virtual-host isolation by host-header and direct-IP behavior checks.",
+			})
+		}
+		if hasSensitive && hasPublic {
+			metrics["tier_overlap_candidates"]++
+			metrics["potential_findings"]++
+			_ = writeJSONLine(findingsWriter, map[string]any{
+				"timestamp":     time.Now().UTC().Format(time.RFC3339),
+				"type":          "tier_overlap_candidate",
+				"severity":      "medium",
+				"ip":            ip,
+				"domains":       ds,
+				"manual_action": "Verify edge/app/data boundary separation and ensure sensitive tiers are not co-hosted with public entrypoints.",
+			})
+		}
+	}
+
+	summaryPath := filepath.Join(outDir, "summary.csv")
+	if err := writeMetricSummaryCSV(summaryPath, []string{
+		"domains_considered",
+		"domains_resolved",
+		"unique_ips",
+		"shared_hosting_candidates",
+		"tier_overlap_candidates",
+		"potential_findings",
+	}, metrics); err != nil {
+		return err
+	}
+	a.logger.Printf("%s: summary written to %s", StepTierIsolation, summaryPath)
+	return nil
+}
+
+func (a *App) runStaticReviewCorrelation(ctx context.Context) error {
+	_ = ctx
+	baseDir := filepath.Dir(a.cfg.Lists.Domains)
+	outDir := filepath.Join(a.fuzzingBaseDir(), "static-review")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+
+	metrics := map[string]int{
+		"semgrep_findings":    0,
+		"gosec_findings":      0,
+		"correlated_findings": 0,
+	}
+
+	var semgrepRows []map[string]any
+	if _, err := exec.LookPath("semgrep"); err == nil {
+		stdout, cmdErr := a.runCommandCapture(ctx, "semgrep", "--config", "auto", "--json", ".")
+		_ = os.WriteFile(filepath.Join(outDir, "semgrep.json"), []byte(stdout), 0o644)
+		if cmdErr == nil {
+			semgrepRows = parseSemgrepFindings(stdout)
+			metrics["semgrep_findings"] = len(semgrepRows)
+		}
+	} else {
+		a.logger.Printf("%s: semgrep not installed", StepStaticReview)
+	}
+
+	var gosecRows []map[string]any
+	if _, err := exec.LookPath("gosec"); err == nil {
+		stdout, cmdErr := a.runCommandCapture(ctx, "gosec", "-fmt=json", "./...")
+		_ = os.WriteFile(filepath.Join(outDir, "gosec.json"), []byte(stdout), 0o644)
+		if cmdErr == nil {
+			gosecRows = parseGosecFindings(stdout)
+			metrics["gosec_findings"] = len(gosecRows)
+		}
+	} else {
+		a.logger.Printf("%s: gosec not installed", StepStaticReview)
+	}
+
+	endpoints := readSafeLines(filepath.Join(baseDir, "recon", "all_urls.txt"))
+	tokens := endpointCorrelationTokens(endpoints)
+
+	corrFile, err := os.Create(filepath.Join(outDir, "correlated_findings.jsonl"))
+	if err != nil {
+		return err
+	}
+	defer corrFile.Close()
+	corrWriter := bufio.NewWriter(corrFile)
+	defer corrWriter.Flush()
+
+	for _, finding := range append(semgrepRows, gosecRows...) {
+		text := strings.ToLower(strings.TrimSpace(asAnyString(finding["file"]) + " " + asAnyString(finding["message"]) + " " + asAnyString(finding["check_id"]) + " " + asAnyString(finding["rule"])))
+		if text == "" {
+			continue
+		}
+		var matched []string
+		for token := range tokens {
+			if strings.Contains(text, token) {
+				matched = append(matched, token)
+			}
+		}
+		if len(matched) == 0 {
+			continue
+		}
+		sort.Strings(matched)
+		metrics["correlated_findings"]++
+		finding["matched_endpoint_tokens"] = matched
+		finding["manual_action"] = "Validate if static issue is reachable via discovered live endpoint(s)."
+		_ = writeJSONLine(corrWriter, finding)
+	}
+
+	summaryPath := filepath.Join(outDir, "summary.csv")
+	if err := writeMetricSummaryCSV(summaryPath, []string{
+		"semgrep_findings",
+		"gosec_findings",
+		"correlated_findings",
+	}, metrics); err != nil {
+		return err
+	}
+	a.logger.Printf("%s: summary written to %s", StepStaticReview, summaryPath)
+	return nil
+}
+
+func (a *App) runManifestCheckpointExport(ctx context.Context) error {
+	_ = ctx
+	baseDir := filepath.Dir(a.cfg.Lists.Domains)
+	outDir := filepath.Join(a.cfg.Paths.LogsDir, "runops")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+	runID := time.Now().UTC().Format("20060102T150405Z")
+
+	manifest := map[string]any{
+		"run_id":     runID,
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+		"go_version": runtime.Version(),
+		"cwd":        baseDir,
+		"paths": map[string]string{
+			"domains":   a.cfg.Lists.Domains,
+			"wildcards": a.cfg.Lists.Wildcards,
+			"fuzzing":   a.cfg.Paths.FuzzingDir,
+			"logs":      a.cfg.Paths.LogsDir,
+			"robots":    a.cfg.Paths.RobotsDir,
+		},
+		"tool_versions": collectToolVersions([]string{
+			"amass", "subfinder", "assetfinder", "gau", "dnsx", "httpx", "katana", "waybackurls", "ffuf", "semgrep", "gosec", "nmap", "searchsploit",
+		}),
+	}
+	manifestPath := filepath.Join(outDir, "manifest_"+runID+".json")
+	if err := writePrettyJSON(manifestPath, manifest); err != nil {
+		return err
+	}
+
+	checkpoint := map[string]any{
+		"run_id":     runID,
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+		"steps_file": filepath.Join(a.cfg.Paths.LogsDir, "steps_state.json"),
+	}
+	if raw, err := os.ReadFile(filepath.Join(a.cfg.Paths.LogsDir, "steps_state.json")); err == nil {
+		var steps map[string]any
+		if jsonErr := json.Unmarshal(raw, &steps); jsonErr == nil {
+			checkpoint["steps"] = steps
+		}
+	}
+	checkpointPath := filepath.Join(outDir, "checkpoint_"+runID+".json")
+	if err := writePrettyJSON(checkpointPath, checkpoint); err != nil {
+		return err
+	}
+
+	files := []string{manifestPath, checkpointPath}
+	files = append(files, collectSummaryArtifacts(a.fuzzingBaseDir())...)
+	zipPath := filepath.Join(outDir, "export_bundle_"+runID+".zip")
+	if err := writeExportZip(zipPath, files); err != nil {
+		return err
+	}
+
+	manifest["export_bundle"] = zipPath
+	manifest["bundle_sha256"] = fileSHA256(zipPath)
+	_ = writePrettyJSON(manifestPath, manifest)
+	return nil
+}
+
+func (a *App) runStageGatesScorecard(ctx context.Context) error {
+	_ = ctx
+	outDir := filepath.Join(a.cfg.Paths.LogsDir, "runops")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+
+	type gate struct {
+		Chapter  string
+		Name     string
+		Required []string
+	}
+	base := a.fuzzingBaseDir()
+	gates := []gate{
+		{Chapter: "4", Name: "Mapping coverage", Required: []string{
+			filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "live-webservers.csv"),
+			filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "recon", "all_urls.txt"),
+		}},
+		{Chapter: "9-10", Name: "Injection coverage", Required: []string{
+			filepath.Join(base, "injection", "summary.csv"),
+			filepath.Join(base, "server-input", "summary.csv"),
+			filepath.Join(base, "adv-injection", "summary.csv"),
+		}},
+		{Chapter: "12-13", Name: "Client-side coverage", Required: []string{
+			filepath.Join(base, "csrf", "summary.csv"),
+			filepath.Join(base, "clickjacking", "summary.csv"),
+			filepath.Join(base, "cors", "summary.csv"),
+			filepath.Join(base, "open-redirect", "summary.csv"),
+		}},
+		{Chapter: "16-18", Name: "Infra/architecture coverage", Required: []string{
+			filepath.Join(base, "smuggling-stack", "summary.csv"),
+			filepath.Join(base, "nmap", "summary.csv"),
+			filepath.Join(base, "tier-isolation", "summary.csv"),
+		}},
+		{Chapter: "19-21", Name: "Methodology orchestration", Required: []string{
+			filepath.Join(base, "static-review", "summary.csv"),
+			filepath.Join(a.cfg.Paths.LogsDir, "runops"),
+		}},
+	}
+
+	var rows []map[string]any
+	completed := 0
+	for _, g := range gates {
+		missing := []string{}
+		for _, req := range g.Required {
+			if info, err := os.Stat(req); err != nil || (err == nil && info.IsDir() && req != filepath.Join(a.cfg.Paths.LogsDir, "runops")) {
+				missing = append(missing, req)
+			}
+		}
+		status := "done"
+		if len(missing) > 0 {
+			status = "pending"
+		} else {
+			completed++
+		}
+		rows = append(rows, map[string]any{
+			"chapter": g.Chapter,
+			"gate":    g.Name,
+			"status":  status,
+			"missing": missing,
+		})
+	}
+
+	score := int(float64(completed) * 100.0 / float64(len(gates)))
+	scorecard := map[string]any{
+		"timestamp":      time.Now().UTC().Format(time.RFC3339),
+		"completed":      completed,
+		"total":          len(gates),
+		"completion_pct": score,
+		"gates":          rows,
+	}
+	if err := writePrettyJSON(filepath.Join(outDir, "scorecard.json"), scorecard); err != nil {
+		return err
+	}
+	return writeScorecardMarkdown(filepath.Join(outDir, "scorecard.md"), rows, completed, len(gates), score)
+}
+
 func (a *App) writeParamFuzzSummary(path string, metrics map[string]struct {
 	requests int
 	hits     int
@@ -2511,6 +3802,761 @@ func (a *App) writeCSRFSummary(path string, metrics map[string]int) error {
 		}
 	}
 	return w.Error()
+}
+
+type corsProbeResult struct {
+	StatusCode       int
+	Length           int
+	AllowOrigin      string
+	AllowCredentials string
+	AllowMethods     string
+	Vary             string
+}
+
+func writeMetricSummaryCSV(path string, keys []string, metrics map[string]int) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := csv.NewWriter(f)
+	defer w.Flush()
+	if err := w.Write([]string{"metric", "value"}); err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if err := w.Write([]string{key, strconv.Itoa(metrics[key])}); err != nil {
+			return err
+		}
+	}
+	return w.Error()
+}
+
+func extractFrameAncestorsDirective(csp string) string {
+	if strings.TrimSpace(csp) == "" {
+		return ""
+	}
+	directives := strings.Split(csp, ";")
+	for _, raw := range directives {
+		d := strings.TrimSpace(raw)
+		if strings.HasPrefix(strings.ToLower(d), "frame-ancestors") {
+			return d
+		}
+	}
+	return ""
+}
+
+func evaluateXFrameOptions(raw string) (strong bool, weak bool) {
+	if strings.TrimSpace(raw) == "" {
+		return false, false
+	}
+	value := strings.ToLower(strings.TrimSpace(raw))
+	switch value {
+	case "deny", "sameorigin":
+		return true, false
+	}
+	if strings.HasPrefix(value, "allow-from ") {
+		return false, true
+	}
+	return false, true
+}
+
+func evaluateFrameAncestors(raw string) (strong bool, weak bool) {
+	if strings.TrimSpace(raw) == "" {
+		return false, false
+	}
+	value := strings.ToLower(strings.TrimSpace(raw))
+	switch {
+	case strings.Contains(value, "'none'"):
+		return true, false
+	case strings.Contains(value, "'self'") && !strings.Contains(value, "*"):
+		return true, false
+	case strings.Contains(value, "*"), strings.Contains(value, "http:"), strings.Contains(value, "https://*"):
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func (a *App) sendCORSProbeRequest(
+	ctx context.Context,
+	client *http.Client,
+	lastByHost map[string]time.Time,
+	target string,
+	origin string,
+) (corsProbeResult, error) {
+	parsed, err := url.Parse(target)
+	if err != nil {
+		return corsProbeResult{}, err
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host != "" {
+		if last, ok := lastByHost[host]; ok {
+			wait := paramFuzzHostDelay - time.Since(last)
+			if wait > 0 {
+				timer := time.NewTimer(wait)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return corsProbeResult{}, ctx.Err()
+				case <-timer.C:
+				}
+			}
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return corsProbeResult{}, err
+	}
+	if strings.TrimSpace(origin) != "" {
+		req.Header.Set("Origin", origin)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return corsProbeResult{}, err
+	}
+	lastByHost[host] = time.Now()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	_ = resp.Body.Close()
+	return corsProbeResult{
+		StatusCode:       resp.StatusCode,
+		Length:           len(body),
+		AllowOrigin:      strings.TrimSpace(resp.Header.Get("Access-Control-Allow-Origin")),
+		AllowCredentials: strings.TrimSpace(resp.Header.Get("Access-Control-Allow-Credentials")),
+		AllowMethods:     strings.TrimSpace(resp.Header.Get("Access-Control-Allow-Methods")),
+		Vary:             strings.TrimSpace(resp.Header.Get("Vary")),
+	}, nil
+}
+
+func collectCORSEndpoints(endpoints []string) []string {
+	if len(endpoints) == 0 {
+		return nil
+	}
+	score := func(endpoint string) int {
+		lower := strings.ToLower(endpoint)
+		total := 0
+		for _, hint := range []string{"api", "graphql", "json", "auth", "v1", "v2", "ajax"} {
+			if strings.Contains(lower, hint) {
+				total += 2
+			}
+		}
+		if strings.Contains(lower, "?") {
+			total++
+		}
+		return total
+	}
+	out := append([]string{}, endpoints...)
+	sort.SliceStable(out, func(i, j int) bool {
+		si := score(out[i])
+		sj := score(out[j])
+		if si == sj {
+			return out[i] < out[j]
+		}
+		return si > sj
+	})
+	return out
+}
+
+func collectOpenRedirectCandidates(endpoints []string) []openRedirectCandidate {
+	seen := make(map[string]struct{})
+	var out []openRedirectCandidate
+	for _, endpoint := range endpoints {
+		parsed, err := url.Parse(endpoint)
+		if err != nil {
+			continue
+		}
+		for key := range parsed.Query() {
+			name := normalizeParamName(key)
+			if name == "" {
+				continue
+			}
+			if !containsAnyString(openRedirectParamNames, name) {
+				continue
+			}
+			id := endpoint + "|" + name
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, openRedirectCandidate{Endpoint: endpoint, Param: name})
+		}
+
+		lowerPath := strings.ToLower(parsed.Path)
+		for _, hint := range openRedirectPathHints {
+			if !strings.Contains(lowerPath, hint) {
+				continue
+			}
+			id := endpoint + "|next"
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, openRedirectCandidate{Endpoint: endpoint, Param: "next"})
+			break
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Endpoint == out[j].Endpoint {
+			return out[i].Param < out[j].Param
+		}
+		return out[i].Endpoint < out[j].Endpoint
+	})
+	return out
+}
+
+func detectOpenRedirectChainSignals(endpoint string, param string) []string {
+	text := strings.ToLower(endpoint + " " + param)
+	var out []string
+	for _, marker := range []string{"oauth", "oidc", "sso", "callback", "signin", "login", "token", "code", "state"} {
+		if strings.Contains(text, marker) {
+			out = append(out, "chain_signal:"+marker)
+		}
+	}
+	return unique(out)
+}
+
+func containsAll(values []string, expected ...string) bool {
+	set := make(map[string]struct{}, len(values))
+	for _, v := range values {
+		set[v] = struct{}{}
+	}
+	for _, e := range expected {
+		if _, ok := set[e]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func containsAny(values []string, expected ...string) bool {
+	set := make(map[string]struct{}, len(values))
+	for _, v := range values {
+		set[v] = struct{}{}
+	}
+	for _, e := range expected {
+		if _, ok := set[e]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAnyString(values []string, target string) bool {
+	target = strings.ToLower(strings.TrimSpace(target))
+	if target == "" {
+		return false
+	}
+	for _, v := range values {
+		if strings.EqualFold(strings.TrimSpace(v), target) {
+			return true
+		}
+	}
+	return false
+}
+
+func prioritizeWorkflowEndpoints(endpoints []string) []string {
+	if len(endpoints) == 0 {
+		return nil
+	}
+	score := func(endpoint string) int {
+		lower := strings.ToLower(endpoint)
+		total := 0
+		for _, hint := range []string{
+			"checkout", "cart", "payment", "transfer", "withdraw", "purchase",
+			"register", "signup", "onboarding", "verify", "confirm",
+			"password", "reset", "invite", "approve", "workflow", "wizard",
+		} {
+			if strings.Contains(lower, hint) {
+				total += 2
+			}
+		}
+		if strings.Contains(lower, "?step=") || strings.Contains(lower, "&step=") || strings.Contains(lower, "stage=") {
+			total += 3
+		}
+		return total
+	}
+	out := append([]string{}, endpoints...)
+	sort.SliceStable(out, func(i, j int) bool {
+		si := score(out[i])
+		sj := score(out[j])
+		if si == sj {
+			return out[i] < out[j]
+		}
+		return si > sj
+	})
+	return out
+}
+
+func findWorkflowStepParam(values url.Values) string {
+	candidates := []string{"step", "stage", "state", "phase", "flow", "order", "sequence", "wizard", "current", "next"}
+	for _, candidate := range candidates {
+		if _, ok := values[candidate]; ok {
+			return candidate
+		}
+	}
+	for key := range values {
+		lk := strings.ToLower(strings.TrimSpace(key))
+		if lk == "" {
+			continue
+		}
+		if strings.Contains(lk, "step") || strings.Contains(lk, "stage") || strings.Contains(lk, "flow") {
+			return lk
+		}
+	}
+	return ""
+}
+
+func removeQueryParam(rawURL, param string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	q := parsed.Query()
+	q.Del(param)
+	parsed.RawQuery = q.Encode()
+	return parsed.String()
+}
+
+func collectUniqueHostsFromLists(paths ...string) []string {
+	var lines []string
+	for _, path := range paths {
+		lines = append(lines, readSafeLines(path)...)
+	}
+	return collectUniqueHostsFromLines(lines)
+}
+
+func collectUniqueHostsFromLines(lines []string) []string {
+	set := make(map[string]struct{})
+	for _, line := range lines {
+		host := extractHostCandidate(line)
+		if host == "" {
+			continue
+		}
+		set[strings.ToLower(strings.TrimSpace(host))] = struct{}{}
+	}
+	out := make([]string, 0, len(set))
+	for host := range set {
+		out = append(out, host)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func countSecuritySignalLines(path string) int {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, line := range strings.Split(string(raw), "\n") {
+		l := strings.ToLower(strings.TrimSpace(line))
+		if l == "" {
+			continue
+		}
+		if strings.Contains(l, "vulnerab") ||
+			strings.Contains(l, "potential") ||
+			strings.Contains(l, "found") ||
+			strings.Contains(l, "differing") ||
+			strings.Contains(l, "status") {
+			count++
+		}
+	}
+	return count
+}
+
+type nmapServiceRow struct {
+	Host    string
+	Port    string
+	Proto   string
+	State   string
+	Service string
+	Info    string
+}
+
+func parseNmapGNMAP(path string) []nmapServiceRow {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var rows []nmapServiceRow
+	re := regexp.MustCompile(`Host:\s+(\S+).*Ports:\s*(.+)$`)
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.Contains(line, "Ports:") {
+			continue
+		}
+		match := re.FindStringSubmatch(line)
+		if len(match) < 3 {
+			continue
+		}
+		host := strings.TrimSpace(match[1])
+		portBlob := strings.TrimSpace(match[2])
+		for _, segment := range strings.Split(portBlob, ",") {
+			segment = strings.TrimSpace(segment)
+			if segment == "" {
+				continue
+			}
+			parts := strings.Split(segment, "/")
+			if len(parts) < 5 {
+				continue
+			}
+			state := strings.TrimSpace(parts[1])
+			if state != "open" {
+				continue
+			}
+			info := ""
+			if len(parts) > 6 {
+				info = strings.TrimSpace(parts[6])
+			}
+			rows = append(rows, nmapServiceRow{
+				Host:    host,
+				Port:    strings.TrimSpace(parts[0]),
+				Proto:   strings.TrimSpace(parts[2]),
+				State:   state,
+				Service: strings.TrimSpace(parts[4]),
+				Info:    info,
+			})
+		}
+	}
+	return rows
+}
+
+func writeNmapServiceCSV(path string, rows []nmapServiceRow) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := csv.NewWriter(f)
+	defer w.Flush()
+	if err := w.Write([]string{"host", "port", "proto", "state", "service", "info"}); err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if err := w.Write([]string{row.Host, row.Port, row.Proto, row.State, row.Service, row.Info}); err != nil {
+			return err
+		}
+	}
+	return w.Error()
+}
+
+func countUniqueNmapFingerprints(rows []nmapServiceRow) int {
+	set := make(map[string]struct{})
+	for _, row := range rows {
+		key := strings.ToLower(strings.TrimSpace(row.Service + "|" + row.Info))
+		if key == "|" || key == "" {
+			continue
+		}
+		set[key] = struct{}{}
+	}
+	return len(set)
+}
+
+func countNonEmptyLines(raw string) int {
+	count := 0
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func normalizeRootDomains(lines []string) []string {
+	set := make(map[string]struct{})
+	for _, line := range lines {
+		root := strings.ToLower(strings.TrimSpace(line))
+		root = strings.TrimPrefix(root, "*.")
+		if root == "" {
+			continue
+		}
+		set[root] = struct{}{}
+	}
+	out := make([]string, 0, len(set))
+	for root := range set {
+		out = append(out, root)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func matchDomainToRoot(domain string, roots []string) string {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	best := ""
+	for _, root := range roots {
+		root = strings.ToLower(strings.TrimSpace(root))
+		if root == "" {
+			continue
+		}
+		if domain == root || strings.HasSuffix(domain, "."+root) {
+			if len(root) > len(best) {
+				best = root
+			}
+		}
+	}
+	return best
+}
+
+func guessWildcardFromDomainForApp(domain string) string {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(domain)), ".")
+	if len(parts) < 2 {
+		return domain
+	}
+	if len(parts) == 2 {
+		return domain
+	}
+	return strings.Join(parts[len(parts)-2:], ".")
+}
+
+func leadingLabel(domain string, root string) string {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	root = strings.ToLower(strings.TrimSpace(root))
+	if domain == "" {
+		return ""
+	}
+	if root != "" && (domain == root || strings.HasSuffix(domain, "."+root)) {
+		prefix := strings.TrimSuffix(domain, "."+root)
+		prefix = strings.TrimSuffix(prefix, ".")
+		if prefix == "" {
+			return ""
+		}
+		parts := strings.Split(prefix, ".")
+		return parts[len(parts)-1]
+	}
+	parts := strings.Split(domain, ".")
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[0]
+}
+
+func looksSensitiveTierLabel(label string) bool {
+	label = strings.ToLower(strings.TrimSpace(label))
+	if label == "" {
+		return false
+	}
+	for _, keyword := range []string{
+		"admin", "internal", "intra", "corp", "api", "db", "sql", "redis", "kafka", "mq", "queue", "staging", "dev", "vpn",
+	} {
+		if strings.Contains(label, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseSemgrepFindings(raw string) []map[string]any {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil
+	}
+	results, _ := payload["results"].([]any)
+	out := make([]map[string]any, 0, len(results))
+	for _, item := range results {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		extra, _ := row["extra"].(map[string]any)
+		out = append(out, map[string]any{
+			"source":   "semgrep",
+			"file":     asAnyString(row["path"]),
+			"check_id": asAnyString(row["check_id"]),
+			"message":  asAnyString(extra["message"]),
+			"severity": strings.ToLower(strings.TrimSpace(asAnyString(extra["severity"]))),
+		})
+	}
+	return out
+}
+
+func parseGosecFindings(raw string) []map[string]any {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil
+	}
+	issues, _ := payload["Issues"].([]any)
+	out := make([]map[string]any, 0, len(issues))
+	for _, item := range issues {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		out = append(out, map[string]any{
+			"source":   "gosec",
+			"file":     asAnyString(row["file"]),
+			"check_id": asAnyString(row["rule_id"]),
+			"message":  asAnyString(row["details"]),
+			"severity": strings.ToLower(strings.TrimSpace(asAnyString(row["severity"]))),
+		})
+	}
+	return out
+}
+
+func endpointCorrelationTokens(endpoints []string) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, endpoint := range endpoints {
+		parsed, err := url.Parse(strings.TrimSpace(endpoint))
+		if err != nil {
+			continue
+		}
+		for _, token := range strings.Split(parsed.Path, "/") {
+			token = strings.ToLower(strings.TrimSpace(token))
+			if len(token) < 4 {
+				continue
+			}
+			if strings.Contains(token, ".") {
+				token = strings.Split(token, ".")[0]
+			}
+			if token == "" {
+				continue
+			}
+			out[token] = struct{}{}
+		}
+	}
+	return out
+}
+
+func collectToolVersions(tools []string) map[string]string {
+	out := make(map[string]string, len(tools))
+	for _, tool := range tools {
+		if _, err := exec.LookPath(tool); err != nil {
+			out[tool] = "not_installed"
+			continue
+		}
+		cmd := exec.Command(tool, "--version")
+		b, err := cmd.CombinedOutput()
+		if err != nil || strings.TrimSpace(string(b)) == "" {
+			cmd = exec.Command(tool, "-version")
+			b, err = cmd.CombinedOutput()
+		}
+		version := strings.TrimSpace(string(b))
+		if version == "" {
+			version = "installed"
+		}
+		out[tool] = version
+	}
+	return out
+}
+
+func writePrettyJSON(path string, value any) error {
+	raw, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o644)
+}
+
+func collectSummaryArtifacts(baseDir string) []string {
+	var out []string
+	_ = filepath.WalkDir(baseDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		name := strings.ToLower(strings.TrimSpace(d.Name()))
+		if name == "summary.csv" || name == "findings.jsonl" || strings.HasSuffix(name, "scorecard.json") || strings.HasSuffix(name, "scorecard.md") {
+			out = append(out, path)
+		}
+		return nil
+	})
+	sort.Strings(out)
+	return out
+}
+
+func writeExportZip(zipPath string, files []string) error {
+	f, err := os.Create(zipPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	zw := zip.NewWriter(f)
+	defer zw.Close()
+
+	base := filepath.Dir(zipPath)
+	for _, path := range files {
+		if !fileExists(path) {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		rel, relErr := filepath.Rel(base, path)
+		if relErr != nil {
+			rel = filepath.Base(path)
+		}
+		w, err := zw.Create(rel)
+		if err != nil {
+			return err
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if _, err := w.Write(raw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func fileSHA256(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func writeScorecardMarkdown(path string, gates []map[string]any, completed int, total int, pct int) error {
+	var lines []string
+	lines = append(lines, "# Chapter Stage Gates Scorecard")
+	lines = append(lines, "")
+	lines = append(lines, fmt.Sprintf("Completion: **%d / %d** (%d%%)", completed, total, pct))
+	lines = append(lines, "")
+	lines = append(lines, "| Chapter | Gate | Status | Missing Evidence |")
+	lines = append(lines, "|---|---|---|---|")
+	for _, gate := range gates {
+		missing := ""
+		switch m := gate["missing"].(type) {
+		case []string:
+			missing = strings.Join(m, "; ")
+		case []any:
+			var parts []string
+			for _, item := range m {
+				parts = append(parts, asAnyString(item))
+			}
+			missing = strings.Join(parts, "; ")
+		}
+		lines = append(lines, fmt.Sprintf("| %s | %s | %s | %s |",
+			asAnyString(gate["chapter"]),
+			asAnyString(gate["gate"]),
+			asAnyString(gate["status"]),
+			missing,
+		))
+	}
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+}
+
+func asAnyString(value any) string {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case json.Number:
+		return v.String()
+	default:
+		return strings.TrimSpace(fmt.Sprintf("%v", value))
+	}
 }
 
 func prioritizeCSRFCandidateEndpoints(endpoints []string) []string {
@@ -3880,7 +5926,9 @@ func normalizeSubdomainSeed(value string) string {
 func (a *App) runShell(ctx context.Context, script string) error {
 	start := time.Now()
 	a.logger.Printf("exec shell: %s", script)
-	cmd := exec.CommandContext(ctx, "sh", "-c", script)
+	name, args := a.withTorPrefix("sh", "-c", script)
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = a.networkEnv()
 	cmd.Stdout = a.commandOutput()
 	cmd.Stderr = a.commandOutput()
 	if err := cmd.Run(); err != nil {
@@ -3894,7 +5942,9 @@ func (a *App) runShell(ctx context.Context, script string) error {
 func (a *App) runCommandCapture(ctx context.Context, name string, args ...string) (string, error) {
 	start := time.Now()
 	a.logger.Printf("exec: %s %s", name, strings.Join(args, " "))
+	name, args = a.withTorPrefix(name, args...)
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = a.networkEnv()
 	var stdout strings.Builder
 	cmd.Stdout = io.MultiWriter(&stdout, a.commandOutput())
 	cmd.Stderr = a.commandOutput()
@@ -3909,7 +5959,9 @@ func (a *App) runCommandCapture(ctx context.Context, name string, args ...string
 func (a *App) runCommandCaptureWithInput(ctx context.Context, input string, name string, args ...string) (string, error) {
 	start := time.Now()
 	a.logger.Printf("exec: %s %s", name, strings.Join(args, " "))
+	name, args = a.withTorPrefix(name, args...)
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = a.networkEnv()
 	cmd.Stdin = strings.NewReader(input)
 	var stdout strings.Builder
 	cmd.Stdout = io.MultiWriter(&stdout, a.commandOutput())
@@ -3920,6 +5972,39 @@ func (a *App) runCommandCaptureWithInput(ctx context.Context, input string, name
 	}
 	a.logger.Printf("exec done: %s (%s)", name, time.Since(start).Round(time.Second))
 	return stdout.String(), nil
+}
+
+func (a *App) withTorPrefix(name string, args ...string) (string, []string) {
+	if !a.torEnabled {
+		return name, args
+	}
+	if _, err := exec.LookPath("torify"); err != nil {
+		return name, args
+	}
+	return "torify", append([]string{name}, args...)
+}
+
+func (a *App) networkEnv() []string {
+	env := os.Environ()
+	if !a.torEnabled {
+		return env
+	}
+	env = upsertEnv(env, "ALL_PROXY", "socks5h://127.0.0.1:9050")
+	env = upsertEnv(env, "HTTP_PROXY", "socks5h://127.0.0.1:9050")
+	env = upsertEnv(env, "HTTPS_PROXY", "socks5h://127.0.0.1:9050")
+	env = upsertEnv(env, "NO_PROXY", "localhost,127.0.0.1,::1")
+	return env
+}
+
+func upsertEnv(env []string, key string, value string) []string {
+	prefix := key + "="
+	for i, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
 }
 
 func (a *App) runForSeedWithRetry(
