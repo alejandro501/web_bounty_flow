@@ -143,6 +143,14 @@ type App struct {
 	torEnabled  bool
 }
 
+// EgressProbe describes best-effort outbound IP detection.
+type EgressProbe struct {
+	Mode   string `json:"mode"`
+	IP     string `json:"ip,omitempty"`
+	Source string `json:"source,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
 type liveWebserverRecord struct {
 	URL           string
 	StatusCode    int
@@ -231,6 +239,55 @@ func (a *App) SetTorEnabled(enabled bool) {
 		a.logger.Printf("network mode: tor enabled")
 	} else {
 		a.logger.Printf("network mode: direct")
+	}
+}
+
+// ProbeNetworkEgress checks current egress IP, honoring current tor mode when possible.
+func (a *App) ProbeNetworkEgress(ctx context.Context) EgressProbe {
+	mode := "direct"
+	if a.torEnabled {
+		mode = "tor"
+	}
+	endpoints := []string{
+		"https://api.ipify.org",
+		"https://ifconfig.me/ip",
+		"https://icanhazip.com",
+	}
+	if _, err := exec.LookPath("curl"); err == nil {
+		for _, endpoint := range endpoints {
+			stdout, runErr := a.runCommandCapture(ctx, "curl", "-fsSL", "--max-time", "12", endpoint)
+			if runErr != nil {
+				continue
+			}
+			if ip := extractIPFromText(stdout); ip != "" {
+				return EgressProbe{Mode: mode, IP: ip, Source: endpoint}
+			}
+		}
+	}
+
+	client := &http.Client{Timeout: 12 * time.Second}
+	for _, endpoint := range endpoints {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if reqErr != nil {
+			continue
+		}
+		resp, doErr := client.Do(req)
+		if doErr != nil {
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			continue
+		}
+		if ip := extractIPFromText(string(body)); ip != "" {
+			return EgressProbe{Mode: mode, IP: ip, Source: endpoint}
+		}
+	}
+
+	return EgressProbe{
+		Mode:  mode,
+		Error: "unable to determine egress IP",
 	}
 }
 
@@ -6005,6 +6062,16 @@ func upsertEnv(env []string, key string, value string) []string {
 		}
 	}
 	return append(env, prefix+value)
+}
+
+func extractIPFromText(raw string) string {
+	for _, token := range strings.Fields(strings.TrimSpace(raw)) {
+		clean := strings.Trim(token, "[](),;\"'")
+		if ip := net.ParseIP(clean); ip != nil {
+			return ip.String()
+		}
+	}
+	return ""
 }
 
 func (a *App) runForSeedWithRetry(

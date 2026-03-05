@@ -9,6 +9,7 @@ const subdomainProgressText = document.getElementById("subdomain-progress-text")
 const menuItems = document.querySelectorAll(".menu-item");
 const views = document.querySelectorAll(".view");
 const torRouteToggle = document.getElementById("tor-route-toggle");
+const torNetworkIndicator = document.getElementById("tor-network-indicator");
 const leadsStatus = document.getElementById("leads-status");
 const leadsSummary = document.getElementById("leads-summary");
 const leadsWildcards = document.getElementById("leads-wildcards");
@@ -1662,6 +1663,10 @@ function initializeManualDomainChecklist() {
 
 runButton?.addEventListener("click", async () => {
   flowStatus.textContent = "requesting run...";
+  if (torRouteToggle?.checked && torNetworkIndicator) {
+    torNetworkIndicator.classList.remove("tor-indicator--ok", "tor-indicator--error");
+    torNetworkIndicator.textContent = "Checking Tor egress...";
+  }
   try {
     const response = await fetch(`${BACKEND_URL}/api/run`, {
       method: "POST",
@@ -1672,6 +1677,7 @@ runButton?.addEventListener("click", async () => {
       throw new Error(await response.text());
     }
     flowStatus.textContent = "Flow queued";
+    await loadNetworkSettings();
   } catch (error) {
     flowStatus.textContent = `Run failed: ${error.message}`;
   }
@@ -2430,9 +2436,12 @@ async function refreshSteps() {
         if (!item.implemented) {
           return `<li class="flow-step flow-step--not-implemented"><span class="flow-step__status">[ ]</span><span class="flow-step__label flow-step__label--not-implemented">${escapeHTML(item.label)} (Not Implemented)</span></li>`;
         }
-        const step = item.stepId ? stepMap.get(item.stepId) : null;
         if (!item.stepId) {
-          return `<li class="flow-step flow-step--done"><span class="flow-step__status">[x]</span><span class="flow-step__label">${escapeHTML(item.label)}</span></li>`;
+          return `<li class="flow-step flow-step--manual"><span class="flow-step__status">[~]</span><span class="flow-step__label">${escapeHTML(item.label)}</span></li>`;
+        }
+        const step = stepMap.get(item.stepId);
+        if (!step) {
+          return `<li class="flow-step flow-step--manual"><span class="flow-step__status">[~]</span><span class="flow-step__label">${escapeHTML(item.label)}</span></li>`;
         }
         const status = step?.status || "pending";
         const prefix = stepPrefix(status);
@@ -2553,14 +2562,44 @@ async function loadNetworkSettings() {
   try {
     const data = await fetchNetworkSettings();
     torRouteToggle.checked = Boolean(data.tor_enabled);
+    renderNetworkIndicator(data);
   } catch {
     torRouteToggle.checked = false;
+    renderNetworkIndicator({ tor_enabled: false, probe_error: "Network status unavailable" });
   }
+}
+
+function renderNetworkIndicator(data) {
+  if (!torNetworkIndicator) {
+    return;
+  }
+  torNetworkIndicator.classList.remove("tor-indicator--ok", "tor-indicator--error");
+  const torOn = Boolean(data?.tor_enabled);
+  if (!torOn) {
+    torNetworkIndicator.textContent = "Tor off";
+    return;
+  }
+  const ip = String(data?.probe_ip || "").trim();
+  const error = String(data?.probe_error || "").trim();
+  const probeAtRaw = String(data?.probe_at || "").trim();
+  const probeAt = probeAtRaw ? new Date(probeAtRaw).toLocaleTimeString() : "";
+  if (ip) {
+    torNetworkIndicator.classList.add("tor-indicator--ok");
+    torNetworkIndicator.textContent = probeAt ? `Tor IP: ${ip} (${probeAt})` : `Tor IP: ${ip}`;
+    return;
+  }
+  if (error) {
+    torNetworkIndicator.classList.add("tor-indicator--error");
+    torNetworkIndicator.textContent = `Tor check failed: ${error}`;
+    return;
+  }
+  torNetworkIndicator.textContent = "Checking Tor egress...";
 }
 
 torRouteToggle?.addEventListener("change", async () => {
   try {
     await updateNetworkSettings({ tor_enabled: Boolean(torRouteToggle.checked) });
+    await loadNetworkSettings();
   } catch (error) {
     torRouteToggle.checked = !torRouteToggle.checked;
     if (flowStatus) {
@@ -2611,6 +2650,7 @@ githubKeysList?.addEventListener("click", async (event) => {
 
 loadConfig();
 loadNetworkSettings();
+setInterval(loadNetworkSettings, 8000);
 
 async function refreshLogs() {
   if (!flowLogOutput) {

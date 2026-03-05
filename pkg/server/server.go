@@ -48,6 +48,8 @@ type Server struct {
 	xssStatus   string
 	xssLastRun  string
 	torEnabled  bool
+	torProbe    app.EgressProbe
+	torProbeAt  string
 }
 
 // New creates a new HTTP server wired to the bounty flow.
@@ -109,7 +111,12 @@ type settingsPayload struct {
 }
 
 type networkResponse struct {
-	TorEnabled bool `json:"tor_enabled"`
+	TorEnabled bool   `json:"tor_enabled"`
+	ProbeMode  string `json:"probe_mode,omitempty"`
+	ProbeIP    string `json:"probe_ip,omitempty"`
+	ProbeAt    string `json:"probe_at,omitempty"`
+	ProbeError string `json:"probe_error,omitempty"`
+	ProbeSrc   string `json:"probe_source,omitempty"`
 }
 
 type networkPayload struct {
@@ -135,7 +142,7 @@ func (s *Server) corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) setCORS(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 
@@ -448,8 +455,19 @@ func (s *Server) networkHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		enabled := s.loadTorEnabled()
+		s.mu.Lock()
+		probe := s.torProbe
+		probeAt := s.torProbeAt
+		s.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(networkResponse{TorEnabled: enabled})
+		_ = json.NewEncoder(w).Encode(networkResponse{
+			TorEnabled: enabled,
+			ProbeMode:  probe.Mode,
+			ProbeIP:    probe.IP,
+			ProbeAt:    probeAt,
+			ProbeError: probe.Error,
+			ProbeSrc:   probe.Source,
+		})
 		return
 	case http.MethodPut:
 		var payload networkPayload
@@ -1155,32 +1173,36 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 	doneIfPending("validate-inputs", hasAnyScope)
 	doneIfPending("amass", dirHasNonEmptyExt(amassDir, ".txt"))
 	doneIfPending("sublist3r",
-		dirHasNonEmptyExt(filepath.Join(rawDir, "sublist3r"), ".txt") ||
-			globHasNonEmpty(filepath.Join(reconDir, "sublist3r_*.txt")),
+		dirHasExt(filepath.Join(rawDir, "sublist3r"), ".txt") ||
+			globHasAny(filepath.Join(reconDir, "sublist3r_*.txt")),
 	)
 	doneIfPending("assetfinder",
-		dirHasNonEmptyExt(filepath.Join(rawDir, "assetfinder"), ".txt") ||
-			globHasNonEmpty(filepath.Join(reconDir, "assetfinder_*.txt")),
+		dirHasExt(filepath.Join(rawDir, "assetfinder"), ".txt") ||
+			globHasAny(filepath.Join(reconDir, "assetfinder_*.txt")),
 	)
 	doneIfPending("gau",
-		dirHasNonEmptyExt(filepath.Join(rawDir, "gau"), ".txt") ||
-			globHasNonEmpty(filepath.Join(reconDir, "gau_*.txt")),
+		dirHasExt(filepath.Join(rawDir, "gau"), ".txt") ||
+			globHasAny(filepath.Join(reconDir, "gau_*.txt")),
 	)
 	doneIfPending("ctl",
-		dirHasNonEmptyExt(filepath.Join(rawDir, "ctl"), ".json") ||
-			globHasNonEmpty(filepath.Join(reconDir, "ctl_*.json")),
+		dirHasExt(filepath.Join(rawDir, "ctl"), ".json") ||
+			globHasAny(filepath.Join(reconDir, "ctl_*.json")),
 	)
 	doneIfPending("subfinder",
-		dirHasNonEmptyExt(filepath.Join(rawDir, "subfinder"), ".txt") ||
-			globHasNonEmpty(filepath.Join(reconDir, "subfinder_*.txt")),
+		dirHasExt(filepath.Join(rawDir, "subfinder"), ".txt") ||
+			globHasAny(filepath.Join(reconDir, "subfinder_*.txt")),
 	)
 	doneIfPending("dnsx-validate",
-		fileHasNonEmpty(filepath.Join(rawDir, "dnsx-validate", "validated_hosts.txt")) ||
-			fileHasNonEmpty(filepath.Join(reconDir, "dnsx_validated_hosts.txt")),
+		fileExists(filepath.Join(rawDir, "dnsx-validate", "validated_hosts.txt")) ||
+			fileExists(filepath.Join(reconDir, "dnsx_validated_hosts.txt")),
 	)
 	doneIfPending("consolidate", fileHasNonEmpty(s.cfg.Lists.Domains))
 	doneIfPending("httpx", fileHasNonEmpty(filepath.Join(baseDir, "live-webservers.csv")))
-	doneIfPending("robots-sitemaps", fileHasNonEmpty(filepath.Join(s.cfg.Paths.RobotsDir, "_hits.txt")) || fileHasNonEmpty(s.cfg.Paths.SitemapsFile))
+	doneIfPending("robots-sitemaps",
+		fileExists(filepath.Join(s.cfg.Paths.RobotsDir, "robots_urls.txt")) ||
+			fileExists(filepath.Join(s.cfg.Paths.RobotsDir, "_hits.txt")) ||
+			fileExists(s.cfg.Paths.SitemapsFile),
+	)
 	doneIfPending("waybackurls",
 		fileExists(filepath.Join(reconDir, "waybackurls_urls.txt")) ||
 			fileExists(filepath.Join(reconDir, "urls_waybackurls.txt")),
@@ -1190,8 +1212,8 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 			fileExists(filepath.Join(reconDir, "urls_katana.txt")),
 	)
 	doneIfPending("url-corpus",
-		fileHasNonEmpty(filepath.Join(reconDir, "all_urls.txt")) ||
-			fileHasNonEmpty(filepath.Join(reconDir, "urls_all.txt")),
+		fileExists(filepath.Join(reconDir, "all_urls.txt")) ||
+			fileExists(filepath.Join(reconDir, "urls_all.txt")),
 	)
 	doneIfPending("param-fuzz", fileExists(filepath.Join(baseDir, "fuzzing", "params", "summary.csv")))
 	doneIfPending("injection-checks", fileExists(filepath.Join(baseDir, "fuzzing", "injection", "summary.csv")))
@@ -1210,8 +1232,8 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 	doneIfPending("stage-gates-scorecard", fileExists(filepath.Join(s.cfg.Paths.LogsDir, "runops", "scorecard.json")))
 	doneIfPending("dork-links", hasDorkLinkFiles(s.cfg.Paths.DorkingDir))
 	doneIfPending("cewl",
-		fileHasNonEmpty(filepath.Join(reconDir, "cewl_custom_wordlist.txt")) ||
-			fileHasNonEmpty(filepath.Join(baseDir, "cewl_custom_wordlist.txt")),
+		fileExists(filepath.Join(reconDir, "cewl_custom_wordlist.txt")) ||
+			fileExists(filepath.Join(baseDir, "cewl_custom_wordlist.txt")),
 	)
 	doneIfPending("fuzz-docs", fileExists(filepath.Join(baseDir, "fuzzing", "documentation", "doc_hits.txt")))
 	doneIfPending("fuzz-dirs", fileExists(filepath.Join(baseDir, "fuzzing", "ffuf", "dir_hits.txt")))
@@ -1261,9 +1283,12 @@ func (s *Server) startFlow() error {
 	s.running = true
 	s.status = "running"
 	s.resetSteps()
+	torEnabled := s.loadTorEnabled()
 	if s.app != nil {
-		s.app.SetTorEnabled(s.loadTorEnabled())
+		s.app.SetTorEnabled(torEnabled)
 	}
+	s.torProbe = app.EgressProbe{}
+	s.torProbeAt = ""
 
 	go func() {
 		defer func() {
@@ -1276,6 +1301,10 @@ func (s *Server) startFlow() error {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
+		if torEnabled {
+			s.refreshTorProbe(ctx)
+		}
+
 		if err := s.app.Run(ctx); err != nil {
 			s.logger.Printf("flow run failed: %v", err)
 			s.mu.Lock()
@@ -1285,6 +1314,25 @@ func (s *Server) startFlow() error {
 	}()
 
 	return nil
+}
+
+func (s *Server) refreshTorProbe(parent context.Context) {
+	if s.app == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, 18*time.Second)
+	defer cancel()
+	probe := s.app.ProbeNetworkEgress(ctx)
+	now := time.Now().Format(time.RFC3339)
+	s.mu.Lock()
+	s.torProbe = probe
+	s.torProbeAt = now
+	s.mu.Unlock()
+	if probe.IP != "" {
+		s.logger.Printf("tor egress check: mode=%s ip=%s source=%s", probe.Mode, probe.IP, probe.Source)
+		return
+	}
+	s.logger.Printf("tor egress check: mode=%s error=%s", probe.Mode, probe.Error)
 }
 
 func (s *Server) missingRequiredToolsForRun() []string {
@@ -2042,6 +2090,24 @@ func dirHasNonEmptyExt(dir string, ext string) bool {
 	return false
 }
 
+func dirHasExt(dir string, ext string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	wantExt := strings.ToLower(strings.TrimSpace(ext))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if wantExt != "" && !strings.HasSuffix(strings.ToLower(entry.Name()), wantExt) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 func globHasNonEmpty(pattern string) bool {
 	if strings.TrimSpace(pattern) == "" {
 		return false
@@ -2056,6 +2122,17 @@ func globHasNonEmpty(pattern string) bool {
 		}
 	}
 	return false
+}
+
+func globHasAny(pattern string) bool {
+	if strings.TrimSpace(pattern) == "" {
+		return false
+	}
+	paths, err := filepath.Glob(pattern)
+	if err != nil {
+		return false
+	}
+	return len(paths) > 0
 }
 
 func fileExists(path string) bool {

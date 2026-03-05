@@ -4,15 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bounty Flow UI</title>
-    <link rel="stylesheet" href="styles.css?v=20260304-3" />
+    <link rel="stylesheet" href="styles.css?v=20260305-3" />
   </head>
   <body data-backend-url="http://localhost:5050" data-active-view="flow">
     <main class="layout">
-      <label class="tor-switch tor-switch--floating">
-        <input id="tor-route-toggle" type="checkbox" />
-        <span class="tor-switch__slider"></span>
-        <span class="tor-switch__label">Route Through Tor</span>
-      </label>
       <aside class="sidebar">
         <h1 class="brand">alejandro501<span class="brand-accent">_</span></h1>
         <nav class="menu">
@@ -24,16 +19,34 @@
       </aside>
 
       <section class="view view-flow is-active">
+        <section class="panel panel-network">
+        <div class="network-bar">
+          <button id="run-flow" class="network-run-flow">Run Flow</button>
+          <div class="network-tor">
+            <label class="tor-switch">
+              <input id="tor-route-toggle" type="checkbox" />
+              <span class="tor-switch__slider"></span>
+              <span class="tor-switch__label">Route Through Tor</span>
+            </label>
+            <span id="tor-network-indicator" class="tor-indicator muted">Tor off</span>
+          </div>
+        </div>
+      </section>
+
         <section class="panel panel-files">
         <h2>Scope files</h2>
         <div id="scope-cards" class="scope-cards"></div>
         <p id="scope-cards-status" class="muted">Checking files...</p>
       </section>
 
+        <section class="panel panel-logs">
+        <h2>Flow logs</h2>
+        <pre id="flow-log-output" class="log-view log-view--tall">Logs appear here when you start the flow.</pre>
+      </section>
+
       <section class="panel panel-flow">
         <h2>Flow control</h2>
         <div class="flow-actions">
-          <button id="run-flow">Run recon (subdomain + URL discovery)</button>
           <button id="open-amass-enum" type="button" disabled>Amass Enum</button>
           <button id="open-live-webservers" type="button" disabled>Live Web Servers</button>
         </div>
@@ -98,11 +111,6 @@
             </div>
           </section>
         </div>
-      </section>
-
-        <section class="panel panel-logs">
-        <h2>Flow logs</h2>
-        <pre id="flow-log-output" class="log-view log-view--tall">Logs appear here when you start the flow.</pre>
       </section>
       </section>
 
