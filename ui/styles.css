@@ -192,6 +192,12 @@ main {
   gap: 1rem;
 }
 
+.network-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
 .network-tor {
   display: inline-flex;
   align-items: center;
@@ -264,6 +270,10 @@ main {
 .manual-xss-runner h3 {
   margin: 0;
   font-size: 0.92rem;
+}
+
+.manual-xss-runner.manual-xss-runner--disabled {
+  opacity: 0.6;
 }
 
 #manual-run-xss {
@@ -1051,6 +1061,35 @@ button:active {
   transform: none;
 }
 
+.network-pause-flow,
+.network-stop-flow,
+.network-clear-results {
+  min-height: 42px;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: none;
+}
+
+.network-pause-flow:hover,
+.network-stop-flow:hover,
+.network-clear-results:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+}
+
+.network-pause-flow {
+  color: #ffd166;
+}
+
+.network-stop-flow {
+  color: #ff8a8a;
+}
+
+.network-clear-results {
+  color: #8cb4ff;
+}
+
 .modal-shell {
   position: fixed;
   inset: 0;
@@ -1278,6 +1317,53 @@ button:active {
   margin-top: 0.75rem;
 }
 
+.log-view .ansi-bold {
+  font-weight: 700;
+}
+
+.log-view .ansi-fg-black {
+  color: #2f3542;
+}
+
+.log-view .ansi-fg-red,
+.log-view .ansi-fg-bright-red {
+  color: #ff7b7b;
+}
+
+.log-view .ansi-fg-green,
+.log-view .ansi-fg-bright-green {
+  color: #6df3a2;
+}
+
+.log-view .ansi-fg-yellow,
+.log-view .ansi-fg-bright-yellow {
+  color: #ffd166;
+}
+
+.log-view .ansi-fg-blue,
+.log-view .ansi-fg-bright-blue {
+  color: #8cb4ff;
+}
+
+.log-view .ansi-fg-magenta,
+.log-view .ansi-fg-bright-magenta {
+  color: #d9a4ff;
+}
+
+.log-view .ansi-fg-cyan,
+.log-view .ansi-fg-bright-cyan {
+  color: #7de7ff;
+}
+
+.log-view .ansi-fg-white,
+.log-view .ansi-fg-bright-white {
+  color: #f6f6f9;
+}
+
+.log-view .ansi-fg-bright-black {
+  color: #8a93a3;
+}
+
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;
@@ -1334,6 +1420,11 @@ button:active {
   .network-bar {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .network-controls {
+    width: 100%;
+    flex-wrap: wrap;
   }
 
   .network-tor {

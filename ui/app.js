@@ -1,6 +1,9 @@
 const BACKEND_URL = document.body.dataset.backendUrl || "http://localhost:8080";
 
 const runButton = document.getElementById("run-flow");
+const pauseButton = document.getElementById("pause-flow");
+const stopButton = document.getElementById("stop-flow");
+const clearResultsButton = document.getElementById("clear-results");
 const flowStatus = document.getElementById("flow-status");
 const flowLogOutput = document.getElementById("flow-log-output");
 const flowStepsList = document.getElementById("flow-steps-list");
@@ -40,6 +43,7 @@ const exportFileViewer = document.getElementById("export-file-viewer");
 const openAmassEnum = document.getElementById("open-amass-enum");
 const amassEnumModal = document.getElementById("amass-enum-modal");
 const closeAmassEnum = document.getElementById("close-amass-enum");
+const exportAmassEnum = document.getElementById("export-amass-enum");
 const amassSearchName = document.getElementById("amass-search-name");
 const amassSearchDomain = document.getElementById("amass-search-domain");
 const amassSearchIP = document.getElementById("amass-search-ip");
@@ -61,6 +65,7 @@ const manualDomainUrl = document.getElementById("manual-domain-url");
 const manualAuthHeader = document.getElementById("manual-auth-header");
 const manualRunXSS = document.getElementById("manual-run-xss");
 const manualXSSStatus = document.getElementById("manual-xss-status");
+const manualXSSRunner = manualRunXSS?.closest(".manual-xss-runner") || null;
 const manualChecklistList = document.getElementById("manual-checklist-list");
 const manualChecklistProgress = document.getElementById("manual-checklist-progress");
 const hybridChecklistList = document.getElementById("hybrid-checklist-list");
@@ -73,6 +78,7 @@ let lastLogsSignature = "";
 let lastScopeSignature = "";
 let lastLeadsSignature = "";
 let manualDomainOptions = [];
+let manualDomainsReady = false;
 let currentFileModalType = "";
 let currentFileModalLabel = "";
 let currentFileModalLines = [];
@@ -169,9 +175,9 @@ const FLOW_SEGMENTS = [
       { label: "Run gau in parallel with other passive tools.", stepId: "gau", implemented: true },
       { label: "Query certificate transparency logs in parallel.", stepId: "ctl", implemented: true },
       { label: "Run subfinder in parallel with other passive tools.", stepId: "subfinder", implemented: true },
+      { label: "Persist per-tool raw outputs in dedicated folders.", stepId: "persist-raw-outputs", implemented: true },
       { label: "Validate discovered hosts with dnsx before consolidation.", stepId: "dnsx-validate", implemented: true },
       { label: "Consolidate all discovered hosts and remove duplicates.", stepId: "consolidate", implemented: true },
-      { label: "Persist per-tool raw outputs in dedicated folders.", implemented: true },
     ],
   },
   {
@@ -198,16 +204,9 @@ const FLOW_SEGMENTS = [
     ],
   },
   {
-    title: "4) Authentication, Session, Access Control (Chapters 6-8)",
+    title: "4) Client-Side Attack Classes (Chapters 12-13)",
     items: [
-      { label: "Role-matrix authorization replay (BOLA/IDOR) tracked in manual checklist.", implemented: true },
-      { label: "Method-based access control mismatch checks tracked in manual checklist.", implemented: true },
-    ],
-  },
-  {
-    title: "5) Client-Side Attack Classes (Chapters 12-13)",
-    items: [
-      { label: "Reflected/stored/DOM XSS tracked in Manual + automated (Playwright launcher + manual validation).", implemented: true },
+      { label: "Reflected/stored/DOM XSS tracked in manual testing.", implemented: true },
       { label: "Automate CSRF token validation checks.", stepId: "csrf-checks", implemented: true },
       { label: "Automate clickjacking and frame policy checks.", stepId: "clickjacking-checks", implemented: true },
       { label: "Automate CORS/SOP misconfiguration scanning.", stepId: "cors-checks", implemented: true },
@@ -215,17 +214,16 @@ const FLOW_SEGMENTS = [
     ],
   },
   {
-    title: "6) Logic, Architecture, and Server Platform (Chapters 11, 16-18)",
+    title: "5) Logic, Architecture, and Server Platform (Chapters 11, 16-18)",
     items: [
       { label: "Semi-automate multi-step workflow logic checks.", stepId: "workflow-logic-checks", implemented: true },
-      { label: "Race-condition checks tracked in manual checklist.", implemented: true },
       { label: "Semi-automate request smuggling/h2c/hop-by-hop/SSI-ESI checks in main flow.", stepId: "smuggling-stack-checks", implemented: true },
       { label: "Reintroduce automated Nmap scan + service enrichment + searchsploit.", stepId: "nmap-enrichment-checks", implemented: true },
       { label: "Semi-automate tier-segmentation and shared-hosting isolation checks.", stepId: "tier-isolation-checks", implemented: true },
     ],
   },
   {
-    title: "7) Source Review and Methodology Orchestration (Chapters 19-21)",
+    title: "6) Source Review and Methodology Orchestration (Chapters 19-21)",
     items: [
       { label: "Integrate semgrep/gosec and correlate static findings with live endpoints.", stepId: "static-review-correlation", implemented: true },
       { label: "Add run manifest, checkpointing, and export bundle.", stepId: "runops-manifest-export", implemented: true },
@@ -891,6 +889,123 @@ function escapeHTML(value) {
     .replace(/\"/g, "&quot;");
 }
 
+function ansiTextToHTML(raw) {
+  const input = String(raw || "");
+  const ansiPattern = /\u001b\[([0-9;]*)m/g;
+  let html = "";
+  let cursor = 0;
+  const state = {
+    fg: "",
+    bold: false,
+  };
+
+  const renderChunk = (chunk) => {
+    const escaped = escapeHTML(chunk);
+    if (!escaped) {
+      return;
+    }
+    const classes = [];
+    if (state.fg) {
+      classes.push(state.fg);
+    }
+    if (state.bold) {
+      classes.push("ansi-bold");
+    }
+    if (classes.length === 0) {
+      html += escaped;
+      return;
+    }
+    html += `<span class="${classes.join(" ")}">${escaped}</span>`;
+  };
+
+  const setFG = (cls) => {
+    state.fg = cls;
+  };
+
+  let match;
+  while ((match = ansiPattern.exec(input)) !== null) {
+    renderChunk(input.slice(cursor, match.index));
+    cursor = match.index + match[0].length;
+    const rawCodes = match[1] || "0";
+    const codes = rawCodes.split(";").filter(Boolean).map((code) => Number(code));
+    if (codes.length === 0) {
+      state.fg = "";
+      state.bold = false;
+      continue;
+    }
+    for (const code of codes) {
+      switch (code) {
+        case 0:
+          state.fg = "";
+          state.bold = false;
+          break;
+        case 1:
+          state.bold = true;
+          break;
+        case 22:
+          state.bold = false;
+          break;
+        case 30:
+          setFG("ansi-fg-black");
+          break;
+        case 31:
+          setFG("ansi-fg-red");
+          break;
+        case 32:
+          setFG("ansi-fg-green");
+          break;
+        case 33:
+          setFG("ansi-fg-yellow");
+          break;
+        case 34:
+          setFG("ansi-fg-blue");
+          break;
+        case 35:
+          setFG("ansi-fg-magenta");
+          break;
+        case 36:
+          setFG("ansi-fg-cyan");
+          break;
+        case 37:
+          setFG("ansi-fg-white");
+          break;
+        case 90:
+          setFG("ansi-fg-bright-black");
+          break;
+        case 91:
+          setFG("ansi-fg-bright-red");
+          break;
+        case 92:
+          setFG("ansi-fg-bright-green");
+          break;
+        case 93:
+          setFG("ansi-fg-bright-yellow");
+          break;
+        case 94:
+          setFG("ansi-fg-bright-blue");
+          break;
+        case 95:
+          setFG("ansi-fg-bright-magenta");
+          break;
+        case 96:
+          setFG("ansi-fg-bright-cyan");
+          break;
+        case 97:
+          setFG("ansi-fg-bright-white");
+          break;
+        case 39:
+          state.fg = "";
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  renderChunk(input.slice(cursor));
+  return html.replace(/\n/g, "<br>");
+}
+
 menuItems.forEach((item) => {
   item.addEventListener("click", () => {
     menuItems.forEach((btn) => btn.classList.remove("is-active"));
@@ -1412,9 +1527,7 @@ function renderManualChecklist() {
       manualDomainUrl.textContent = "No domain selected";
       manualDomainUrl.removeAttribute("href");
     }
-    if (manualRunXSS) {
-      manualRunXSS.disabled = true;
-    }
+    applyManualXSSRunnerAvailability(false);
     return;
   }
 
@@ -1424,9 +1537,7 @@ function renderManualChecklist() {
     manualDomainUrl.textContent = url;
     manualDomainUrl.href = url;
   }
-  if (manualRunXSS) {
-    manualRunXSS.disabled = false;
-  }
+  applyManualXSSRunnerAvailability(false);
 
   const state = loadManualDomainChecklistState();
   const domainState = state[host] || {};
@@ -1459,6 +1570,25 @@ function updateManualXSSStatusText(statusData) {
   manualXSSStatus.textContent = running ? `running: ${status}${lastRunText}` : `${status}${lastRunText}`;
 }
 
+function applyManualXSSRunnerAvailability(running = false) {
+  const hasSelectedDomain = Boolean(selectedManualDomain());
+  const runnerEnabled = manualDomainsReady && hasSelectedDomain;
+
+  if (manualXSSRunner) {
+    manualXSSRunner.classList.toggle("manual-xss-runner--disabled", !manualDomainsReady);
+  }
+  if (manualAuthHeader) {
+    manualAuthHeader.disabled = !manualDomainsReady || running;
+  }
+  if (manualRunXSS) {
+    manualRunXSS.disabled = running || !runnerEnabled;
+    manualRunXSS.textContent = running ? "Playwright running..." : "Launch Playwright XSS";
+  }
+  if (manualXSSStatus && !manualDomainsReady && !running) {
+    manualXSSStatus.textContent = "Disabled until domains list is populated.";
+  }
+}
+
 async function refreshManualXSSStatus() {
   if (!manualXSSStatus) {
     return;
@@ -1470,10 +1600,7 @@ async function refreshManualXSSStatus() {
     }
     const data = await res.json();
     updateManualXSSStatusText(data);
-    if (manualRunXSS) {
-      manualRunXSS.disabled = Boolean(data.running) || !selectedManualDomain();
-      manualRunXSS.textContent = data.running ? "Playwright running..." : "Launch Playwright XSS";
-    }
+    applyManualXSSRunnerAvailability(Boolean(data.running));
   } catch (error) {
     manualXSSStatus.textContent = `status error: ${error.message}`;
   }
@@ -1551,6 +1678,7 @@ async function refreshManualDomainOptions() {
   if (Array.isArray(domainsData.entries) && domainsData.entries.length > 0) {
     options.push(...domainsData.entries.map((entry) => normalizeDomainEntry(entry)));
   }
+  manualDomainsReady = Array.isArray(domainsData.entries) && domainsData.entries.length > 0;
   const signature = [...new Set(options.map((entry) => normalizeDomainEntry(entry)).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
     .join("|");
@@ -1560,13 +1688,16 @@ async function refreshManualDomainOptions() {
   } else {
     renderManualChecklist();
     renderHybridChecklist();
+    applyManualXSSRunnerAvailability(false);
   }
+  void refreshManualXSSStatus();
 }
 
 function initializeManualDomainChecklist() {
   if (!manualDomainSelect || !manualChecklistList) {
     return;
   }
+  applyManualXSSRunnerAvailability(false);
   manualDomainSelect.addEventListener("change", () => {
     renderManualChecklist();
     renderHybridChecklist();
@@ -1621,6 +1752,13 @@ function initializeManualDomainChecklist() {
   });
 
   manualRunXSS?.addEventListener("click", async () => {
+    if (!manualDomainsReady) {
+      if (manualXSSStatus) {
+        manualXSSStatus.textContent = "Disabled until domains list is populated.";
+      }
+      applyManualXSSRunnerAvailability(false);
+      return;
+    }
     const target = selectedManualDomain();
     if (!target) {
       if (manualXSSStatus) {
@@ -1651,7 +1789,7 @@ function initializeManualDomainChecklist() {
         manualXSSStatus.textContent = `launch failed: ${error.message}`;
       }
       if (manualRunXSS) {
-        manualRunXSS.disabled = !selectedManualDomain();
+        manualRunXSS.disabled = !manualDomainsReady || !selectedManualDomain();
         manualRunXSS.textContent = "Launch Playwright XSS";
       }
     }
@@ -1680,6 +1818,60 @@ runButton?.addEventListener("click", async () => {
     await loadNetworkSettings();
   } catch (error) {
     flowStatus.textContent = `Run failed: ${error.message}`;
+  }
+});
+
+async function postFlowAction(path) {
+  const response = await fetch(`${BACKEND_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
+
+pauseButton?.addEventListener("click", async () => {
+  flowStatus.textContent = "requesting pause...";
+  try {
+    await postFlowAction("/api/run/pause");
+    flowStatus.textContent = "Pause requested";
+  } catch (error) {
+    flowStatus.textContent = `Pause failed: ${error.message}`;
+  }
+});
+
+stopButton?.addEventListener("click", async () => {
+  flowStatus.textContent = "requesting stop...";
+  try {
+    await postFlowAction("/api/run/stop");
+    flowStatus.textContent = "Stop requested";
+  } catch (error) {
+    flowStatus.textContent = `Stop failed: ${error.message}`;
+  }
+});
+
+clearResultsButton?.addEventListener("click", async () => {
+  flowStatus.textContent = "clearing results...";
+  try {
+    await postFlowAction("/api/run/clear");
+    flowStatus.textContent = "Results cleared";
+    await Promise.all([
+      refreshScopeCards(),
+      refreshSubdomainProgress(),
+      refreshAmassEnum({ renderOnlyIfOpen: false }),
+      refreshLiveWebservers({ renderOnlyIfOpen: false }),
+      refreshSteps(),
+      refreshStatus(),
+    ]);
+  } catch (error) {
+    flowStatus.textContent = `Clear failed: ${error.message}`;
   }
 });
 
@@ -2096,15 +2288,12 @@ function liveStatusRowClass(statusCode) {
   return statusClass ? `lws-row ${statusClass}` : "";
 }
 
-function renderAmassTable() {
-  if (!amassTableBody || !amassCount) {
-    return;
-  }
+function getFilteredSortedAmassRows() {
   const nameNeedle = normalizeFilterValue(amassSearchName?.value);
   const domainNeedle = normalizeFilterValue(amassSearchDomain?.value);
   const ipNeedle = normalizeFilterValue(amassSearchIP?.value);
 
-  const filtered = amassRows.filter((row) => (
+  const filtered = (amassRows || []).filter((row) => (
     (!nameNeedle || normalizeFilterValue(row.name).includes(nameNeedle)) &&
     (!domainNeedle || normalizeFilterValue(row.domain).includes(domainNeedle)) &&
     (!ipNeedle || normalizeFilterValue(row.ip).includes(ipNeedle))
@@ -2119,6 +2308,14 @@ function renderAmassTable() {
     }
     return String(av || "").localeCompare(String(bv || ""), undefined, { sensitivity: "base" }) * dir;
   });
+  return filtered;
+}
+
+function renderAmassTable() {
+  if (!amassTableBody || !amassCount) {
+    return;
+  }
+  const filtered = getFilteredSortedAmassRows();
 
   amassCount.textContent = `Showing ${filtered.length} of ${amassRows.length} rows`;
   amassTableBody.innerHTML = filtered.map((row) => `
@@ -2222,6 +2419,31 @@ closeAmassEnum?.addEventListener("click", () => {
   if (amassEnumModal) {
     amassEnumModal.hidden = true;
   }
+});
+
+exportAmassEnum?.addEventListener("click", () => {
+  const rows = getFilteredSortedAmassRows();
+  const header = "host,domain,ip,asn";
+  const csvRows = rows.map((row) => {
+    const cols = [row.name || "", row.domain || "", row.ip || "", String(row.asn || "")];
+    return cols.map((col) => {
+      const text = String(col);
+      if (text.includes(",") || text.includes("\"") || text.includes("\n")) {
+        return `"${text.replace(/\"/g, "\"\"")}"`;
+      }
+      return text;
+    }).join(",");
+  });
+  const csv = [header, ...csvRows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `amass_enum_${Date.now()}.csv`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 });
 
 closeFileViewer?.addEventListener("click", () => {
@@ -2437,7 +2659,7 @@ async function refreshSteps() {
           return `<li class="flow-step flow-step--not-implemented"><span class="flow-step__status">[ ]</span><span class="flow-step__label flow-step__label--not-implemented">${escapeHTML(item.label)} (Not Implemented)</span></li>`;
         }
         if (!item.stepId) {
-          return `<li class="flow-step flow-step--manual"><span class="flow-step__status">[~]</span><span class="flow-step__label">${escapeHTML(item.label)}</span></li>`;
+          return `<li class="flow-step flow-step--completed"><span class="flow-step__status">[x]</span><span class="flow-step__label">${escapeHTML(item.label)}</span></li>`;
         }
         const step = stepMap.get(item.stepId);
         if (!step) {
@@ -2668,7 +2890,7 @@ async function refreshLogs() {
     }
     const shouldStickToBottom =
       flowLogOutput.scrollHeight - flowLogOutput.scrollTop - flowLogOutput.clientHeight < 16;
-    flowLogOutput.textContent = nextText;
+    flowLogOutput.innerHTML = ansiTextToHTML(nextText);
     lastLogsSignature = nextText;
     if (shouldStickToBottom) {
       flowLogOutput.scrollTop = flowLogOutput.scrollHeight;
@@ -2676,7 +2898,7 @@ async function refreshLogs() {
   } catch (error) {
     const nextText = `Log fetch error: ${error.message}`;
     if (nextText !== lastLogsSignature) {
-      flowLogOutput.textContent = nextText;
+      flowLogOutput.innerHTML = ansiTextToHTML(nextText);
       lastLogsSignature = nextText;
     }
   }

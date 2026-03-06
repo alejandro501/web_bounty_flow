@@ -36,8 +36,12 @@ type Server struct {
 	mu          sync.Mutex
 	running     bool
 	status      string
+	runCancel   context.CancelFunc
+	abortMode   string
+	paused      bool
 	logMu       sync.Mutex
 	logLines    []string
+	logPath     string
 	stepMu      sync.Mutex
 	steps       []app.Step
 	stepState   map[string]app.StepStatus
@@ -59,8 +63,10 @@ func New(cfg *config.Config) *Server {
 		mux:    http.NewServeMux(),
 		status: "idle",
 	}
+	s.logPath = filepath.Join(cfg.Paths.LogsDir, "flow.log")
 	s.stepsPath = filepath.Join(cfg.Paths.LogsDir, "steps_state.json")
 	s.initSteps()
+	s.loadPersistedLogs()
 	s.logger = log.New(io.MultiWriter(os.Stdout, s), "[bflow-server] ", log.LstdFlags)
 	s.initConfigStore()
 	appLogger := log.New(io.MultiWriter(os.Stdout, s), "[bflow] ", log.LstdFlags)
@@ -69,6 +75,9 @@ func New(cfg *config.Config) *Server {
 	s.mux.HandleFunc("/api/upload", s.corsMiddleware(s.uploadHandler))
 	s.mux.HandleFunc("/api/url", s.corsMiddleware(s.urlHandler))
 	s.mux.HandleFunc("/api/run", s.corsMiddleware(s.runHandler))
+	s.mux.HandleFunc("/api/run/stop", s.corsMiddleware(s.stopHandler))
+	s.mux.HandleFunc("/api/run/pause", s.corsMiddleware(s.pauseHandler))
+	s.mux.HandleFunc("/api/run/clear", s.corsMiddleware(s.clearResultsHandler))
 	s.mux.HandleFunc("/api/status", s.corsMiddleware(s.statusHandler))
 	s.mux.HandleFunc("/api/logs", s.corsMiddleware(s.logsHandler))
 	s.mux.HandleFunc("/api/config", s.corsMiddleware(s.configHandler))
@@ -391,6 +400,45 @@ func (s *Server) runHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "started"})
 }
 
+func (s *Server) stopHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.requestStop(false); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "stopping"})
+}
+
+func (s *Server) pauseHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.requestStop(true); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "pausing"})
+}
+
+func (s *Server) clearResultsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.clearResults(); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
+}
+
 func (s *Server) statusHandler(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -676,6 +724,12 @@ func (s *Server) amassEnumHandler(w http.ResponseWriter, r *http.Request) {
 			resp.Rows = fallbackRows
 			resp.Count = len(fallbackRows)
 		}
+	}
+	if len(resp.Rows) > 0 {
+		resp.Rows = normalizeAmassRows(resp.Rows)
+		resp.Count = len(resp.Rows)
+		resp.Present = resp.Count > 0
+		s.syncIPsFromAmassRows(resp.Rows)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1055,8 +1109,6 @@ func (s *Server) toolCheck(name string, required bool, notes string) toolStatus 
 }
 
 func (s *Server) recordLog(line string) {
-	s.logMu.Lock()
-	defer s.logMu.Unlock()
 	s.logLines = append(s.logLines, line)
 	if len(s.logLines) > 400 {
 		s.logLines = s.logLines[len(s.logLines)-400:]
@@ -1064,6 +1116,9 @@ func (s *Server) recordLog(line string) {
 }
 
 func (s *Server) Write(p []byte) (int, error) {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+
 	lines := strings.Split(string(p), "\n")
 	for i, line := range lines {
 		if i == len(lines)-1 && line == "" {
@@ -1071,7 +1126,52 @@ func (s *Server) Write(p []byte) (int, error) {
 		}
 		s.recordLog(strings.TrimRight(line, "\r"))
 	}
+
+	if strings.TrimSpace(s.logPath) != "" {
+		if err := os.MkdirAll(filepath.Dir(s.logPath), 0o755); err == nil {
+			if f, err := os.OpenFile(s.logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+				_, _ = f.Write(p)
+				_ = f.Close()
+			}
+		}
+	}
 	return len(p), nil
+}
+
+func (s *Server) loadPersistedLogs() {
+	if strings.TrimSpace(s.logPath) == "" {
+		return
+	}
+	lines, err := readLastLines(s.logPath, 400)
+	if err != nil {
+		return
+	}
+	s.logMu.Lock()
+	s.logLines = lines
+	s.logMu.Unlock()
+}
+
+func readLastLines(path string, max int) ([]string, error) {
+	if max <= 0 {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	all := strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
+	filtered := make([]string, 0, len(all))
+	for _, line := range all {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	if len(filtered) <= max {
+		return filtered, nil
+	}
+	return filtered[len(filtered)-max:], nil
 }
 
 func (s *Server) initSteps() {
@@ -1085,12 +1185,16 @@ func (s *Server) initSteps() {
 }
 
 func (s *Server) resetSteps() {
+	s.resetStepsInMemory()
+	s.persistStepState()
+}
+
+func (s *Server) resetStepsInMemory() {
 	s.stepMu.Lock()
 	for _, step := range s.steps {
 		s.stepState[step.ID] = app.StepPending
 	}
 	s.stepMu.Unlock()
-	s.persistStepState()
 }
 
 func (s *Server) updateStep(id string, status app.StepStatus) {
@@ -1192,6 +1296,15 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 		dirHasExt(filepath.Join(rawDir, "subfinder"), ".txt") ||
 			globHasAny(filepath.Join(reconDir, "subfinder_*.txt")),
 	)
+	doneIfPending("persist-raw-outputs",
+		fileExists(amassDir) &&
+			fileExists(filepath.Join(rawDir, "amass")) &&
+			fileExists(filepath.Join(rawDir, "sublist3r")) &&
+			fileExists(filepath.Join(rawDir, "assetfinder")) &&
+			fileExists(filepath.Join(rawDir, "gau")) &&
+			fileExists(filepath.Join(rawDir, "ctl")) &&
+			fileExists(filepath.Join(rawDir, "subfinder")),
+	)
 	doneIfPending("dnsx-validate",
 		fileExists(filepath.Join(rawDir, "dnsx-validate", "validated_hosts.txt")) ||
 			fileExists(filepath.Join(reconDir, "dnsx_validated_hosts.txt")),
@@ -1237,7 +1350,6 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 	)
 	doneIfPending("fuzz-docs", fileExists(filepath.Join(baseDir, "fuzzing", "documentation", "doc_hits.txt")))
 	doneIfPending("fuzz-dirs", fileExists(filepath.Join(baseDir, "fuzzing", "ffuf", "dir_hits.txt")))
-	s.persistStepState()
 }
 
 func (s *Server) initConfigStore() {
@@ -1280,32 +1392,78 @@ func (s *Server) startFlow() error {
 	if missing := s.missingRequiredToolsForRun(); len(missing) > 0 {
 		return fmt.Errorf("missing required tools for run: %s", strings.Join(missing, ", "))
 	}
+
+	resume := s.paused
 	s.running = true
-	s.status = "running"
-	s.resetSteps()
+	s.abortMode = ""
+	if resume {
+		s.status = "running (resumed)"
+	} else {
+		s.status = "running"
+		s.resetSteps()
+	}
 	torEnabled := s.loadTorEnabled()
+	doneSteps := make(map[string]bool)
+	if resume {
+		s.inferCompletedStepsFromArtifacts()
+		s.stepMu.Lock()
+		for stepID, status := range s.stepState {
+			if status == app.StepDone {
+				doneSteps[stepID] = true
+			}
+		}
+		s.stepMu.Unlock()
+	}
 	if s.app != nil {
 		s.app.SetTorEnabled(torEnabled)
+		s.app.SetResumeCompleted(doneSteps)
 	}
+	s.paused = false
 	s.torProbe = app.EgressProbe{}
 	s.torProbeAt = ""
 
 	go func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		s.mu.Lock()
+		s.runCancel = cancel
+		s.mu.Unlock()
+
 		defer func() {
+			cancel()
 			s.mu.Lock()
+			mode := s.abortMode
 			s.running = false
-			s.status = fmt.Sprintf("last run finished at %s", time.Now().Format(time.RFC3339))
+			s.runCancel = nil
+			now := time.Now().Format(time.RFC3339)
+			switch mode {
+			case "pause":
+				s.paused = true
+				s.status = fmt.Sprintf("paused at %s", now)
+			case "stop":
+				s.paused = false
+				s.status = fmt.Sprintf("stopped at %s", now)
+			default:
+				s.paused = false
+				s.status = fmt.Sprintf("last run finished at %s", now)
+			}
+			s.abortMode = ""
 			s.mu.Unlock()
 		}()
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
 
 		if torEnabled {
 			s.refreshTorProbe(ctx)
 		}
 
 		if err := s.app.Run(ctx); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			s.mu.Lock()
+			mode := s.abortMode
+			s.mu.Unlock()
+			if mode == "pause" || mode == "stop" {
+				return
+			}
 			s.logger.Printf("flow run failed: %v", err)
 			s.mu.Lock()
 			s.status = fmt.Sprintf("error: %v", err)
@@ -1314,6 +1472,91 @@ func (s *Server) startFlow() error {
 	}()
 
 	return nil
+}
+
+func (s *Server) requestStop(pause bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.running || s.runCancel == nil {
+		return errors.New("flow is not running")
+	}
+	if pause {
+		s.abortMode = "pause"
+		s.status = "pausing..."
+	} else {
+		s.abortMode = "stop"
+		s.status = "stopping..."
+		s.paused = false
+	}
+	s.runCancel()
+	return nil
+}
+
+func (s *Server) clearResults() error {
+	s.mu.Lock()
+	if s.running {
+		s.mu.Unlock()
+		return errors.New("cannot clear results while flow is running")
+	}
+	s.paused = false
+	s.abortMode = ""
+	s.status = "idle"
+	s.logMu.Lock()
+	s.logLines = nil
+	s.logMu.Unlock()
+	if strings.TrimSpace(s.logPath) != "" {
+		_ = os.MkdirAll(filepath.Dir(s.logPath), 0o755)
+		_ = os.WriteFile(s.logPath, []byte{}, 0o644)
+	}
+	s.mu.Unlock()
+
+	baseDir := filepath.Dir(s.cfg.Lists.Domains)
+	targets := []string{
+		filepath.Join(baseDir, "recon"),
+		filepath.Join(baseDir, "fuzzing"),
+		s.cfg.Paths.RobotsDir,
+		s.cfg.Paths.DorkingDir,
+		filepath.Join(s.cfg.Paths.LogsDir, "runops"),
+		filepath.Join(baseDir, "live-webservers.csv"),
+		s.cfg.Paths.SitemapsFile,
+		"robots",
+		"fuzzing",
+		"logs",
+	}
+	for _, path := range targets {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		if isSourceDir(path) {
+			continue
+		}
+		_ = os.RemoveAll(path)
+	}
+
+	// Remove generated scope outputs entirely; they will be recreated by relevant steps.
+	for _, generatedList := range []string{s.cfg.Lists.Domains, s.cfg.Lists.APIDomains, s.cfg.Lists.IPs} {
+		if strings.TrimSpace(generatedList) == "" {
+			continue
+		}
+		_ = os.Remove(generatedList)
+	}
+	if strings.TrimSpace(s.stepsPath) != "" {
+		_ = os.Remove(s.stepsPath)
+	}
+	s.resetStepsInMemory()
+	s.torProbe = app.EgressProbe{}
+	s.torProbeAt = ""
+	return nil
+}
+
+func isSourceDir(path string) bool {
+	clean := filepath.Clean(path)
+	switch clean {
+	case ".", "ui", "pkg", "cmd", "scripts", "dorking", "utils", "resources", "__dev", "_notes":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) refreshTorProbe(parent context.Context) {
@@ -1670,10 +1913,8 @@ func readAmassEnumFromSeedText(dir string) ([]amassEnumRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	hostIPs := readDNSXHostIPs(filepath.Join(filepath.Dir(dir), "raw", "dnsx-validate", "results.txt"))
 
 	var rows []amassEnumRow
-	seen := make(map[string]struct{})
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -1687,42 +1928,273 @@ func readAmassEnumFromSeedText(dir string) ([]amassEnumRow, error) {
 			continue
 		}
 		path := filepath.Join(dir, name)
-		for _, host := range readListLines(path) {
-			host = strings.TrimSpace(host)
-			if host == "" {
-				continue
+		seedRows, parseErr := parseAmassSeedText(path, seed)
+		if parseErr != nil {
+			continue
+		}
+		rows = append(rows, seedRows...)
+	}
+
+	return rows, nil
+}
+
+func parseAmassSeedText(path string, seed string) ([]amassEnumRow, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	seed = strings.ToLower(strings.TrimSpace(seed))
+	hostIPs := make(map[string]map[string]struct{})
+	ipNetblocks := make(map[string]map[string]struct{})
+	netblockASN := make(map[string]int)
+	hostSeen := make(map[string]struct{})
+
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.Contains(line, "-->") {
+			continue
+		}
+		left, rel, right, ok := parseAmassRelationLine(line)
+		if !ok {
+			continue
+		}
+		leftVal := strings.ToLower(strings.TrimSpace(left.value))
+		rightVal := strings.ToLower(strings.TrimSpace(right.value))
+		if left.typ == "fqdn" {
+			hostSeen[leftVal] = struct{}{}
+		}
+		if left.typ == "fqdn" && (rel == "a_record" || rel == "aaaa_record") && right.typ == "ipaddress" {
+			if hostIPs[leftVal] == nil {
+				hostIPs[leftVal] = make(map[string]struct{})
 			}
-			ips := hostIPs[strings.ToLower(host)]
-			if len(ips) == 0 {
-				key := strings.ToLower(host) + "|" + strings.ToLower(seed) + "|"
-				if _, ok := seen[key]; ok {
-					continue
-				}
-				seen[key] = struct{}{}
-				rows = append(rows, amassEnumRow{
-					Name:   host,
-					Domain: seed,
-					Source: "amass",
-				})
-				continue
+			hostIPs[leftVal][rightVal] = struct{}{}
+			continue
+		}
+		if left.typ == "netblock" && rel == "contains" && right.typ == "ipaddress" {
+			if ipNetblocks[rightVal] == nil {
+				ipNetblocks[rightVal] = make(map[string]struct{})
 			}
-			for _, ip := range ips {
-				key := strings.ToLower(host) + "|" + strings.ToLower(seed) + "|" + ip
-				if _, ok := seen[key]; ok {
-					continue
-				}
-				seen[key] = struct{}{}
-				rows = append(rows, amassEnumRow{
-					Name:   host,
-					Domain: seed,
-					IP:     ip,
-					Source: "amass",
-				})
+			ipNetblocks[rightVal][leftVal] = struct{}{}
+			continue
+		}
+		if left.typ == "asn" && rel == "announces" && right.typ == "netblock" {
+			asn, convErr := strconv.Atoi(strings.TrimSpace(left.value))
+			if convErr == nil {
+				netblockASN[rightVal] = asn
 			}
 		}
 	}
 
+	allHosts := make([]string, 0, len(hostSeen))
+	for host := range hostSeen {
+		allHosts = append(allHosts, host)
+	}
+	sort.Strings(allHosts)
+
+	var rows []amassEnumRow
+	for _, host := range allHosts {
+		ipSet := hostIPs[host]
+		if len(ipSet) == 0 {
+			rows = append(rows, amassEnumRow{
+				Name:   host,
+				Domain: seed,
+				Source: "amass",
+			})
+			continue
+		}
+		ips := make([]string, 0, len(ipSet))
+		for ip := range ipSet {
+			ips = append(ips, ip)
+		}
+		sort.Strings(ips)
+		for _, ip := range ips {
+			asn := 0
+			if blocks := ipNetblocks[ip]; len(blocks) > 0 {
+				for block := range blocks {
+					if val, ok := netblockASN[block]; ok && val != 0 {
+						asn = val
+						break
+					}
+				}
+			}
+			rows = append(rows, amassEnumRow{
+				Name:   host,
+				Domain: seed,
+				IP:     ip,
+				ASN:    asn,
+				Source: "amass",
+			})
+		}
+	}
+
 	return rows, nil
+}
+
+type amassEntity struct {
+	value string
+	typ   string
+}
+
+func parseAmassRelationLine(line string) (amassEntity, string, amassEntity, bool) {
+	parts := strings.Split(line, "-->")
+	if len(parts) != 3 {
+		return amassEntity{}, "", amassEntity{}, false
+	}
+	left, okLeft := parseAmassEntity(parts[0])
+	right, okRight := parseAmassEntity(parts[2])
+	if !okLeft || !okRight {
+		return amassEntity{}, "", amassEntity{}, false
+	}
+	rel := strings.ToLower(strings.TrimSpace(parts[1]))
+	if rel == "" {
+		return amassEntity{}, "", amassEntity{}, false
+	}
+	return left, rel, right, true
+}
+
+func parseAmassEntity(raw string) (amassEntity, bool) {
+	raw = strings.TrimSpace(raw)
+	open := strings.LastIndex(raw, "(")
+	close := strings.LastIndex(raw, ")")
+	if open < 0 || close < 0 || close <= open {
+		return amassEntity{}, false
+	}
+	val := strings.TrimSpace(raw[:open])
+	typ := strings.ToLower(strings.TrimSpace(raw[open+1 : close]))
+	if val == "" || typ == "" {
+		return amassEntity{}, false
+	}
+	return amassEntity{value: val, typ: typ}, true
+}
+
+func normalizeAmassRows(rows []amassEnumRow) []amassEnumRow {
+	type aggRow struct {
+		row    amassEnumRow
+		hasIP  bool
+		hasASN bool
+		hasSrc bool
+		hasTag bool
+	}
+	agg := make(map[string]aggRow, len(rows))
+	for _, row := range rows {
+		name := strings.ToLower(strings.TrimSpace(row.Name))
+		domain := strings.ToLower(strings.TrimSpace(row.Domain))
+		ip := strings.TrimSpace(row.IP)
+		source := strings.TrimSpace(row.Source)
+		tag := strings.TrimSpace(row.Tag)
+		if name == "" {
+			continue
+		}
+		key := strings.Join([]string{name, domain, ip}, "|")
+		item := agg[key]
+		if item.row.Name == "" {
+			item.row = amassEnumRow{
+				Name:   name,
+				Domain: domain,
+				IP:     ip,
+			}
+		}
+		if ip != "" {
+			item.hasIP = true
+			item.row.IP = ip
+		}
+		if row.ASN != 0 {
+			item.hasASN = true
+			item.row.ASN = row.ASN
+		}
+		if source != "" && !item.hasSrc {
+			item.row.Source = source
+			item.hasSrc = true
+		}
+		if tag != "" && !item.hasTag {
+			item.row.Tag = tag
+			item.hasTag = true
+		}
+		agg[key] = item
+	}
+
+	out := make([]amassEnumRow, 0, len(agg))
+	for _, item := range agg {
+		out = append(out, item.row)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Domain == out[j].Domain {
+			if out[i].Name == out[j].Name {
+				return out[i].IP < out[j].IP
+			}
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Domain < out[j].Domain
+	})
+	return out
+}
+
+func (s *Server) syncIPsFromAmassRows(rows []amassEnumRow) {
+	if strings.TrimSpace(s.cfg.Lists.IPs) == "" || len(rows) == 0 {
+		return
+	}
+	all := make([]string, 0, len(rows))
+	for _, existing := range readListLines(s.cfg.Lists.IPs) {
+		all = append(all, existing)
+	}
+	for _, row := range rows {
+		all = append(all, row.IP)
+	}
+	ips := sortedUniqueIPs(all)
+	if len(ips) == 0 {
+		return
+	}
+	_ = os.WriteFile(s.cfg.Lists.IPs, []byte(strings.Join(ips, "\n")), 0o644)
+}
+
+func sortedUniqueIPs(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		ip := net.ParseIP(strings.TrimSpace(v))
+		if ip == nil {
+			continue
+		}
+		canonical := ip.String()
+		if _, ok := seen[canonical]; ok {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		out = append(out, canonical)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return ipStringLess(out[i], out[j])
+	})
+	return out
+}
+
+func ipStringLess(a, b string) bool {
+	ipa := net.ParseIP(a)
+	ipb := net.ParseIP(b)
+	if ipa == nil || ipb == nil {
+		return a < b
+	}
+	a4 := ipa.To4()
+	b4 := ipb.To4()
+	if a4 != nil && b4 == nil {
+		return true
+	}
+	if a4 == nil && b4 != nil {
+		return false
+	}
+	aa := ipa.To16()
+	bb := ipb.To16()
+	if aa == nil || bb == nil {
+		return a < b
+	}
+	for i := 0; i < len(aa) && i < len(bb); i++ {
+		if aa[i] == bb[i] {
+			continue
+		}
+		return aa[i] < bb[i]
+	}
+	return a < b
 }
 
 func readDNSXHostIPs(path string) map[string][]string {

@@ -16,7 +16,7 @@ Go backend + static web UI for running recon flow tasks.
 
 3. Passive recon enrichment
 - generate dork links for `wildcards`, `domains`, and `apidomains`
-- bucket dork outputs into `dorking/github`, `dorking/google`, `dorking/shodan`, `dorking/wayback`
+- bucket dork outputs into `data/dorking/github`, `data/dorking/google`, `data/dorking/shodan`, `data/dorking/wayback`
 - optional GitHub dork automation (token-based API search + hits)
 - fetch `robots.txt` and extract disallowed paths/sitemaps for wildcard/domain/api targets
 - run `sort_http` on domains to keep live HTTP targets organized

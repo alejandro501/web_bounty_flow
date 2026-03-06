@@ -58,6 +58,7 @@ const (
 	StepGAU            = "gau"
 	StepCTL            = "ctl"
 	StepSubfinder      = "subfinder"
+	StepRawOutputs     = "persist-raw-outputs"
 	StepDNSX           = "dnsx-validate"
 	StepRobotsSitemaps = "robots-sitemaps"
 	StepWaybackURLs    = "waybackurls"
@@ -96,6 +97,7 @@ var flowSteps = []Step{
 	{ID: StepGAU, Label: "Run gau in parallel with other passive tools."},
 	{ID: StepCTL, Label: "Query certificate transparency logs in parallel."},
 	{ID: StepSubfinder, Label: "Run subfinder in parallel with other passive tools."},
+	{ID: StepRawOutputs, Label: "Persist per-tool raw outputs in dedicated folders."},
 	{ID: StepDNSX, Label: "Validate discovered hosts with dnsx before consolidation."},
 	{ID: StepConsolidate, Label: "Consolidate all discovered hosts and remove duplicates."},
 	{ID: StepHTTPX, Label: "Probe consolidated hosts with httpx for live web servers."},
@@ -141,6 +143,7 @@ type App struct {
 	stepUpdate  func(id string, status StepStatus)
 	configStore *configstore.Store
 	torEnabled  bool
+	resumeDone  map[string]bool
 }
 
 // EgressProbe describes best-effort outbound IP detection.
@@ -219,6 +222,11 @@ func (a *App) updateStep(id string, status StepStatus) {
 }
 
 func (a *App) runStep(id string, fn func() error) error {
+	if a.resumeDone != nil && a.resumeDone[id] {
+		a.logger.Printf("%s: resume skip (already completed)", id)
+		a.updateStep(id, StepDone)
+		return nil
+	}
 	a.updateStep(id, StepRunning)
 	if err := fn(); err != nil {
 		a.updateStep(id, StepError)
@@ -239,6 +247,20 @@ func (a *App) SetTorEnabled(enabled bool) {
 		a.logger.Printf("network mode: tor enabled")
 	} else {
 		a.logger.Printf("network mode: direct")
+	}
+}
+
+// SetResumeCompleted configures steps to skip during a resumed run.
+func (a *App) SetResumeCompleted(done map[string]bool) {
+	if len(done) == 0 {
+		a.resumeDone = nil
+		return
+	}
+	a.resumeDone = make(map[string]bool, len(done))
+	for stepID, ok := range done {
+		if ok {
+			a.resumeDone[stepID] = true
+		}
 	}
 }
 
@@ -386,14 +408,14 @@ func (a *App) prepareDirectories() error {
 
 func (a *App) passiveRecon(ctx context.Context) error {
 	for _, step := range []string{
-		StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepClickjacking, StepCORSChecks, StepOpenRedirect, StepWorkflowLogic, StepSmugglingStack, StepNmapEnrich, StepTierIsolation, StepStaticReview, StepRunOpsBundle, StepStageScorecard, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
+		StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepRawOutputs, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepClickjacking, StepCORSChecks, StepOpenRedirect, StepWorkflowLogic, StepSmugglingStack, StepNmapEnrich, StepTierIsolation, StepStaticReview, StepRunOpsBundle, StepStageScorecard, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
 	} {
 		a.updateStep(step, StepPending)
 	}
 
 	if !fileExists(a.cfg.Lists.Wildcards) || len(readSafeLines(a.cfg.Lists.Wildcards)) == 0 {
 		for _, step := range []string{
-			StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepClickjacking, StepCORSChecks, StepOpenRedirect, StepWorkflowLogic, StepSmugglingStack, StepNmapEnrich, StepTierIsolation, StepStaticReview, StepRunOpsBundle, StepStageScorecard, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
+			StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepRawOutputs, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepClickjacking, StepCORSChecks, StepOpenRedirect, StepWorkflowLogic, StepSmugglingStack, StepNmapEnrich, StepTierIsolation, StepStaticReview, StepRunOpsBundle, StepStageScorecard, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
 		} {
 			a.skipStep(step)
 		}
@@ -498,23 +520,25 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 	amassDir := filepath.Join(reconDir, "amass")
 	rawDir := filepath.Join(reconDir, "raw")
 	combinedAmassJSON := filepath.Join(amassDir, "amass_enum.jsonl")
-	if err := os.MkdirAll(amassDir, 0o755); err != nil {
-		return err
-	}
-	for _, dir := range []string{
-		filepath.Join(rawDir, StepAmass),
-		filepath.Join(rawDir, StepSublist3r),
-		filepath.Join(rawDir, StepAssetfinder),
-		filepath.Join(rawDir, StepGAU),
-		filepath.Join(rawDir, StepCTL),
-		filepath.Join(rawDir, StepSubfinder),
-		filepath.Join(rawDir, StepDNSX),
-	} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := a.runStep(StepRawOutputs, func() error {
+		if err := os.MkdirAll(amassDir, 0o755); err != nil {
 			return err
 		}
-	}
-	if err := os.WriteFile(combinedAmassJSON, []byte{}, 0o644); err != nil {
+		for _, dir := range []string{
+			filepath.Join(rawDir, StepAmass),
+			filepath.Join(rawDir, StepSublist3r),
+			filepath.Join(rawDir, StepAssetfinder),
+			filepath.Join(rawDir, StepGAU),
+			filepath.Join(rawDir, StepCTL),
+			filepath.Join(rawDir, StepSubfinder),
+			filepath.Join(rawDir, StepDNSX),
+		} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
+		}
+		return os.WriteFile(combinedAmassJSON, []byte{}, 0o644)
+	}); err != nil {
 		return err
 	}
 
@@ -5600,10 +5624,7 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 	}
 
 	csvPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "live-webservers.csv")
-	legacyDomainsHTTP := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "domains_http")
-	if removeErr := os.Remove(legacyDomainsHTTP); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-		a.logger.Printf("%s: failed to remove legacy %s: %v", StepHTTPX, legacyDomainsHTTP, removeErr)
-	}
+	domainsHTTPPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "domains_http")
 
 	stdout, err := a.runCommandCapture(
 		ctx,
@@ -5633,10 +5654,7 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 		}
 
 		urls := readSafeLines(tmpOutputPath)
-		if err := os.WriteFile(a.cfg.Lists.Domains, []byte(strings.Join(urls, "\n")), 0o644); err != nil {
-			return "", err
-		}
-		if err := a.generateAPIDomainsFromDomains(); err != nil {
+		if err := os.WriteFile(domainsHTTPPath, []byte(strings.Join(urls, "\n")), 0o644); err != nil {
 			return "", err
 		}
 
@@ -5652,7 +5670,7 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 			return "", err
 		}
 		a.liveCSVPath = csvPath
-		return a.cfg.Lists.Domains, nil
+		return domainsHTTPPath, nil
 	}
 
 	rows := parseHTTPXJSONRecords(stdout)
@@ -5669,10 +5687,7 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 		urls = append(urls, u)
 	}
 	sort.Strings(urls)
-	if err := os.WriteFile(a.cfg.Lists.Domains, []byte(strings.Join(urls, "\n")), 0o644); err != nil {
-		return "", err
-	}
-	if err := a.generateAPIDomainsFromDomains(); err != nil {
+	if err := os.WriteFile(domainsHTTPPath, []byte(strings.Join(urls, "\n")), 0o644); err != nil {
 		return "", err
 	}
 	if err := a.writeLiveWebserversCSV(csvPath, rows); err != nil {
@@ -5680,7 +5695,7 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 	}
 
 	a.liveCSVPath = csvPath
-	return a.cfg.Lists.Domains, nil
+	return domainsHTTPPath, nil
 }
 
 func parseHTTPXJSONRecords(output string) []liveWebserverRecord {
@@ -5901,6 +5916,12 @@ func asStringSlice(v any) []string {
 }
 
 func (a *App) httpListOrDefault(path string) string {
+	if strings.TrimSpace(path) == strings.TrimSpace(a.cfg.Lists.Domains) {
+		domainsHTTPPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "domains_http")
+		if len(readSafeLines(domainsHTTPPath)) > 0 {
+			return domainsHTTPPath
+		}
+	}
 	return path
 }
 
@@ -6046,10 +6067,8 @@ func (a *App) networkEnv() []string {
 	if !a.torEnabled {
 		return env
 	}
-	env = upsertEnv(env, "ALL_PROXY", "socks5h://127.0.0.1:9050")
-	env = upsertEnv(env, "HTTP_PROXY", "socks5h://127.0.0.1:9050")
-	env = upsertEnv(env, "HTTPS_PROXY", "socks5h://127.0.0.1:9050")
-	env = upsertEnv(env, "NO_PROXY", "localhost,127.0.0.1,::1")
+	// Do not force SOCKS env globally: some tools (notably Python requests-based)
+	// fail without optional SOCKS dependencies. Tor routing is handled via torify.
 	return env
 }
 
@@ -6315,7 +6334,7 @@ func (a *App) mergeDiscoveredIPs(ips []string) error {
 		return nil
 	}
 	existing := readSafeLines(a.cfg.Lists.IPs)
-	merged := unique(append(existing, ips...))
+	merged := sortedUniqueIPs(append(existing, ips...))
 	return os.WriteFile(a.cfg.Lists.IPs, []byte(strings.Join(merged, "\n")), 0o644)
 }
 
@@ -6370,6 +6389,55 @@ func unique(values []string) []string {
 
 	sort.Strings(result)
 	return result
+}
+
+func sortedUniqueIPs(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		ip := net.ParseIP(strings.TrimSpace(v))
+		if ip == nil {
+			continue
+		}
+		canonical := ip.String()
+		if _, ok := seen[canonical]; ok {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		out = append(out, canonical)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return ipStringLess(out[i], out[j])
+	})
+	return out
+}
+
+func ipStringLess(a, b string) bool {
+	ipa := net.ParseIP(a)
+	ipb := net.ParseIP(b)
+	if ipa == nil || ipb == nil {
+		return a < b
+	}
+	a4 := ipa.To4()
+	b4 := ipb.To4()
+	if a4 != nil && b4 == nil {
+		return true
+	}
+	if a4 == nil && b4 != nil {
+		return false
+	}
+	aa := ipa.To16()
+	bb := ipb.To16()
+	if aa == nil || bb == nil {
+		return a < b
+	}
+	for i := 0; i < len(aa) && i < len(bb); i++ {
+		if aa[i] == bb[i] {
+			continue
+		}
+		return aa[i] < bb[i]
+	}
+	return a < b
 }
 
 func sanitizeFilename(input string) string {
