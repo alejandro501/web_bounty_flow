@@ -563,6 +563,69 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		}
 	}
 
+	discoveredDomains := make(map[string]struct{})
+	for _, line := range readSafeLines(a.cfg.Lists.Domains) {
+		host := normalizeDorkTarget(line)
+		if host == "" {
+			continue
+		}
+		discoveredDomains[host] = struct{}{}
+	}
+	discoveredAPIDomains := make(map[string]struct{})
+	for _, line := range readSafeLines(a.cfg.Lists.APIDomains) {
+		host := normalizeDorkTarget(line)
+		if host == "" {
+			continue
+		}
+		discoveredAPIDomains[host] = struct{}{}
+	}
+	var discoveredMu sync.Mutex
+	persistDiscoveredViews := func(hosts []string) error {
+		discoveredMu.Lock()
+		defer discoveredMu.Unlock()
+
+		changed := false
+		apiChanged := false
+		for _, rawHost := range hosts {
+			host := normalizeDorkTarget(rawHost)
+			if host == "" {
+				continue
+			}
+			if _, ok := discoveredDomains[host]; !ok {
+				discoveredDomains[host] = struct{}{}
+				changed = true
+			}
+			if isAPIRelatedHost(host) {
+				if _, ok := discoveredAPIDomains[host]; !ok {
+					discoveredAPIDomains[host] = struct{}{}
+					apiChanged = true
+				}
+			}
+		}
+		if !changed && !apiChanged {
+			return nil
+		}
+
+		domains := make([]string, 0, len(discoveredDomains))
+		for host := range discoveredDomains {
+			domains = append(domains, host)
+		}
+		sort.Strings(domains)
+		if err := os.WriteFile(a.cfg.Lists.Domains, []byte(strings.Join(domains, "\n")), 0o644); err != nil {
+			return err
+		}
+
+		apiDomains := make([]string, 0, len(discoveredAPIDomains))
+		for host := range discoveredAPIDomains {
+			apiDomains = append(apiDomains, host)
+		}
+		sort.Strings(apiDomains)
+		if err := os.WriteFile(a.cfg.Lists.APIDomains, []byte(strings.Join(apiDomains, "\n")), 0o644); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	type toolRunner struct {
 		step       string
 		required   string
@@ -758,6 +821,9 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 					return
 				}
 				appendResults(r.step, hosts)
+				if err := persistDiscoveredViews(hosts); err != nil {
+					a.logger.Printf("%s: failed to persist incremental discovered domains: %v", r.step, err)
+				}
 				a.logger.Printf("%s: finished seed=%s hosts=%d duration=%s", r.step, seed, len(hosts), time.Since(start).Round(time.Second))
 			}()
 		}

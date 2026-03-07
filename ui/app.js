@@ -162,6 +162,104 @@ const LIST_FILES = [
   { type: "fuzzing_dir_hits", label: "Fuzzing Dir Hits", uploadable: false },
 ];
 
+const GENERATED_FILE_GROUPS = [
+  {
+    title: "Mapping & Discovery",
+    types: [
+      "domains_http",
+      "domains_dead",
+      "apidomains_http",
+      "apidomains_dead",
+      "live_webservers_csv",
+      "robots_urls",
+      "wayback_urls",
+      "katana_urls",
+      "all_urls",
+      "params_candidates",
+    ],
+  },
+  {
+    title: "Input & Injection Fuzzing",
+    types: [
+      "fuzzing_doc_hits",
+      "fuzzing_dir_hits",
+      "param_fuzz_query_hits",
+      "param_fuzz_body_hits",
+      "param_fuzz_header_hits",
+      "param_fuzz_cookie_hits",
+      "param_fuzz_summary",
+      "injection_sqli_hits",
+      "injection_nosqli_hits",
+      "injection_xpath_hits",
+      "injection_ldap_hits",
+      "injection_summary",
+      "server_input_os_command_hits",
+      "server_input_path_traversal_hits",
+      "server_input_file_inclusion_hits",
+      "server_input_summary",
+      "adv_injection_xxe_hits",
+      "adv_injection_soap_hits",
+      "adv_injection_ssrf_hits",
+      "adv_injection_smtp_hits",
+      "adv_injection_summary",
+    ],
+  },
+  {
+    title: "Client-Side Attack Classes",
+    types: [
+      "csrf_candidates",
+      "csrf_findings",
+      "csrf_replay_log",
+      "csrf_summary",
+      "clickjacking_headers",
+      "clickjacking_findings",
+      "clickjacking_summary",
+      "cors_replay_log",
+      "cors_findings",
+      "cors_summary",
+      "open_redirect_candidates",
+      "open_redirect_replay_log",
+      "open_redirect_findings",
+      "open_redirect_summary",
+      "xss_reflected_hits",
+      "xss_dom_hits",
+      "xss_stored_hits",
+      "xss_summary",
+      "xss_scan_log",
+    ],
+  },
+  {
+    title: "Logic, Architecture & Platform",
+    types: [
+      "workflow_logic_candidates",
+      "workflow_logic_findings",
+      "workflow_logic_replay_log",
+      "workflow_logic_summary",
+      "smuggling_stack_tool_runs",
+      "smuggling_stack_findings",
+      "smuggling_stack_summary",
+      "nmap_targets",
+      "nmap_services",
+      "nmap_searchsploit",
+      "nmap_summary",
+      "tier_isolation_ip_map",
+      "tier_isolation_findings",
+      "tier_isolation_summary",
+    ],
+  },
+  {
+    title: "Source Review & RunOps",
+    types: [
+      "static_review_semgrep",
+      "static_review_gosec",
+      "static_review_correlated",
+      "static_review_summary",
+      "runops_scorecard_json",
+      "runops_scorecard_md",
+    ],
+  },
+];
+
 const FLOW_SEGMENTS = [
   {
     title: "0) Preflight and Runtime",
@@ -1944,7 +2042,38 @@ function initializeScopeCards() {
   };
 
   const uploadableCards = LIST_FILES.filter((item) => item.uploadable).map(renderCard).join("");
-  const generatedCards = LIST_FILES.filter((item) => !item.uploadable).map(renderCard).join("");
+  const generatedItems = LIST_FILES.filter((item) => !item.uploadable);
+  const generatedByType = new Map(generatedItems.map((item) => [item.type, item]));
+  const groupedGeneratedSections = GENERATED_FILE_GROUPS.map((group) => {
+    const cards = group.types
+      .map((type) => generatedByType.get(type))
+      .filter(Boolean)
+      .map((item) => renderCard(item))
+      .join("");
+    if (!cards) {
+      return "";
+    }
+    return `
+      <section class="scope-generated-group">
+        <h4 class="scope-generated-group__title">${escapeHTML(group.title)}</h4>
+        <div class="scope-group__grid">${cards}</div>
+      </section>
+    `;
+  }).join("");
+
+  const groupedTypes = new Set(GENERATED_FILE_GROUPS.flatMap((group) => group.types));
+  const otherGeneratedCards = generatedItems
+    .filter((item) => !groupedTypes.has(item.type))
+    .map((item) => renderCard(item))
+    .join("");
+  const otherGeneratedSection = otherGeneratedCards
+    ? `
+      <section class="scope-generated-group">
+        <h4 class="scope-generated-group__title">Other</h4>
+        <div class="scope-group__grid">${otherGeneratedCards}</div>
+      </section>
+    `
+    : "";
 
   scopeCards.innerHTML = `
     <section class="scope-group">
@@ -1955,8 +2084,9 @@ function initializeScopeCards() {
     </section>
     <details class="scope-group scope-group--generated">
       <summary class="scope-group__summary">Auto-generated</summary>
-      <div class="scope-group__grid">
-        ${generatedCards}
+      <div class="scope-generated-groups">
+        ${groupedGeneratedSections}
+        ${otherGeneratedSection}
       </div>
     </details>
   `;
@@ -2254,16 +2384,18 @@ function updateAmassEnumButton(present, count) {
   if (!openAmassEnum) {
     return;
   }
-  openAmassEnum.disabled = !present;
-  openAmassEnum.textContent = present ? `Amass Enum (${count})` : "Amass Enum";
+  const total = Number(count) || 0;
+  openAmassEnum.disabled = !present || total === 0;
+  openAmassEnum.textContent = `Amass Enum (${total})`;
 }
 
 function updateLiveWebserversButton(present, count) {
   if (!openLiveWebservers) {
     return;
   }
-  openLiveWebservers.disabled = !present;
-  openLiveWebservers.textContent = present ? `Live Web Servers (${count})` : "Live Web Servers";
+  const total = Number(count) || 0;
+  openLiveWebservers.disabled = !present || total === 0;
+  openLiveWebservers.textContent = `Live Web Servers (${total})`;
 }
 
 function normalizeFilterValue(v) {
