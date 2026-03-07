@@ -27,6 +27,14 @@ const strideAnswerText = document.getElementById("stride-answer-text");
 const strideAnswerStatus = document.getElementById("stride-answer-status");
 const strideExportAnswers = document.getElementById("stride-export-answers");
 const manualWorkspaceRoots = document.querySelectorAll(".manual-recon[data-workspace]");
+const notesEditor = document.getElementById("notes-editor");
+const notesSave = document.getElementById("notes-save");
+const notesStatus = document.getElementById("notes-status");
+const notesPreview = document.getElementById("notes-preview");
+const manualTipsEditor = document.getElementById("manual-tips-editor");
+const manualTipsSave = document.getElementById("manual-tips-save");
+const manualTipsStatus = document.getElementById("manual-tips-status");
+const manualTipsPreview = document.getElementById("manual-tips-preview");
 const githubAutoRun = document.getElementById("github-auto-run");
 const githubKeyLabel = document.getElementById("github-key-label");
 const githubKeyValue = document.getElementById("github-key-value");
@@ -82,6 +90,12 @@ let manualDomainsReady = false;
 let currentFileModalType = "";
 let currentFileModalLabel = "";
 let currentFileModalLines = [];
+const noteDrafts = {
+  notes: "",
+  manual_tips: "",
+};
+let notesAutosaveTimer = null;
+let manualTipsAutosaveTimer = null;
 
 const LIST_FILES = [
   { type: "wildcards", label: "Wildcards", uploadable: true },
@@ -1121,8 +1135,193 @@ menuItems.forEach((item) => {
     if (view === "leads") {
       void refreshLeads({ force: true });
     }
+    if (view === "notes") {
+      void loadNoteCanvas("notes");
+    }
+    if (view === "manual-tips") {
+      void loadNoteCanvas("manual_tips");
+    }
   });
 });
+
+async function fetchNoteDoc(name) {
+  const response = await fetch(`${BACKEND_URL}/api/notes?name=${encodeURIComponent(name)}`);
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
+async function saveNoteDoc(name, content) {
+  const response = await fetch(`${BACKEND_URL}/api/notes?name=${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
+async function loadNoteCanvas(name) {
+  const isNotes = name === "notes";
+  const editor = isNotes ? notesEditor : manualTipsEditor;
+  const statusNode = isNotes ? notesStatus : manualTipsStatus;
+  if (!editor || !statusNode) {
+    return;
+  }
+  statusNode.textContent = "Loading...";
+  try {
+    const data = await fetchNoteDoc(name);
+    const content = String(data.content || "");
+    noteDrafts[name] = content;
+    editor.value = content;
+    refreshNotePreview(name, content);
+    statusNode.textContent = "Loaded";
+  } catch (error) {
+    statusNode.textContent = `Load failed: ${error.message}`;
+  }
+}
+
+async function saveNoteCanvas(name) {
+  const isNotes = name === "notes";
+  const editor = isNotes ? notesEditor : manualTipsEditor;
+  const statusNode = isNotes ? notesStatus : manualTipsStatus;
+  if (!editor || !statusNode) {
+    return;
+  }
+  const content = editor.value || "";
+  statusNode.textContent = "Saving...";
+  try {
+    await saveNoteDoc(name, content);
+    noteDrafts[name] = content;
+    statusNode.textContent = "Saved";
+  } catch (error) {
+    statusNode.textContent = `Save failed: ${error.message}`;
+  }
+}
+
+function scheduleNoteAutosave(name) {
+  if (name === "notes") {
+    if (notesAutosaveTimer) {
+      clearTimeout(notesAutosaveTimer);
+    }
+    notesAutosaveTimer = setTimeout(() => {
+      void saveNoteCanvas("notes");
+    }, 900);
+    return;
+  }
+  if (manualTipsAutosaveTimer) {
+    clearTimeout(manualTipsAutosaveTimer);
+  }
+  manualTipsAutosaveTimer = setTimeout(() => {
+    void saveNoteCanvas("manual_tips");
+  }, 900);
+}
+
+function renderMarkdownPreview(rawText) {
+  const text = String(rawText || "").replace(/\r\n/g, "\n");
+  if (!text.trim()) {
+    return '<p class="muted">Markdown preview appears here.</p>';
+  }
+  const lines = text.split("\n");
+  let html = "";
+  let inCode = false;
+  let inUL = false;
+  let inOL = false;
+
+  const closeLists = () => {
+    if (inUL) {
+      html += "</ul>";
+      inUL = false;
+    }
+    if (inOL) {
+      html += "</ol>";
+      inOL = false;
+    }
+  };
+
+  const inline = (value) => {
+    let out = escapeHTML(value);
+    out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
+    out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    out = out.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+    out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    return out;
+  };
+
+  for (const line of lines) {
+    if (line.trim().startsWith("```")) {
+      closeLists();
+      if (!inCode) {
+        html += "<pre><code>";
+        inCode = true;
+      } else {
+        html += "</code></pre>";
+        inCode = false;
+      }
+      continue;
+    }
+    if (inCode) {
+      html += `${escapeHTML(line)}\n`;
+      continue;
+    }
+    const trimmed = line.trim();
+    if (!trimmed) {
+      closeLists();
+      continue;
+    }
+    const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      closeLists();
+      const level = Math.min(6, heading[1].length);
+      html += `<h${level}>${inline(heading[2])}</h${level}>`;
+      continue;
+    }
+    const ol = trimmed.match(/^(\d+)\.\s+(.+)$/);
+    if (ol) {
+      if (inUL) {
+        html += "</ul>";
+        inUL = false;
+      }
+      if (!inOL) {
+        html += "<ol>";
+        inOL = true;
+      }
+      html += `<li>${inline(ol[2])}</li>`;
+      continue;
+    }
+    const ul = trimmed.match(/^[-*]\s+(.+)$/);
+    if (ul) {
+      if (inOL) {
+        html += "</ol>";
+        inOL = false;
+      }
+      if (!inUL) {
+        html += "<ul>";
+        inUL = true;
+      }
+      html += `<li>${inline(ul[1])}</li>`;
+      continue;
+    }
+    closeLists();
+    html += `<p>${inline(trimmed)}</p>`;
+  }
+  closeLists();
+  if (inCode) {
+    html += "</code></pre>";
+  }
+  return html;
+}
+
+function refreshNotePreview(name, content) {
+  const preview = name === "notes" ? notesPreview : manualTipsPreview;
+  if (!preview) {
+    return;
+  }
+  preview.innerHTML = renderMarkdownPreview(content);
+}
 
 strideTabs.forEach((tab) => {
   tab.addEventListener("click", () => {
@@ -2054,10 +2253,10 @@ function initializeScopeCards() {
       return "";
     }
     return `
-      <section class="scope-generated-group">
-        <h4 class="scope-generated-group__title">${escapeHTML(group.title)}</h4>
+      <details class="scope-generated-group" open>
+        <summary class="scope-generated-group__summary">${escapeHTML(group.title)}</summary>
         <div class="scope-group__grid">${cards}</div>
-      </section>
+      </details>
     `;
   }).join("");
 
@@ -2068,10 +2267,10 @@ function initializeScopeCards() {
     .join("");
   const otherGeneratedSection = otherGeneratedCards
     ? `
-      <section class="scope-generated-group">
-        <h4 class="scope-generated-group__title">Other</h4>
+      <details class="scope-generated-group" open>
+        <summary class="scope-generated-group__summary">Other</summary>
         <div class="scope-group__grid">${otherGeneratedCards}</div>
-      </section>
+      </details>
     `
     : "";
 
@@ -3006,6 +3205,30 @@ githubKeysList?.addEventListener("click", async (event) => {
   }
 });
 
+notesSave?.addEventListener("click", async () => {
+  await saveNoteCanvas("notes");
+});
+
+manualTipsSave?.addEventListener("click", async () => {
+  await saveNoteCanvas("manual_tips");
+});
+
+notesEditor?.addEventListener("input", () => {
+  if (notesStatus) {
+    notesStatus.textContent = "Unsaved changes...";
+  }
+  refreshNotePreview("notes", notesEditor.value || "");
+  scheduleNoteAutosave("notes");
+});
+
+manualTipsEditor?.addEventListener("input", () => {
+  if (manualTipsStatus) {
+    manualTipsStatus.textContent = "Unsaved changes...";
+  }
+  refreshNotePreview("manual_tips", manualTipsEditor.value || "");
+  scheduleNoteAutosave("manual_tips");
+});
+
 loadConfig();
 loadNetworkSettings();
 setInterval(loadNetworkSettings, 8000);
@@ -3071,3 +3294,5 @@ setInterval(() => {
 renderStrideLearning();
 loadStrideAnswer();
 initializeManualRecon();
+loadNoteCanvas("notes");
+loadNoteCanvas("manual_tips");

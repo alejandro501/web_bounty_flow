@@ -86,6 +86,7 @@ func New(cfg *config.Config) *Server {
 	s.mux.HandleFunc("/api/dorking/github/run", s.corsMiddleware(s.githubRunHandler))
 	s.mux.HandleFunc("/api/steps", s.corsMiddleware(s.stepsHandler))
 	s.mux.HandleFunc("/api/list", s.corsMiddleware(s.listHandler))
+	s.mux.HandleFunc("/api/notes", s.corsMiddleware(s.notesHandler))
 	s.mux.HandleFunc("/api/tools", s.corsMiddleware(s.toolsHandler))
 	s.mux.HandleFunc("/api/live-webservers", s.corsMiddleware(s.liveWebserversHandler))
 	s.mux.HandleFunc("/api/amass-enum", s.corsMiddleware(s.amassEnumHandler))
@@ -304,6 +305,10 @@ type subdomainProgressResponse struct {
 	OverallDone    int                     `json:"overall_done"`
 	OverallPercent int                     `json:"overall_percent"`
 	Tools          []subdomainToolProgress `json:"tools"`
+}
+
+type notePayload struct {
+	Content string `json:"content"`
 }
 
 type liveWebserverRow struct {
@@ -686,6 +691,57 @@ func (s *Server) listHandler(w http.ResponseWriter, r *http.Request) {
 		"present": present,
 		"entries": lines,
 	})
+}
+
+func (s *Server) notesHandler(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("name")))
+	path, err := notePath(name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+			http.Error(w, readErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(notePayload{Content: string(raw)})
+		return
+	case http.MethodPut:
+		var payload notePayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := os.WriteFile(path, []byte(payload.Content), 0o644); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(notePayload{Content: payload.Content})
+		return
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func notePath(name string) (string, error) {
+	switch name {
+	case "notes":
+		return filepath.Join("_notes", "notes.md"), nil
+	case "manual_tips":
+		return filepath.Join("_notes", "useful_manual_tips.md"), nil
+	default:
+		return "", fmt.Errorf("unsupported note name %q", name)
+	}
 }
 
 func (s *Server) liveWebserversHandler(w http.ResponseWriter, r *http.Request) {
