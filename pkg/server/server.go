@@ -1534,7 +1534,15 @@ func (s *Server) clearResults() error {
 	}
 
 	// Remove generated scope outputs entirely; they will be recreated by relevant steps.
-	for _, generatedList := range []string{s.cfg.Lists.Domains, s.cfg.Lists.APIDomains, s.cfg.Lists.IPs} {
+	for _, generatedList := range []string{
+		s.cfg.Lists.Domains,
+		filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "domains_http"),
+		filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "domains_dead"),
+		s.cfg.Lists.APIDomains,
+		filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "apidomains_http"),
+		filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "apidomains_dead"),
+		s.cfg.Lists.IPs,
+	} {
 		if strings.TrimSpace(generatedList) == "" {
 			continue
 		}
@@ -1604,8 +1612,16 @@ func (s *Server) listPath(name string) (string, error) {
 		return s.cfg.Lists.Wildcards, nil
 	case "domains":
 		return s.cfg.Lists.Domains, nil
+	case "domains_http":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "domains_http"), nil
+	case "domains_dead":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "domains_dead"), nil
 	case "apidomains":
 		return s.cfg.Lists.APIDomains, nil
+	case "apidomains_http":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "apidomains_http"), nil
+	case "apidomains_dead":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "apidomains_dead"), nil
 	case "out_of_scope":
 		return s.cfg.Lists.OutOfScope, nil
 	case "live_webservers_csv":

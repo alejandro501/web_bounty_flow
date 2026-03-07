@@ -15,6 +15,17 @@ dorking/github/_github_token.txt
 # ffuf
 ffuf/github/github_token.txt
 .env
+.env.*
+!.env.example
+
+# local dev and sensitive artifacts
+__dev/
+*token*.txt
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.*
 
 # dev/hot-reload artifacts
 .cache/

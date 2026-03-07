@@ -85,8 +85,12 @@ let currentFileModalLines = [];
 
 const LIST_FILES = [
   { type: "wildcards", label: "Wildcards", uploadable: true },
-  { type: "domains", label: "Domains", uploadable: true },
-  { type: "apidomains", label: "API Domains", uploadable: true },
+  { type: "domains", label: "All Domains", uploadable: true },
+  { type: "domains_http", label: "HTTP Domains", uploadable: false },
+  { type: "domains_dead", label: "Dead Domains", uploadable: false },
+  { type: "apidomains", label: "All API Domains", uploadable: true },
+  { type: "apidomains_http", label: "HTTP API Domains", uploadable: false },
+  { type: "apidomains_dead", label: "Dead API Domains", uploadable: false },
   { type: "organizations", label: "Organizations", uploadable: true },
   { type: "ips", label: "IPs", uploadable: true },
   { type: "out_of_scope", label: "Out of scope", uploadable: true },

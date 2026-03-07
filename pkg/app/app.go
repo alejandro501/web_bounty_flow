@@ -5657,6 +5657,9 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 		if err := os.WriteFile(domainsHTTPPath, []byte(strings.Join(urls, "\n")), 0o644); err != nil {
 			return "", err
 		}
+		if err := a.syncProbedDomainViews(urls); err != nil {
+			return "", err
+		}
 
 		var fallbackRows []liveWebserverRecord
 		for _, u := range urls {
@@ -5688,6 +5691,9 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 	}
 	sort.Strings(urls)
 	if err := os.WriteFile(domainsHTTPPath, []byte(strings.Join(urls, "\n")), 0o644); err != nil {
+		return "", err
+	}
+	if err := a.syncProbedDomainViews(urls); err != nil {
 		return "", err
 	}
 	if err := a.writeLiveWebserversCSV(csvPath, rows); err != nil {
@@ -5788,6 +5794,80 @@ func (a *App) generateAPIDomainsFromDomains() error {
 	}
 	sort.Strings(apiDomains)
 	return os.WriteFile(a.cfg.Lists.APIDomains, []byte(strings.Join(apiDomains, "\n")), 0o644)
+}
+
+func (a *App) syncProbedDomainViews(httpTargets []string) error {
+	baseDir := filepath.Dir(a.cfg.Lists.Domains)
+	domainsDeadPath := filepath.Join(baseDir, "domains_dead")
+	apiHTTPPath := filepath.Join(baseDir, "apidomains_http")
+	apiDeadPath := filepath.Join(baseDir, "apidomains_dead")
+
+	httpByHost := make(map[string]struct{})
+	httpURLs := unique(httpTargets)
+	for _, target := range httpURLs {
+		host := extractHostCandidate(target)
+		if host == "" {
+			continue
+		}
+		httpByHost[host] = struct{}{}
+	}
+
+	allDomains := unique(readSafeLines(a.cfg.Lists.Domains))
+	var deadDomains []string
+	for _, domain := range allDomains {
+		host := extractHostCandidate(domain)
+		if host == "" {
+			continue
+		}
+		if _, ok := httpByHost[host]; ok {
+			continue
+		}
+		deadDomains = append(deadDomains, normalizeLiveTarget(domain))
+	}
+
+	apiDomains := unique(readSafeLines(a.cfg.Lists.APIDomains))
+	apiHostSet := make(map[string]struct{}, len(apiDomains))
+	for _, api := range apiDomains {
+		host := extractHostCandidate(api)
+		if host == "" {
+			continue
+		}
+		apiHostSet[host] = struct{}{}
+	}
+
+	var apiHTTP []string
+	for _, target := range httpURLs {
+		host := extractHostCandidate(target)
+		if host == "" {
+			continue
+		}
+		if _, ok := apiHostSet[host]; ok {
+			apiHTTP = append(apiHTTP, target)
+		}
+	}
+
+	var apiDead []string
+	for _, api := range apiDomains {
+		host := extractHostCandidate(api)
+		if host == "" {
+			continue
+		}
+		if _, ok := httpByHost[host]; ok {
+			continue
+		}
+		apiDead = append(apiDead, normalizeLiveTarget(api))
+	}
+
+	if err := os.WriteFile(domainsDeadPath, []byte(strings.Join(unique(deadDomains), "\n")), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(apiHTTPPath, []byte(strings.Join(unique(apiHTTP), "\n")), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(apiDeadPath, []byte(strings.Join(unique(apiDead), "\n")), 0o644); err != nil {
+		return err
+	}
+	return nil
 }
 
 func extractHostCandidate(raw string) string {
