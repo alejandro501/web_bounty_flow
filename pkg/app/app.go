@@ -689,7 +689,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 					ctx,
 					"sublist3r",
 					"-d", seed,
-					"-e", "crtsh,netcraft,passivedns",
+					"-e", "crtsh,passivedns",
 					"-o", outFile,
 				)
 				if err != nil {
