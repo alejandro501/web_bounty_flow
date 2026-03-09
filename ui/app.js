@@ -47,7 +47,11 @@ const fileViewerModal = document.getElementById("file-viewer-modal");
 const fileViewerTitle = document.getElementById("file-viewer-title");
 const fileViewerContent = document.getElementById("file-viewer-content");
 const closeFileViewer = document.getElementById("close-file-viewer");
-const exportFileViewer = document.getElementById("export-file-viewer");
+const openFileViewerExport = document.getElementById("open-file-viewer-export");
+const fileViewerExportMenu = document.getElementById("file-viewer-export-menu");
+const editFileViewer = document.getElementById("edit-file-viewer");
+const saveFileViewer = document.getElementById("save-file-viewer");
+const fileViewerEditor = document.getElementById("file-viewer-editor");
 const openAmassEnum = document.getElementById("open-amass-enum");
 const amassEnumModal = document.getElementById("amass-enum-modal");
 const closeAmassEnum = document.getElementById("close-amass-enum");
@@ -90,6 +94,12 @@ let manualDomainsReady = false;
 let currentFileModalType = "";
 let currentFileModalLabel = "";
 let currentFileModalLines = [];
+let currentFileModalRows = [];
+let currentFileModalColumns = [];
+let currentFileModalStructured = false;
+let currentFileModalRawText = "";
+let fileViewerEditing = false;
+let fileViewerExportStructured = false;
 const noteDrafts = {
   notes: "",
   manual_tips: "",
@@ -1886,7 +1896,7 @@ function applyManualXSSRunnerAvailability(running = false) {
     manualRunXSS.textContent = running ? "Playwright running..." : "Launch Playwright XSS";
   }
   if (manualXSSStatus && !manualDomainsReady && !running) {
-    manualXSSStatus.textContent = "Disabled until domains list is populated.";
+    manualXSSStatus.textContent = "Disabled until HTTP domains are populated.";
   }
 }
 
@@ -1962,9 +1972,9 @@ function populateManualDomainSelect(options) {
 }
 
 async function refreshManualDomainOptions() {
-  const [liveData, domainsData] = await Promise.all([
+  const [liveData, domainsHTTPData] = await Promise.all([
     fetchLiveWebservers().catch(() => ({ present: false, rows: [] })),
-    fetchListMeta("domains").catch(() => ({ present: false, entries: [] })),
+    fetchListMeta("domains_http").catch(() => ({ present: false, entries: [] })),
   ]);
   const liveRows = Array.isArray(liveData.rows) ? liveData.rows : [];
   updateManualStatusFilterOptions(liveRows);
@@ -1976,10 +1986,10 @@ async function refreshManualDomainOptions() {
   if (statusFilteredRows.length > 0) {
     options.push(...statusFilteredRows.map((row) => row.url).filter(Boolean));
   }
-  if (Array.isArray(domainsData.entries) && domainsData.entries.length > 0) {
-    options.push(...domainsData.entries.map((entry) => normalizeDomainEntry(entry)));
+  if (Array.isArray(domainsHTTPData.entries) && domainsHTTPData.entries.length > 0) {
+    options.push(...domainsHTTPData.entries.map((entry) => normalizeDomainEntry(entry)));
   }
-  manualDomainsReady = Array.isArray(domainsData.entries) && domainsData.entries.length > 0;
+  manualDomainsReady = options.length > 0;
   const signature = [...new Set(options.map((entry) => normalizeDomainEntry(entry)).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
     .join("|");
@@ -2055,7 +2065,7 @@ function initializeManualDomainChecklist() {
   manualRunXSS?.addEventListener("click", async () => {
     if (!manualDomainsReady) {
       if (manualXSSStatus) {
-        manualXSSStatus.textContent = "Disabled until domains list is populated.";
+        manualXSSStatus.textContent = "Disabled until HTTP domains are populated.";
       }
       applyManualXSSRunnerAvailability(false);
       return;
@@ -2353,22 +2363,175 @@ async function openScopeFileModal(type, label) {
   currentFileModalType = type || "";
   currentFileModalLabel = label || type || "file";
   currentFileModalLines = [];
+  currentFileModalRows = [];
+  currentFileModalColumns = [];
+  currentFileModalStructured = false;
+  currentFileModalRawText = "";
+  fileViewerEditing = false;
+  applyFileViewerExportFormatOptions(false);
+  setFileViewerEditing(false);
   fileViewerTitle.textContent = label;
+  fileViewerContent.classList.remove("log-view--table");
   fileViewerContent.textContent = "Loading...";
   fileViewerModal.hidden = false;
   try {
     const data = await fetchListMeta(type);
-    if (!data.present) {
-      fileViewerContent.textContent = "File missing.";
-      return;
-    }
     currentFileModalLines = Array.isArray(data.entries) ? data.entries : [];
-    fileViewerContent.textContent = data.entries && data.entries.length
-      ? data.entries.join("\n")
-      : "No entries yet.";
+    currentFileModalRawText = currentFileModalLines.join("\n");
+    renderFileViewerData(currentFileModalLines);
   } catch (error) {
+    applyFileViewerExportFormatOptions(false);
+    fileViewerContent.classList.remove("log-view--table");
     fileViewerContent.textContent = `Error: ${error.message}`;
   }
+}
+
+function setFileViewerEditing(editing) {
+  fileViewerEditing = Boolean(editing);
+  if (fileViewerEditor) {
+    fileViewerEditor.hidden = !fileViewerEditing;
+    if (fileViewerEditing) {
+      fileViewerEditor.value = currentFileModalRawText || "";
+    }
+  }
+  if (fileViewerContent) {
+    fileViewerContent.hidden = fileViewerEditing;
+  }
+  if (saveFileViewer) {
+    saveFileViewer.disabled = !fileViewerEditing;
+  }
+  if (editFileViewer) {
+    editFileViewer.textContent = fileViewerEditing ? "Cancel Edit" : "Edit";
+  }
+  if (openFileViewerExport) {
+    openFileViewerExport.disabled = fileViewerEditing;
+  }
+  if (fileViewerEditing && fileViewerExportMenu) {
+    fileViewerExportMenu.hidden = true;
+  }
+}
+
+async function saveScopeFileContent(type, content) {
+  const response = await fetch(`${BACKEND_URL}/api/list?type=${encodeURIComponent(type)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
+function normalizeTableCellValue(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeTableCellValue(item)).join(", ");
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function parseJSONLRows(lines) {
+  const rows = [];
+  const columns = [];
+  const columnSet = new Set();
+  let sawAnyLine = false;
+  for (const rawLine of lines || []) {
+    const line = String(rawLine || "").trim();
+    if (!line) {
+      continue;
+    }
+    sawAnyLine = true;
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      return { ok: false, rows: [], columns: [] };
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { ok: false, rows: [], columns: [] };
+    }
+    rows.push(parsed);
+    Object.keys(parsed).forEach((key) => {
+      if (!columnSet.has(key)) {
+        columnSet.add(key);
+        columns.push(key);
+      }
+    });
+  }
+  if (!sawAnyLine || rows.length === 0 || columns.length === 0) {
+    return { ok: false, rows: [], columns: [] };
+  }
+  return { ok: true, rows, columns };
+}
+
+function escapeCSVCell(value) {
+  const text = String(value ?? "");
+  if (text.includes(",") || text.includes("\"") || text.includes("\n")) {
+    return `"${text.replace(/\"/g, "\"\"")}"`;
+  }
+  return text;
+}
+
+function rowsToCSV(rows, columns) {
+  const header = columns.map((col) => escapeCSVCell(col)).join(",");
+  const body = rows.map((row) => columns.map((col) => escapeCSVCell(normalizeTableCellValue(row[col]))).join(","));
+  return [header, ...body].join("\n");
+}
+
+function applyFileViewerExportFormatOptions(isStructured) {
+  fileViewerExportStructured = Boolean(isStructured);
+  if (!fileViewerExportMenu) {
+    return;
+  }
+  fileViewerExportMenu.querySelectorAll("button[data-export-format='csv'], button[data-export-format='json']")
+    .forEach((btn) => {
+      btn.disabled = !isStructured;
+    });
+}
+
+function renderFileViewerData(lines) {
+  const parsed = parseJSONLRows(lines);
+  currentFileModalStructured = parsed.ok;
+  currentFileModalRows = parsed.rows;
+  currentFileModalColumns = parsed.columns;
+  applyFileViewerExportFormatOptions(parsed.ok);
+
+  if (!fileViewerContent) {
+    return;
+  }
+  if (!Array.isArray(lines) || lines.length === 0) {
+    fileViewerContent.classList.remove("log-view--table");
+    fileViewerContent.textContent = "No entries yet.";
+    return;
+  }
+
+  if (!parsed.ok) {
+    fileViewerContent.classList.remove("log-view--table");
+    fileViewerContent.textContent = lines.join("\n");
+    return;
+  }
+
+  const header = parsed.columns.map((col) => `<th>${escapeHTML(col)}</th>`).join("");
+  const body = parsed.rows.map((row) => {
+    const cells = parsed.columns.map((col) => `<td>${escapeHTML(normalizeTableCellValue(row[col]))}</td>`).join("");
+    return `<tr>${cells}</tr>`;
+  }).join("");
+
+  fileViewerContent.classList.add("log-view--table");
+  fileViewerContent.innerHTML = `
+    <div class="modal-table-wrap file-viewer-table-wrap">
+      <table class="lws-table">
+        <thead><tr>${header}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+  `;
 }
 
 function updateScopeCards(states) {
@@ -2785,9 +2948,51 @@ closeFileViewer?.addEventListener("click", () => {
   if (fileViewerModal) {
     fileViewerModal.hidden = true;
   }
+  setFileViewerEditing(false);
 });
 
-exportFileViewer?.addEventListener("click", async () => {
+editFileViewer?.addEventListener("click", () => {
+  if (fileViewerEditing) {
+    setFileViewerEditing(false);
+    return;
+  }
+  setFileViewerEditing(true);
+});
+
+saveFileViewer?.addEventListener("click", async () => {
+  const type = currentFileModalType;
+  if (!type || !fileViewerEditor) {
+    return;
+  }
+  const content = fileViewerEditor.value || "";
+  if (saveFileViewer) {
+    saveFileViewer.disabled = true;
+    saveFileViewer.textContent = "Saving...";
+  }
+  try {
+    await saveScopeFileContent(type, content);
+    currentFileModalRawText = content;
+    currentFileModalLines = content === "" ? [] : content.split(/\r?\n/);
+    renderFileViewerData(currentFileModalLines);
+    setFileViewerEditing(false);
+    await refreshScopeCards();
+    if (scopeCardsStatus) {
+      scopeCardsStatus.textContent = `Saved ${currentFileModalLabel || type}`;
+    }
+  } catch (error) {
+    if (fileViewerContent) {
+      fileViewerContent.classList.remove("log-view--table");
+      fileViewerContent.textContent = `Save failed: ${error.message}`;
+    }
+  } finally {
+    if (saveFileViewer) {
+      saveFileViewer.textContent = "Save";
+      saveFileViewer.disabled = !fileViewerEditing;
+    }
+  }
+});
+
+async function exportCurrentFileViewerContent(requestedFormat = "") {
   const type = currentFileModalType;
   if (!type) {
     return;
@@ -2795,8 +3000,29 @@ exportFileViewer?.addEventListener("click", async () => {
   try {
     const data = await fetchListMeta(type);
     const lines = Array.isArray(data.entries) ? data.entries : currentFileModalLines;
-    const text = lines.length ? lines.join("\n") : "";
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const parsed = parseJSONLRows(lines);
+    const exportFormat = requestedFormat || (parsed.ok ? "csv" : "txt");
+    let payload = "";
+    let mime = "text/plain;charset=utf-8";
+    let ext = "txt";
+    if (exportFormat === "csv") {
+      if (!parsed.ok) {
+        throw new Error("CSV export requires structured JSON lines.");
+      }
+      payload = rowsToCSV(parsed.rows, parsed.columns);
+      mime = "text/csv;charset=utf-8";
+      ext = "csv";
+    } else if (exportFormat === "json") {
+      if (!parsed.ok) {
+        throw new Error("JSON export requires structured JSON lines.");
+      }
+      payload = `${JSON.stringify(parsed.rows, null, 2)}\n`;
+      mime = "application/json;charset=utf-8";
+      ext = "json";
+    } else {
+      payload = lines.length ? lines.join("\n") : "";
+    }
+    const blob = new Blob([payload], { type: mime });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     const base = (currentFileModalLabel || type || "export")
@@ -2804,7 +3030,7 @@ exportFileViewer?.addEventListener("click", async () => {
       .replace(/[^a-z0-9]+/g, "_")
       .replace(/^_+|_+$/g, "");
     anchor.href = url;
-    anchor.download = `${base || "export"}.txt`;
+    anchor.download = `${base || "export"}.${ext}`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
@@ -2812,11 +3038,52 @@ exportFileViewer?.addEventListener("click", async () => {
   } catch (error) {
     fileViewerContent.textContent = `Export failed: ${error.message}`;
   }
+}
+
+openFileViewerExport?.addEventListener("click", () => {
+  if (!fileViewerExportMenu || fileViewerEditing) {
+    return;
+  }
+  fileViewerExportMenu.hidden = !fileViewerExportMenu.hidden;
+});
+
+fileViewerExportMenu?.addEventListener("click", async (event) => {
+  const btn = event.target.closest("button[data-export-format]");
+  if (!btn) {
+    return;
+  }
+  if (btn.disabled) {
+    return;
+  }
+  const format = (btn.dataset.exportFormat || "").trim().toLowerCase();
+  if ((format === "csv" || format === "json") && !fileViewerExportStructured) {
+    return;
+  }
+  fileViewerExportMenu.hidden = true;
+  await exportCurrentFileViewerContent(format || "txt");
 });
 
 fileViewerModal?.addEventListener("click", (event) => {
   if (event.target === fileViewerModal) {
     fileViewerModal.hidden = true;
+    setFileViewerEditing(false);
+    if (fileViewerExportMenu) {
+      fileViewerExportMenu.hidden = true;
+    }
+  }
+});
+
+document.addEventListener("click", (event) => {
+  if (!fileViewerExportMenu || !openFileViewerExport) {
+    return;
+  }
+  if (fileViewerExportMenu.hidden) {
+    return;
+  }
+  const clickedButton = openFileViewerExport.contains(event.target);
+  const clickedMenu = fileViewerExportMenu.contains(event.target);
+  if (!clickedButton && !clickedMenu) {
+    fileViewerExportMenu.hidden = true;
   }
 });
 
@@ -2848,6 +3115,7 @@ liveWebserversModal?.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && fileViewerModal && !fileViewerModal.hidden) {
     fileViewerModal.hidden = true;
+    setFileViewerEditing(false);
   }
   if (event.key === "Escape" && amassEnumModal && !amassEnumModal.hidden) {
     amassEnumModal.hidden = true;

@@ -640,14 +640,24 @@
           <div class="modal-header">
             <h3 id="file-viewer-title">Scope File</h3>
             <div class="modal-actions">
-              <button id="export-file-viewer" type="button">Export</button>
+              <div class="export-menu-wrap">
+                <button id="open-file-viewer-export" type="button">Export</button>
+                <div id="file-viewer-export-menu" class="export-menu" hidden>
+                  <button type="button" data-export-format="csv">CSV</button>
+                  <button type="button" data-export-format="json">JSON</button>
+                  <button type="button" data-export-format="txt">TXT</button>
+                </div>
+              </div>
+              <button id="edit-file-viewer" type="button">Edit</button>
+              <button id="save-file-viewer" type="button" disabled>Save</button>
               <button id="close-file-viewer" type="button">Close</button>
             </div>
           </div>
-          <pre id="file-viewer-content" class="log-view log-view--tall">Loading...</pre>
+          <textarea id="file-viewer-editor" class="notes-editor" rows="22" hidden></textarea>
+          <div id="file-viewer-content" class="log-view log-view--tall">Loading...</div>
         </div>
       </div>
     </main>
-    <script src="app.js?v=20260305-2"></script>
+    <script src="app.js?v=20260308-2"></script>
   </body>
 </html>

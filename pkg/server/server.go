@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -308,6 +309,10 @@ type subdomainProgressResponse struct {
 }
 
 type notePayload struct {
+	Content string `json:"content"`
+}
+
+type listPayload struct {
 	Content string `json:"content"`
 }
 
@@ -680,17 +685,41 @@ func (s *Server) listHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	present := false
-	if info, statErr := os.Stat(dest); statErr == nil && !info.IsDir() {
-		present = true
+	switch r.Method {
+	case http.MethodGet:
+		present := false
+		if info, statErr := os.Stat(dest); statErr == nil && !info.IsDir() {
+			present = true
+		}
+		lines := readListLines(dest)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"present": present,
+			"entries": lines,
+		})
+	case http.MethodPut:
+		var payload listPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := os.WriteFile(dest, []byte(payload.Content), 0o644); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		lines := readListLines(dest)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"present": true,
+			"entries": lines,
+		})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
-
-	lines := readListLines(dest)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"present": present,
-		"entries": lines,
-	})
 }
 
 func (s *Server) notesHandler(w http.ResponseWriter, r *http.Request) {
@@ -817,18 +846,14 @@ func (s *Server) subdomainProgressHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	sumPercent := 0
-	minDone := total
+	sumDone := 0
 	for _, tool := range toolCounts {
 		done := countFilesByExt(tool.dir, tool.ext)
 		if done > total {
 			done = total
 		}
 		percent := int(float64(done) * 100.0 / float64(total))
-		sumPercent += percent
-		if done < minDone {
-			minDone = done
-		}
+		sumDone += done
 		resp.Tools = append(resp.Tools, subdomainToolProgress{
 			Name:    tool.name,
 			Done:    done,
@@ -837,8 +862,17 @@ func (s *Server) subdomainProgressHandler(w http.ResponseWriter, r *http.Request
 		})
 	}
 
-	resp.OverallDone = minDone
-	resp.OverallPercent = int(float64(sumPercent) / float64(len(toolCounts)))
+	if len(toolCounts) > 0 {
+		avgDone := int(math.Round(float64(sumDone) / float64(len(toolCounts))))
+		if avgDone < 0 {
+			avgDone = 0
+		}
+		if avgDone > total {
+			avgDone = total
+		}
+		resp.OverallDone = avgDone
+		resp.OverallPercent = int(float64(avgDone) * 100.0 / float64(total))
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
@@ -1262,6 +1296,21 @@ func (s *Server) updateStep(id string, status app.StepStatus) {
 	s.persistStepState()
 }
 
+func (s *Server) markPendingStepsSkipped() {
+	s.stepMu.Lock()
+	changed := false
+	for id, st := range s.stepState {
+		if st == app.StepPending {
+			s.stepState[id] = app.StepSkipped
+			changed = true
+		}
+	}
+	s.stepMu.Unlock()
+	if changed {
+		s.persistStepState()
+	}
+}
+
 func (s *Server) loadPersistedStepState() {
 	if s.stepsPath == "" {
 		return
@@ -1520,6 +1569,7 @@ func (s *Server) startFlow() error {
 			if mode == "pause" || mode == "stop" {
 				return
 			}
+			s.markPendingStepsSkipped()
 			s.logger.Printf("flow run failed: %v", err)
 			s.mu.Lock()
 			s.status = fmt.Sprintf("error: %v", err)

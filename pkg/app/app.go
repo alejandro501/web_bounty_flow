@@ -168,6 +168,8 @@ const (
 	defaultRetryBackoff  = 2 * time.Second
 	ctlRetryAttempts     = 3
 	ctlRetryBackoff      = 2 * time.Second
+	amassSeedTimeout     = 15 * time.Minute
+	amassToolTimeoutMins = "12"
 )
 
 // New creates an orchestrator with the provided configuration.
@@ -646,7 +648,9 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 				seedPrefix := filepath.Join(amassDir, seedFile)
 				seedJSON := seedPrefix + ".json"
 				seedText := seedPrefix + ".txt"
-				_, err := a.runCommandCapture(ctx, "amass", "enum", "-passive", "-d", seed, "-oA", seedPrefix)
+				amassCtx, cancel := context.WithTimeout(ctx, amassSeedTimeout)
+				defer cancel()
+				_, err := a.runCommandCapture(amassCtx, "amass", "enum", "-passive", "-timeout", amassToolTimeoutMins, "-d", seed, "-oA", seedPrefix)
 				if err != nil {
 					return nil, err
 				}
@@ -3144,6 +3148,10 @@ func (a *App) runSmugglingStackChecks(ctx context.Context) error {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
+	hopByHopDir := filepath.Join(outDir, "hop_by_hop")
+	if err := os.MkdirAll(hopByHopDir, 0o755); err != nil {
+		return err
+	}
 
 	hosts := collectUniqueHostsFromLists(a.cfg.Lists.Domains, a.cfg.Lists.APIDomains)
 	if len(hosts) == 0 {
@@ -3176,7 +3184,13 @@ func (a *App) runSmugglingStackChecks(ctx context.Context) error {
 	}
 	scripts := []toolSpec{
 		{name: "request_smuggling", cmd: "python3", args: []string{"utils/request_smuggling.py", "--file", targetsFile}},
-		{name: "hop_by_hop", cmd: "python3", args: []string{"utils/hop_by_hop_checker.py", "--list", targetsFile, "--threads", "8"}},
+		{name: "hop_by_hop", cmd: "python3", args: []string{
+			"utils/hop_by_hop_checker.py",
+			"--list", targetsFile,
+			"--threads", "8",
+			"--output-dir", hopByHopDir,
+			"--log-file", filepath.Join(hopByHopDir, "hop_by_hop.log"),
+		}},
 		{name: "h2c", cmd: "bash", args: []string{"utils/h2csmuggler.sh", "--input", targetsFile, "--output", filepath.Join(outDir, "h2c_results.txt")}},
 		{name: "ssi_esi", cmd: "bash", args: []string{"utils/ssi_esi.sh", "--input", targetsFile, "--output", filepath.Join(outDir, "ssi_esi_results.txt")}},
 	}
@@ -3228,8 +3242,8 @@ func (a *App) runSmugglingStackChecks(ctx context.Context) error {
 	}{
 		{tool: "request_smuggling", path: filepath.Join(baseDir, "logs", "request_smuggling", "request_smuggling_basic.log"), metric: "request_smuggling_hits"},
 		{tool: "request_smuggling", path: filepath.Join(baseDir, "logs", "request_smuggling", "request_smuggling_advanced.log"), metric: "request_smuggling_hits"},
-		{tool: "hop_by_hop", path: filepath.Join(baseDir, "logs", "hop_by_hop", "hop_by_hop.txt"), metric: "hop_by_hop_hits"},
-		{tool: "hop_by_hop", path: filepath.Join(baseDir, "logs", "hop_by_hop", "hop_by_hop_differing_status.txt"), metric: "hop_by_hop_hits"},
+		{tool: "hop_by_hop", path: filepath.Join(hopByHopDir, "hop_by_hop.txt"), metric: "hop_by_hop_hits"},
+		{tool: "hop_by_hop", path: filepath.Join(hopByHopDir, "hop_by_hop_differing_status.txt"), metric: "hop_by_hop_hits"},
 		{tool: "h2c", path: filepath.Join(outDir, "h2c_results.txt"), metric: "h2c_hits"},
 		{tool: "ssi_esi", path: filepath.Join(outDir, "ssi_esi_results.txt"), metric: "ssi_esi_hits"},
 	}
@@ -3296,7 +3310,11 @@ func (a *App) runNmapEnrichmentChecks(ctx context.Context) error {
 	}
 
 	prefix := filepath.Join(outDir, "scan")
-	stdout, err := a.runCommandCapture(ctx, "nmap", "-sV", "-Pn", "--open", "-iL", targetsFile, "-oA", prefix)
+	nmapArgs := []string{"-sV", "-Pn", "--open", "-iL", targetsFile, "-oA", prefix}
+	if datadir := detectNmapDataDir(); datadir != "" {
+		nmapArgs = append([]string{"--datadir", datadir}, nmapArgs...)
+	}
+	stdout, err := a.runCommandCapture(ctx, "nmap", nmapArgs...)
 	_ = os.WriteFile(filepath.Join(outDir, "nmap_stdout.log"), []byte(stdout), 0o644)
 	if err != nil {
 		a.logger.Printf("%s: nmap execution error: %v", StepNmapEnrich, err)
@@ -5612,7 +5630,7 @@ func (a *App) generateDorkLinksIfNeeded(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := run(fmt.Sprintf("generate_dork_links -oR %s --api", shellQuote(orgPath))); err != nil {
+		if err := run(fmt.Sprintf("generate_dork_links -list %s", shellQuote(orgPath))); err != nil {
 			return err
 		}
 	}
@@ -5625,7 +5643,7 @@ func (a *App) generateDorkLinksIfNeeded(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := run(fmt.Sprintf("generate_dork_links -L %s --api", shellQuote(absPath))); err != nil {
+		if err := run(fmt.Sprintf("generate_dork_links -list %s", shellQuote(absPath))); err != nil {
 			return err
 		}
 	}
@@ -5671,6 +5689,20 @@ func (a *App) hasExistingDorkLinks() bool {
 		}
 	}
 	return false
+}
+
+func detectNmapDataDir() string {
+	candidates := []string{
+		"/usr/share/nmap",
+		"/usr/local/share/nmap",
+		"/opt/homebrew/share/nmap",
+	}
+	for _, dir := range candidates {
+		if fileExists(filepath.Join(dir, "nse_main.lua")) {
+			return dir
+		}
+	}
+	return ""
 }
 
 func shellQuote(value string) string {

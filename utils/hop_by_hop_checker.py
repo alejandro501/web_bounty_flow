@@ -52,16 +52,16 @@ additional_headers = {
     'X-Forwarded-Proto': 'https'
 }
 
-def setup_logging():
+def setup_logging(log_file_path):
     """Set up logging configuration"""
-    log_dir = os.path.join(os.path.dirname(SCRIPT_DIR), "logs")
+    log_dir = os.path.dirname(log_file_path)
     os.makedirs(log_dir, exist_ok=True)
-    
+
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(os.path.join(log_dir, "hop_by_hop.log")),
+            logging.FileHandler(log_file_path),
             logging.StreamHandler()
         ]
     )
@@ -136,6 +136,8 @@ def main():
     parser.add_argument('--output', '-o', type=str, default='hop_by_hop.txt', help='Output file for vulnerabilities')
     parser.add_argument('--differing-status-output', '-ds', type=str, default='hop_by_hop_differing_status.txt', help='File for subdomains with differing status codes')
     parser.add_argument('--statuses-output', '-so', type=str, default='hop_by_hop_statuses.txt', help='File for vulnerable subdomains and their status codes')
+    parser.add_argument('--output-dir', type=str, default='', help='Directory for output artifacts (default: ../logs/hop_by_hop)')
+    parser.add_argument('--log-file', type=str, default='', help='Path to scanner runtime log file (default: ../logs/hop_by_hop.log)')
     parser.add_argument('--port', '-p', type=int, help='Specify a proxy port (optional)', default=None)
     parser.add_argument('--threads', '-t', type=int, default=5, help='Number of threads to use (default: 5)')
     parser.add_argument('--ca', '-c', type=str, help='Path to the custom CA certificate (optional)', default=None)
@@ -146,13 +148,20 @@ def main():
     if not args.domain and not args.list:
         parser.error("Either --domain or --list must be specified")
 
-    # Set up logging
-    setup_logging()
-    logging.info("Starting Hop-by-Hop header scan")
-
-    # Set up output files
-    output_dir = os.path.join(os.path.dirname(SCRIPT_DIR), "logs", "hop_by_hop")
+    default_output_dir = os.path.join(os.path.dirname(SCRIPT_DIR), "logs", "hop_by_hop")
+    output_dir = args.output_dir or default_output_dir
+    if not os.path.isabs(output_dir):
+        output_dir = os.path.abspath(output_dir)
     os.makedirs(output_dir, exist_ok=True)
+
+    default_log_file = os.path.join(os.path.dirname(SCRIPT_DIR), "logs", "hop_by_hop.log")
+    log_file = args.log_file or default_log_file
+    if not os.path.isabs(log_file):
+        log_file = os.path.abspath(log_file)
+
+    # Set up logging
+    setup_logging(log_file)
+    logging.info("Starting Hop-by-Hop header scan")
 
     output_file = os.path.join(output_dir, args.output)
     differing_status_file = os.path.join(output_dir, args.differing_status_output)
