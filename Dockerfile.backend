@@ -13,6 +13,7 @@ RUN mkdir -p /toolbin
 RUN GOBIN=/toolbin go install github.com/alejandro501/generate_dork_links@latest && \
     GOBIN=/toolbin go install github.com/alejandro501/sort_http@latest && \
     GOBIN=/toolbin go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest && \
+    GOBIN=/toolbin go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest && \
     GOBIN=/toolbin go install github.com/tomnomnom/httprobe@latest && \
     GOBIN=/toolbin go install github.com/tomnomnom/assetfinder@latest && \
     GOBIN=/toolbin go install github.com/owasp-amass/amass/v4/cmd/amass@master && \

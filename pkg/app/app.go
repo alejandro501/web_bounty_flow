@@ -75,6 +75,7 @@ const (
 	StepWorkflowLogic  = "workflow-logic-checks"
 	StepSmugglingStack = "smuggling-stack-checks"
 	StepNmapEnrich     = "nmap-enrichment-checks"
+	StepNucleiScan     = "nuclei-scan"
 	StepTierIsolation  = "tier-isolation-checks"
 	StepStaticReview   = "static-review-correlation"
 	StepRunOpsBundle   = "runops-manifest-export"
@@ -116,6 +117,7 @@ var flowSteps = []Step{
 	{ID: StepWorkflowLogic, Label: "Run semi-automated multi-step workflow logic checks."},
 	{ID: StepSmugglingStack, Label: "Run semi-automated request smuggling/h2c/hop-by-hop/SSI-ESI checks."},
 	{ID: StepNmapEnrich, Label: "Run automated nmap scan + service enrichment + searchsploit correlation."},
+	{ID: StepNucleiScan, Label: "Run nuclei template scans against discovered live web targets."},
 	{ID: StepTierIsolation, Label: "Run semi-automated tier-segmentation and shared-hosting isolation checks."},
 	{ID: StepStaticReview, Label: "Run semgrep/gosec and correlate static findings with live endpoints."},
 	{ID: StepRunOpsBundle, Label: "Generate run manifest, checkpoint snapshot, and export bundle."},
@@ -410,14 +412,14 @@ func (a *App) prepareDirectories() error {
 
 func (a *App) passiveRecon(ctx context.Context) error {
 	for _, step := range []string{
-		StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepRawOutputs, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepClickjacking, StepCORSChecks, StepOpenRedirect, StepWorkflowLogic, StepSmugglingStack, StepNmapEnrich, StepTierIsolation, StepStaticReview, StepRunOpsBundle, StepStageScorecard, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
+		StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepRawOutputs, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepClickjacking, StepCORSChecks, StepOpenRedirect, StepWorkflowLogic, StepSmugglingStack, StepNmapEnrich, StepNucleiScan, StepTierIsolation, StepStaticReview, StepRunOpsBundle, StepStageScorecard, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
 	} {
 		a.updateStep(step, StepPending)
 	}
 
 	if !fileExists(a.cfg.Lists.Wildcards) || len(readSafeLines(a.cfg.Lists.Wildcards)) == 0 {
 		for _, step := range []string{
-			StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepRawOutputs, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepClickjacking, StepCORSChecks, StepOpenRedirect, StepWorkflowLogic, StepSmugglingStack, StepNmapEnrich, StepTierIsolation, StepStaticReview, StepRunOpsBundle, StepStageScorecard, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
+			StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepRawOutputs, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepClickjacking, StepCORSChecks, StepOpenRedirect, StepWorkflowLogic, StepSmugglingStack, StepNmapEnrich, StepNucleiScan, StepTierIsolation, StepStaticReview, StepRunOpsBundle, StepStageScorecard, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
 		} {
 			a.skipStep(step)
 		}
@@ -1025,6 +1027,15 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		a.logger.Printf("%s: skipped (nmap not found)", StepNmapEnrich)
 	} else if err := a.runStep(StepNmapEnrich, func() error {
 		return a.runNmapEnrichmentChecks(ctx)
+	}); err != nil {
+		return err
+	}
+
+	if _, err := exec.LookPath("nuclei"); err != nil {
+		a.skipStep(StepNucleiScan)
+		a.logger.Printf("%s: skipped (nuclei not found)", StepNucleiScan)
+	} else if err := a.runStep(StepNucleiScan, func() error {
+		return a.runNucleiScan(ctx)
 	}); err != nil {
 		return err
 	}
@@ -3351,6 +3362,117 @@ func (a *App) runNmapEnrichmentChecks(ctx context.Context) error {
 	return nil
 }
 
+func (a *App) runNucleiScan(ctx context.Context) error {
+	outDir := filepath.Join(a.fuzzingBaseDir(), "nuclei")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+
+	domainsHTTPPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "domains_http")
+	apiHTTPPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "apidomains_http")
+	targets := unique(append(
+		normalizeHTTPSTargets(readSafeLines(domainsHTTPPath)),
+		normalizeHTTPSTargets(readSafeLines(apiHTTPPath))...,
+	))
+	targetsFile := filepath.Join(outDir, "targets.txt")
+	if err := os.WriteFile(targetsFile, []byte(strings.Join(targets, "\n")), 0o644); err != nil {
+		return err
+	}
+
+	metrics := map[string]int{
+		"targets":          len(targets),
+		"findings":         0,
+		"unique_templates": 0,
+		"critical":         0,
+		"high":             0,
+		"medium":           0,
+		"low":              0,
+		"info":             0,
+		"unknown":          0,
+	}
+
+	summaryPath := filepath.Join(outDir, "summary.csv")
+	if len(targets) == 0 {
+		return writeMetricSummaryCSV(summaryPath, []string{
+			"targets",
+			"findings",
+			"unique_templates",
+			"critical",
+			"high",
+			"medium",
+			"low",
+			"info",
+			"unknown",
+		}, metrics)
+	}
+
+	findingsPath := filepath.Join(outDir, "findings.jsonl")
+	stdout, err := a.runCommandCapture(ctx, "nuclei",
+		"-silent",
+		"-jsonl",
+		"-l", targetsFile,
+		"-o", findingsPath,
+		"-timeout", "7",
+		"-retries", "1",
+		"-rate-limit", "50",
+		"-bulk-size", "25",
+		"-c", "25",
+	)
+	_ = os.WriteFile(filepath.Join(outDir, "nuclei_stdout.log"), []byte(stdout), 0o644)
+	if err != nil {
+		a.logger.Printf("%s: nuclei execution error: %v", StepNucleiScan, err)
+	}
+
+	templateSet := make(map[string]struct{})
+	for _, line := range readSafeLines(findingsPath) {
+		var row map[string]any
+		if unmarshalErr := json.Unmarshal([]byte(line), &row); unmarshalErr != nil {
+			continue
+		}
+		metrics["findings"]++
+
+		templateID := strings.TrimSpace(asAnyString(row["template-id"]))
+		if templateID == "" {
+			templateID = strings.TrimSpace(asAnyString(row["template"]))
+		}
+		if templateID != "" {
+			templateSet[templateID] = struct{}{}
+		}
+
+		switch extractNucleiSeverity(row) {
+		case "critical":
+			metrics["critical"]++
+		case "high":
+			metrics["high"]++
+		case "medium":
+			metrics["medium"]++
+		case "low":
+			metrics["low"]++
+		case "info":
+			metrics["info"]++
+		default:
+			metrics["unknown"]++
+		}
+	}
+	metrics["unique_templates"] = len(templateSet)
+
+	if err := writeMetricSummaryCSV(summaryPath, []string{
+		"targets",
+		"findings",
+		"unique_templates",
+		"critical",
+		"high",
+		"medium",
+		"low",
+		"info",
+		"unknown",
+	}, metrics); err != nil {
+		return err
+	}
+	a.logger.Printf("%s: summary written to %s", StepNucleiScan, summaryPath)
+	return nil
+}
+
 func (a *App) runTierIsolationChecks(ctx context.Context) error {
 	_ = ctx
 	outDir := filepath.Join(a.fuzzingBaseDir(), "tier-isolation")
@@ -3579,7 +3701,7 @@ func (a *App) runManifestCheckpointExport(ctx context.Context) error {
 			"robots":    a.cfg.Paths.RobotsDir,
 		},
 		"tool_versions": collectToolVersions([]string{
-			"amass", "subfinder", "assetfinder", "gau", "dnsx", "httpx", "katana", "waybackurls", "ffuf", "semgrep", "gosec", "nmap", "searchsploit",
+			"amass", "subfinder", "assetfinder", "gau", "dnsx", "httpx", "katana", "waybackurls", "ffuf", "semgrep", "gosec", "nmap", "searchsploit", "nuclei",
 		}),
 	}
 	manifestPath := filepath.Join(outDir, "manifest_"+runID+".json")
@@ -3868,7 +3990,37 @@ func injectionReasons(base, mutated paramFuzzObservation, familyKeywords []strin
 			reasons = append(reasons, "family_keyword:"+kw)
 		}
 	}
-	return unique(reasons)
+	reasons = unique(reasons)
+	if len(reasons) == 0 {
+		return nil
+	}
+	strong := hasReasonPrefix(reasons, "family_keyword:") ||
+		hasReasonPrefix(reasons, "new_signal_keyword:") ||
+		containsAny(reasons, "server_error_on_payload")
+	if strong {
+		return reasons
+	}
+	lenDiff := mutated.Length - base.Length
+	if lenDiff < 0 {
+		lenDiff = -lenDiff
+	}
+	if mutated.StatusCode >= 500 || lenDiff > 600 {
+		return reasons
+	}
+	return nil
+}
+
+func hasReasonPrefix(reasons []string, prefix string) bool {
+	prefix = strings.ToLower(strings.TrimSpace(prefix))
+	if prefix == "" {
+		return false
+	}
+	for _, reason := range reasons {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(reason)), prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) writeInjectionSummary(path string, metrics map[string]struct {
@@ -4725,6 +4877,19 @@ func asAnyString(value any) string {
 	}
 }
 
+func extractNucleiSeverity(row map[string]any) string {
+	if row == nil {
+		return ""
+	}
+	if info, ok := row["info"].(map[string]any); ok {
+		sev := strings.ToLower(strings.TrimSpace(asAnyString(info["severity"])))
+		if sev != "" {
+			return sev
+		}
+	}
+	return strings.ToLower(strings.TrimSpace(asAnyString(row["severity"])))
+}
+
 func prioritizeCSRFCandidateEndpoints(endpoints []string) []string {
 	if len(endpoints) == 0 {
 		return nil
@@ -5123,7 +5288,11 @@ func mutateURLQuery(rawURL, key, value string) string {
 func paramFuzzReasons(base, mutated paramFuzzObservation) []string {
 	var reasons []string
 	if base.StatusCode != mutated.StatusCode {
-		reasons = append(reasons, "status_code_changed")
+		baseClass := statusCodeClass(base.StatusCode)
+		mutatedClass := statusCodeClass(mutated.StatusCode)
+		if baseClass != mutatedClass || base.StatusCode >= 500 || mutated.StatusCode >= 500 {
+			reasons = append(reasons, "status_code_changed")
+		}
 	}
 	lenDiff := mutated.Length - base.Length
 	if lenDiff < 0 {
@@ -5137,9 +5306,11 @@ func paramFuzzReasons(base, mutated paramFuzzObservation) []string {
 		reasons = append(reasons, "response_length_changed")
 	}
 	if base.Location != mutated.Location {
-		reasons = append(reasons, "redirect_target_changed")
+		if redirectTargetMeaningfullyChanged(base.Location, mutated.Location) {
+			reasons = append(reasons, "redirect_target_changed")
+		}
 	}
-	if mutated.DurationMS > (base.DurationMS*2 + 500) {
+	if mutated.DurationMS > (base.DurationMS*3 + 1500) {
 		reasons = append(reasons, "timing_spike")
 	}
 	for _, kw := range paramFuzzSignalKeywords {
@@ -5148,6 +5319,44 @@ func paramFuzzReasons(base, mutated paramFuzzObservation) []string {
 		}
 	}
 	return unique(reasons)
+}
+
+func statusCodeClass(code int) int {
+	if code >= 100 && code <= 599 {
+		return code / 100
+	}
+	return 0
+}
+
+func redirectTargetMeaningfullyChanged(baseLoc, mutatedLoc string) bool {
+	baseTrimmed := strings.TrimSpace(baseLoc)
+	mutatedTrimmed := strings.TrimSpace(mutatedLoc)
+	if baseTrimmed == mutatedTrimmed {
+		return false
+	}
+	if baseTrimmed == "" || mutatedTrimmed == "" {
+		return true
+	}
+	baseCore := normalizedRedirectCore(baseTrimmed)
+	mutatedCore := normalizedRedirectCore(mutatedTrimmed)
+	if baseCore == "" || mutatedCore == "" {
+		return !strings.EqualFold(baseTrimmed, mutatedTrimmed)
+	}
+	return baseCore != mutatedCore
+}
+
+func normalizedRedirectCore(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	path := strings.TrimSpace(parsed.EscapedPath())
+	if path == "" {
+		path = "/"
+	}
+	return scheme + "|" + host + "|" + path
 }
 
 func writeJSONLine(w *bufio.Writer, value any) error {

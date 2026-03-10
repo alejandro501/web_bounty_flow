@@ -335,18 +335,19 @@ type amassEnumRow struct {
 }
 
 type leadItem struct {
-	ID           string   `json:"id"`
-	Category     string   `json:"category"`
-	Family       string   `json:"family,omitempty"`
-	Severity     string   `json:"severity"`
-	ROI          int      `json:"roi"`
-	Wildcard     string   `json:"wildcard"`
-	Domain       string   `json:"domain"`
-	Target       string   `json:"target"`
-	Reasons      []string `json:"reasons,omitempty"`
-	ManualAction string   `json:"manual_action,omitempty"`
-	Source       string   `json:"source"`
-	Timestamp    string   `json:"timestamp,omitempty"`
+	ID           string         `json:"id"`
+	Category     string         `json:"category"`
+	Family       string         `json:"family,omitempty"`
+	Severity     string         `json:"severity"`
+	ROI          int            `json:"roi"`
+	Wildcard     string         `json:"wildcard"`
+	Domain       string         `json:"domain"`
+	Target       string         `json:"target"`
+	Reasons      []string       `json:"reasons,omitempty"`
+	ManualAction string         `json:"manual_action,omitempty"`
+	Evidence     map[string]any `json:"evidence,omitempty"`
+	Source       string         `json:"source"`
+	Timestamp    string         `json:"timestamp,omitempty"`
 }
 
 type leadsDomainGroup struct {
@@ -934,6 +935,7 @@ func (s *Server) leadsHandler(w http.ResponseWriter, r *http.Request) {
 		{category: "clickjacking", source: "clickjacking/findings.jsonl", path: filepath.Join(fuzzDir, "clickjacking", "findings.jsonl")},
 		{category: "cors", source: "cors/findings.jsonl", path: filepath.Join(fuzzDir, "cors", "findings.jsonl")},
 		{category: "open-redirect", source: "open-redirect/findings.jsonl", path: filepath.Join(fuzzDir, "open-redirect", "findings.jsonl")},
+		{category: "nuclei", source: "nuclei/findings.jsonl", path: filepath.Join(fuzzDir, "nuclei", "findings.jsonl")},
 		{category: "xss", source: "xss/reflected_hits.jsonl", path: filepath.Join(fuzzDir, "xss", "reflected_hits.jsonl")},
 		{category: "xss", source: "xss/dom_hits.jsonl", path: filepath.Join(fuzzDir, "xss", "dom_hits.jsonl")},
 		{category: "xss", source: "xss/stored_hits.jsonl", path: filepath.Join(fuzzDir, "xss", "stored_hits.jsonl")},
@@ -1066,6 +1068,7 @@ func (s *Server) toolsHandler(w http.ResponseWriter, r *http.Request) {
 		s.toolCheck("httpx", true, ""),
 		s.toolCheck("ffuf", false, "needed for fuzz-docs/fuzz-dirs steps"),
 		s.toolCheck("cewl", false, "optional; flow can continue without it"),
+		s.toolCheck("nuclei", false, "optional; enables template-based vulnerability scan step"),
 		s.toolCheck("httprobe", false, "used as fallback when httpx fails"),
 		s.toolCheck("node", false, "required for manual Playwright XSS scan"),
 	}
@@ -1476,6 +1479,7 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 	doneIfPending("workflow-logic-checks", fileExists(filepath.Join(baseDir, "fuzzing", "workflow-logic", "summary.csv")))
 	doneIfPending("smuggling-stack-checks", fileExists(filepath.Join(baseDir, "fuzzing", "smuggling-stack", "summary.csv")))
 	doneIfPending("nmap-enrichment-checks", fileExists(filepath.Join(baseDir, "fuzzing", "nmap", "summary.csv")))
+	doneIfPending("nuclei-scan", fileExists(filepath.Join(baseDir, "fuzzing", "nuclei", "summary.csv")))
 	doneIfPending("tier-isolation-checks", fileExists(filepath.Join(baseDir, "fuzzing", "tier-isolation", "summary.csv")))
 	doneIfPending("static-review-correlation", fileExists(filepath.Join(baseDir, "fuzzing", "static-review", "summary.csv")))
 	doneIfPending("runops-manifest-export", globHasNonEmpty(filepath.Join(s.cfg.Paths.LogsDir, "runops", "manifest_*.json")))
@@ -1866,6 +1870,10 @@ func (s *Server) listPath(name string) (string, error) {
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "nmap", "searchsploit.txt"), nil
 	case "nmap_summary":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "nmap", "summary.csv"), nil
+	case "nuclei_findings":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "nuclei", "findings.jsonl"), nil
+	case "nuclei_summary":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "nuclei", "summary.csv"), nil
 	case "tier_isolation_ip_map":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "tier-isolation", "ip_map.jsonl"), nil
 	case "tier_isolation_findings":
@@ -2505,8 +2513,76 @@ func buildLeadItem(category, source string, row map[string]any, roots []string) 
 		Target:       target,
 		Reasons:      reasons,
 		ManualAction: manualAction,
+		Evidence:     leadEvidence(row),
 		Source:       source,
 		Timestamp:    strings.TrimSpace(asRawString(row["timestamp"])),
+	}
+}
+
+func leadEvidence(row map[string]any) map[string]any {
+	if len(row) == 0 {
+		return nil
+	}
+	preferred := []string{
+		"mode",
+		"family",
+		"severity",
+		"method",
+		"endpoint",
+		"url",
+		"param",
+		"payload",
+		"vector",
+		"mutated_url",
+		"status_code",
+		"baseline_status_code",
+		"mutated_status_code",
+		"length",
+		"baseline_length",
+		"mutated_length",
+		"duration_ms",
+		"baseline_duration_ms",
+		"mutated_duration_ms",
+		"baseline_location",
+		"mutated_location",
+		"origin",
+		"referer",
+		"chain_signals",
+		"matcher-name",
+		"template-id",
+		"template",
+		"matched-at",
+		"host",
+		"ip",
+		"port",
+		"timestamp",
+	}
+	out := make(map[string]any)
+	for _, key := range preferred {
+		if value, ok := row[key]; ok && !isLeadEvidenceEmpty(value) {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func isLeadEvidenceEmpty(v any) bool {
+	switch value := v.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(value) == ""
+	case []any:
+		return len(value) == 0
+	case []string:
+		return len(value) == 0
+	case map[string]any:
+		return len(value) == 0
+	default:
+		return false
 	}
 }
 

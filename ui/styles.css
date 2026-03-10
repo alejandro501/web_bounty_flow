@@ -459,8 +459,16 @@ main {
   padding: 0.9rem;
 }
 
-.lead-wildcard-card h3 {
-  margin: 0;
+.lead-wildcard-card > summary {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.7rem;
+}
+
+.lead-wildcard-card[open] > summary {
+  margin-bottom: 0.7rem;
 }
 
 .lead-domain-list {
@@ -499,6 +507,15 @@ main {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.02);
   padding: 0.6rem;
+}
+
+.lead-item > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.lead-item > summary::-webkit-details-marker {
+  display: none;
 }
 
 .lead-item__top {
@@ -565,6 +582,28 @@ main {
   padding: 0.08rem 0.42rem;
   font-size: 0.72rem;
   color: var(--muted);
+}
+
+.lead-item__evidence {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.4rem;
+}
+
+.lead-item__evidence-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+  gap: 0.45rem;
+  align-items: start;
+}
+
+.lead-item__evidence-key {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.lead-item__evidence-value {
+  overflow-wrap: anywhere;
 }
 
 .stride-panel {

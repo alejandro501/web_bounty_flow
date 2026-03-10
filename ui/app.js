@@ -103,21 +103,84 @@ let fileViewerEditing = false;
 let fileViewerExportStructured = false;
 
 const FILE_EXPLANATIONS = {
+  wildcards: "Root scope domains you provided (e.g., example.com). Recon tools expand these into discovered subdomains.",
+  domains: "All discovered domains/subdomains in scope before HTTP liveness filtering.",
+  domains_http: "Live HTTP(S) domains that responded to probing; these are primary attack targets.",
+  domains_dead: "Discovered domains that did not respond to HTTP probing (useful for passive review only).",
+  apidomains: "Discovered API-like domains/endpoints (api.*, *-api, graphql/gateway-style hostnames).",
+  apidomains_http: "Live API domains that responded to HTTP probing.",
+  apidomains_dead: "API-like domains that did not respond to HTTP probing.",
+  organizations: "Organization/company names used as seed input for dorking and discovery workflows.",
+  ips: "IP addresses found during recon (for infrastructure profiling and segmentation checks).",
+  out_of_scope: "Explicitly excluded targets; flow should avoid testing these hosts/domains.",
+  live_webservers_csv: "HTTPX results with status, title, server, and technologies; used to prioritize reachable attack surface.",
+  robots_urls: "URLs extracted from robots.txt/sitemap paths; often reveals hidden or low-linked endpoints.",
+  wayback_urls: "Historical URLs from web archives; useful for old endpoints and forgotten functionality.",
+  katana_urls: "Crawler-discovered URLs from active crawling against live targets.",
+  all_urls: "Merged URL corpus from multiple discovery sources; baseline input for later fuzzing stages.",
+  params_candidates: "Likely parameter names collected for parameter fuzzing and replay-based behavior checks.",
+  fuzzing_doc_hits: "Potential documentation endpoints found via ffuf (docs, swagger, openapi, api-reference paths).",
+  fuzzing_dir_hits: "Potential interesting directories/API paths found via ffuf brute-force wordlists.",
+  param_fuzz_query_hits: "Query parameter fuzz hits. We look for response changes that suggest hidden logic or unsafe parameter handling.",
+  param_fuzz_body_hits: "Body parameter fuzz hits. We look for behavior deltas when adding/changing body fields.",
+  param_fuzz_header_hits: "Header fuzz hits. We look for trust/misuse of attacker-controlled headers.",
+  param_fuzz_cookie_hits: "Cookie fuzz hits. We look for state/control issues from manipulated cookie values.",
   cors_summary: "Summary of CORS checks: counts tested endpoints and risky Access-Control-Allow-* patterns.",
   param_fuzz_summary: "Summary of parameter fuzzing signals across query/body/header/cookie inputs.",
+  injection_sqli_hits: "SQL Injection candidates. We inject SQL-like payloads and hunt for DB errors or response anomalies.",
+  injection_nosqli_hits: "NoSQL Injection candidates. We inject operator-style payloads and watch for auth/query logic shifts.",
+  injection_xpath_hits: "XPath Injection candidates. We test if XML/XPath queries can be altered by crafted input.",
+  injection_ldap_hits: "LDAP Injection candidates. We test if LDAP filters are manipulable via user-controlled input.",
   injection_summary: "Summary of automated SQLi/NoSQL/XPath/LDAP response-delta findings.",
+  server_input_os_command_hits: "OS Command Injection candidates. We test whether input reaches shell/system command execution.",
+  server_input_path_traversal_hits: "Path Traversal candidates. We test if file path input can escape intended directories.",
+  server_input_file_inclusion_hits: "File Inclusion candidates. We test for unsafe local/remote file loading behavior.",
   server_input_summary: "Summary of server-side input abuse checks (OS command, traversal, inclusion).",
+  adv_injection_xxe_hits: "XXE candidates. We test XML parsing paths for external entity processing and file/SSRF access.",
+  adv_injection_soap_hits: "SOAP injection candidates. We test SOAP/XML operations for unsafe parser/business logic handling.",
+  adv_injection_ssrf_hits: "SSRF candidates. We test whether server-side requests can be redirected to attacker-chosen hosts.",
+  adv_injection_smtp_hits: "SMTP injection candidates. We test mail-related fields for header/protocol injection patterns.",
   adv_injection_summary: "Summary of advanced injection checks (XXE/SOAP/SSRF/SMTP) and potential findings.",
+  csrf_candidates: "State-changing endpoints that may require CSRF protection and were selected for replay checks.",
+  csrf_findings: "CSRF risk findings. We look for cross-origin state changes accepted without robust anti-CSRF controls.",
+  csrf_replay_log: "Request replay details for CSRF testing (baseline vs forged-origin/cookie replay behavior).",
   csrf_summary: "Summary of CSRF candidate replay outcomes and token/origin enforcement behavior.",
+  clickjacking_headers: "Observed frame-related headers/policies (X-Frame-Options and CSP frame-ancestors).",
+  clickjacking_findings: "Potential clickjacking exposures where framing protections are weak/missing.",
   clickjacking_summary: "Summary of frame policy/header posture and potential clickjacking exposure.",
+  cors_replay_log: "CORS replay details using controlled Origin headers to validate trust policy behavior.",
+  cors_findings: "Potential CORS misconfigurations (overly broad origin trust, credentials + weak origin validation).",
   open_redirect_summary: "Summary of redirect candidate replay results and open-redirect findings.",
+  open_redirect_candidates: "Endpoints that redirect and are suitable for open-redirect validation.",
+  open_redirect_replay_log: "Replay details for redirect checks (baseline vs attacker-controlled destination behavior).",
+  open_redirect_findings: "Potential open redirects where attacker-controlled redirect targets are accepted.",
+  workflow_logic_candidates: "Multi-step flow endpoints selected for business-logic/state-machine consistency checks.",
+  workflow_logic_findings: "Potential logic flaws from invalid step order, weak state validation, or replay inconsistencies.",
+  workflow_logic_replay_log: "Replay traces for workflow/state tests across step transitions.",
+  smuggling_stack_tool_runs: "Execution traces from smuggling/h2c/hop-by-hop/SSI-ESI tooling.",
+  smuggling_stack_findings: "Potential request smuggling/stack parsing desync and related intermediary handling risks.",
   workflow_logic_summary: "Summary of workflow sequence/replay checks and possible state-machine gaps.",
   smuggling_stack_summary: "Summary of request-smuggling stack checks (smuggling, hop-by-hop, h2c, SSI/ESI).",
+  nmap_targets: "Hosts selected for Nmap service fingerprinting.",
+  nmap_services: "Discovered open services/ports from Nmap; useful for exposed service triage.",
+  nmap_searchsploit: "Searchsploit correlation output mapped from detected service fingerprints.",
   nmap_summary: "Summary of Nmap enrichment results: targets, discovered services, and correlation counts.",
+  nuclei_findings: "Template-based vulnerability matches from nuclei (heuristic findings; manual verification required).",
+  nuclei_summary: "Summary of nuclei template-scan results by severity and template coverage.",
+  tier_isolation_ip_map: "Domain-to-IP mapping used to detect shared hosting and weak environment isolation.",
+  tier_isolation_findings: "Potential segmentation/isolation issues where sensitive and public assets overlap on infra.",
   tier_isolation_summary: "Summary of IP/domain co-hosting observations and boundary-risk indicators.",
+  static_review_semgrep: "Raw Semgrep static-analysis output (source-level patterns that may indicate vulnerabilities).",
+  static_review_gosec: "Raw Gosec static-analysis output for Go code security smells.",
+  static_review_correlated: "Static findings correlated to discovered live endpoints for higher-priority review.",
   static_review_summary: "Summary of static scan coverage and correlated findings against discovered assets.",
   runops_scorecard_json: "Run completion scorecard in JSON format for pipeline health and stage coverage.",
   runops_scorecard_md: "Run completion scorecard in Markdown format for quick human review.",
+  xss_reflected_hits: "Reflected XSS candidates where injected input appears in immediate responses in dangerous contexts.",
+  xss_dom_hits: "DOM XSS candidates where client-side scripts may use untrusted data in unsafe sinks.",
+  xss_stored_hits: "Stored XSS candidates where payloads may persist and execute for later viewers.",
+  xss_summary: "Summary of XSS candidate classes and hit counts from automated/manual-assisted checks.",
+  xss_scan_log: "Raw log output from Playwright-assisted XSS scan runs.",
 };
 const noteDrafts = {
   notes: "",
@@ -187,6 +250,8 @@ const LIST_FILES = [
   { type: "nmap_services", label: "Nmap Services", uploadable: false },
   { type: "nmap_searchsploit", label: "Nmap Searchsploit Correlation", uploadable: false },
   { type: "nmap_summary", label: "Nmap Summary", uploadable: false },
+  { type: "nuclei_findings", label: "Nuclei Findings", uploadable: false },
+  { type: "nuclei_summary", label: "Nuclei Summary", uploadable: false },
   { type: "tier_isolation_ip_map", label: "Tier Isolation IP Map", uploadable: false },
   { type: "tier_isolation_findings", label: "Tier Isolation Findings", uploadable: false },
   { type: "tier_isolation_summary", label: "Tier Isolation Summary", uploadable: false },
@@ -285,6 +350,8 @@ const GENERATED_FILE_GROUPS = [
       "nmap_services",
       "nmap_searchsploit",
       "nmap_summary",
+      "nuclei_findings",
+      "nuclei_summary",
       "tier_isolation_ip_map",
       "tier_isolation_findings",
       "tier_isolation_summary",
@@ -364,6 +431,7 @@ const FLOW_SEGMENTS = [
       { label: "Semi-automate multi-step workflow logic checks.", stepId: "workflow-logic-checks", implemented: true },
       { label: "Semi-automate request smuggling/h2c/hop-by-hop/SSI-ESI checks in main flow.", stepId: "smuggling-stack-checks", implemented: true },
       { label: "Reintroduce automated Nmap scan + service enrichment + searchsploit.", stepId: "nmap-enrichment-checks", implemented: true },
+      { label: "Run nuclei template scans against live web targets.", stepId: "nuclei-scan", implemented: true },
       { label: "Semi-automate tier-segmentation and shared-hosting isolation checks.", stepId: "tier-isolation-checks", implemented: true },
     ],
   },
@@ -2716,6 +2784,62 @@ function rootDomainFromHost(host) {
   return `${parts[parts.length - 2]}.${parts[parts.length - 1]}`;
 }
 
+function sortedLeadEvidenceEntries(evidence) {
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+    return [];
+  }
+  const preferred = [
+    "method",
+    "endpoint",
+    "url",
+    "param",
+    "payload",
+    "vector",
+    "mutated_url",
+    "status_code",
+    "baseline_status_code",
+    "mutated_status_code",
+    "length",
+    "baseline_length",
+    "mutated_length",
+    "duration_ms",
+    "baseline_duration_ms",
+    "mutated_duration_ms",
+    "baseline_location",
+    "mutated_location",
+    "origin",
+    "referer",
+    "chain_signals",
+    "matcher-name",
+    "template-id",
+    "template",
+    "matched-at",
+    "host",
+    "ip",
+    "port",
+    "timestamp",
+  ];
+  const entries = Object.entries(evidence);
+  const rank = new Map(preferred.map((k, i) => [k, i]));
+  return entries.sort((a, b) => {
+    const ra = rank.has(a[0]) ? rank.get(a[0]) : Number.MAX_SAFE_INTEGER;
+    const rb = rank.has(b[0]) ? rank.get(b[0]) : Number.MAX_SAFE_INTEGER;
+    if (ra !== rb) {
+      return ra - rb;
+    }
+    return a[0].localeCompare(b[0], undefined, { sensitivity: "base" });
+  });
+}
+
+function renderLeadEvidenceValue(value) {
+  const normalized = normalizeTableCellValue(value);
+  if (isLikelyURL(normalized)) {
+    const safe = escapeHTML(normalized);
+    return `<a href="${safe}" target="_blank" rel="noopener noreferrer"><code>${safe}</code></a>`;
+  }
+  return `<code>${escapeHTML(normalized)}</code>`;
+}
+
 function renderLeads(data) {
   if (!leadsStatus || !leadsSummary || !leadsWildcards) {
     return;
@@ -2746,6 +2870,7 @@ function renderLeads(data) {
   }
 
   leadsWildcards.innerHTML = wildcards.map((wc) => {
+    const wildcardName = String(wc.wildcard || "(unmapped)").trim().toLowerCase();
     const domains = Array.isArray(wc.domains) ? wc.domains : [];
     const groupedByRoot = new Map();
     for (const domain of domains) {
@@ -2761,23 +2886,41 @@ function renderLeads(data) {
         const domainHtml = rootDomains.map((domain) => {
           const leads = Array.isArray(domain.leads) ? domain.leads : [];
           const leadsHtml = leads.map((lead) => `
-            <article class="lead-item">
-              <div class="lead-item__top">
-                <span class="lead-roi">ROI ${escapeHTML(String(lead.roi || 0))}</span>
-                <span class="lead-severity ${severityPillClass(lead.severity)}">${escapeHTML((lead.severity || "low").toUpperCase())}</span>
-                <span class="lead-category">${escapeHTML(lead.category || "unknown")}${lead.family ? `/${escapeHTML(lead.family)}` : ""}</span>
-              </div>
-              <div class="lead-item__target">${
+            <details class="lead-item">
+              <summary>
+                <div class="lead-item__top">
+                  <span class="lead-roi">ROI ${escapeHTML(String(lead.roi || 0))}</span>
+                  <span class="lead-severity ${severityPillClass(lead.severity)}">${escapeHTML((lead.severity || "low").toUpperCase())}</span>
+                  <span class="lead-category">${escapeHTML(lead.category || "unknown")}${lead.family ? `/${escapeHTML(lead.family)}` : ""}</span>
+                </div>
+                <div class="lead-item__target">${
                 isLikelyURL(lead.target || "")
                   ? `<a href="${escapeHTML(lead.target || "")}" target="_blank" rel="noopener noreferrer"><code>${escapeHTML(lead.target || "")}</code></a>`
                   : `<code>${escapeHTML(lead.target || "")}</code>`
               }</div>
+              </summary>
               ${Array.isArray(lead.reasons) && lead.reasons.length ? `<div class="lead-item__reasons">${lead.reasons.slice(0, 4).map((reason) => `<span>${escapeHTML(reason)}</span>`).join("")}</div>` : ""}
+              <div class="lead-item__evidence">
+                ${
+  (() => {
+    const entries = sortedLeadEvidenceEntries(lead.evidence);
+    if (!entries.length) {
+      return '<p class="muted">No structured evidence captured for this lead yet.</p>';
+    }
+    return entries.map(([key, value]) => `
+      <div class="lead-item__evidence-row">
+        <span class="lead-item__evidence-key">${escapeHTML(key)}</span>
+        <span class="lead-item__evidence-value">${renderLeadEvidenceValue(value)}</span>
+      </div>
+    `).join("");
+  })()
+}
+              </div>
               ${lead.manual_action ? `<p class="muted">${escapeHTML(lead.manual_action)}</p>` : ""}
-            </article>
+            </details>
           `).join("");
           return `
-            <details class="lead-domain-card" open>
+            <details class="lead-domain-card">
               <summary>
                 <span><strong>${escapeHTML(domain.domain || "")}</strong></span>
                 <span class="lead-domain-meta">ROI ${escapeHTML(String(domain.roi || 0))} | Leads ${escapeHTML(String(domain.lead_count || 0))} | H:${escapeHTML(String(domain.high_count || 0))} M:${escapeHTML(String(domain.medium_count || 0))} L:${escapeHTML(String(domain.low_count || 0))}</span>
@@ -2786,8 +2929,12 @@ function renderLeads(data) {
             </details>
           `;
         }).join("");
+        const normalizedRoot = String(rootDomain || "").trim().toLowerCase();
+        if (normalizedRoot === wildcardName) {
+          return domainHtml;
+        }
         return `
-          <details class="lead-domain-card" open>
+          <details class="lead-domain-card">
             <summary>
               <span><strong>${escapeHTML(rootDomain)}</strong></span>
               <span class="lead-domain-meta">Main domain group (${escapeHTML(String(rootDomains.length))} subdomain bucket${rootDomains.length === 1 ? "" : "s"})</span>
@@ -2798,11 +2945,13 @@ function renderLeads(data) {
       }).join("");
 
     return `
-      <section class="lead-wildcard-card">
-        <h3>${escapeHTML(wc.wildcard || "(unmapped)")}</h3>
-        <p class="muted">ROI ${escapeHTML(String(wc.roi || 0))} | Domains ${escapeHTML(String(wc.domain_count || 0))} | Leads ${escapeHTML(String(wc.lead_count || 0))}</p>
+      <details class="lead-wildcard-card">
+        <summary>
+          <span><strong>${escapeHTML(wc.wildcard || "(unmapped)")}</strong></span>
+          <span class="lead-domain-meta">ROI ${escapeHTML(String(wc.roi || 0))} | Domains ${escapeHTML(String(wc.domain_count || 0))} | Leads ${escapeHTML(String(wc.lead_count || 0))}</span>
+        </summary>
         <div class="lead-domain-list">${rootBlocks}</div>
-      </section>
+      </details>
     `;
   }).join("");
 }
