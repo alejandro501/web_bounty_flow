@@ -873,6 +873,38 @@ func (s *Server) subdomainProgressHandler(w http.ResponseWriter, r *http.Request
 		resp.OverallDone = avgDone
 		resp.OverallPercent = int(float64(avgDone) * 100.0 / float64(total))
 	}
+
+	subdomainStepIDs := []string{
+		app.StepAmass,
+		app.StepSublist3r,
+		app.StepAssetfinder,
+		app.StepGAU,
+		app.StepCTL,
+		app.StepSubfinder,
+	}
+	s.mu.Lock()
+	isRunning := s.running
+	s.mu.Unlock()
+	if !isRunning {
+		allTerminal := true
+		s.stepMu.Lock()
+		for _, id := range subdomainStepIDs {
+			st, ok := s.stepState[id]
+			if !ok {
+				allTerminal = false
+				break
+			}
+			if st != app.StepDone && st != app.StepError && st != app.StepSkipped {
+				allTerminal = false
+				break
+			}
+		}
+		s.stepMu.Unlock()
+		if allTerminal {
+			resp.OverallDone = total
+			resp.OverallPercent = 100
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }

@@ -1064,6 +1064,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 
 	if _, err := exec.LookPath("cewl"); err != nil {
 		a.skipStep(StepCeWL)
+		a.logger.Printf("%s: skipped (binary not found)", StepCeWL)
 	} else if err := a.runStep(StepCeWL, func() error {
 		targets := readSafeLines(a.httpListOrDefault(a.cfg.Lists.Domains))
 		if len(targets) == 0 {
@@ -5625,12 +5626,17 @@ func (a *App) generateDorkLinksIfNeeded(ctx context.Context) error {
 	run := func(cmd string) error {
 		return a.runShell(ctx, fmt.Sprintf("cd %s && %s", shellQuote(a.cfg.Paths.DorkingDir), cmd))
 	}
+	dorkWordlist := a.resolveDorkWordlist()
+	if dorkWordlist == "" {
+		a.logger.Printf("%s: skipped (no usable dorking wordlist found)", StepDorkLinks)
+		return nil
+	}
 	if fileExists(a.cfg.Lists.Organizations) && len(readSafeLines(a.cfg.Lists.Organizations)) > 0 {
 		orgPath, err := toAbsPath(a.cfg.Lists.Organizations)
 		if err != nil {
 			return err
 		}
-		if err := run(fmt.Sprintf("generate_dork_links -list %s", shellQuote(orgPath))); err != nil {
+		if err := run(fmt.Sprintf("generate_dork_links -w %s -list %s", shellQuote(dorkWordlist), shellQuote(orgPath))); err != nil {
 			return err
 		}
 	}
@@ -5643,7 +5649,7 @@ func (a *App) generateDorkLinksIfNeeded(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := run(fmt.Sprintf("generate_dork_links -list %s", shellQuote(absPath))); err != nil {
+		if err := run(fmt.Sprintf("generate_dork_links -w %s -list %s", shellQuote(dorkWordlist), shellQuote(absPath))); err != nil {
 			return err
 		}
 	}
@@ -5691,12 +5697,50 @@ func (a *App) hasExistingDorkLinks() bool {
 	return false
 }
 
-func detectNmapDataDir() string {
+func (a *App) resolveDorkWordlist() string {
 	candidates := []string{
+		a.cfg.Wordlists.Dorking.ApiGithub,
+		a.cfg.Wordlists.Dorking.Github,
+		a.cfg.Wordlists.Dorking.ApiGoogle,
+		a.cfg.Wordlists.Dorking.Google,
+		a.cfg.Wordlists.Dorking.ApiShodan,
+		a.cfg.Wordlists.Dorking.Shodan,
+		a.cfg.Wordlists.Dorking.ApiWayback,
+		a.cfg.Wordlists.Dorking.Wayback,
+	}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if fileExists(candidate) && len(readSafeLines(candidate)) > 0 {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func detectNmapDataDir() string {
+	candidates := []string{}
+	if envDir := strings.TrimSpace(os.Getenv("NMAPDIR")); envDir != "" {
+		candidates = append(candidates, envDir)
+	}
+	if nmapPath, err := exec.LookPath("nmap"); err == nil && strings.TrimSpace(nmapPath) != "" {
+		resolved := nmapPath
+		if eval, evalErr := filepath.EvalSymlinks(nmapPath); evalErr == nil && strings.TrimSpace(eval) != "" {
+			resolved = eval
+		}
+		binDir := filepath.Dir(resolved)
+		candidates = append(candidates,
+			filepath.Clean(filepath.Join(binDir, "..", "share", "nmap")),
+			filepath.Clean(filepath.Join(binDir, "..", "..", "share", "nmap")),
+		)
+	}
+	candidates = append(candidates,
 		"/usr/share/nmap",
 		"/usr/local/share/nmap",
 		"/opt/homebrew/share/nmap",
-	}
+	)
 	for _, dir := range candidates {
 		if fileExists(filepath.Join(dir, "nse_main.lua")) {
 			return dir

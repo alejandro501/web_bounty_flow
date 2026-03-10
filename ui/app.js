@@ -45,6 +45,7 @@ const scopeCards = document.getElementById("scope-cards");
 const scopeCardsStatus = document.getElementById("scope-cards-status");
 const fileViewerModal = document.getElementById("file-viewer-modal");
 const fileViewerTitle = document.getElementById("file-viewer-title");
+const fileViewerDescription = document.getElementById("file-viewer-description");
 const fileViewerContent = document.getElementById("file-viewer-content");
 const closeFileViewer = document.getElementById("close-file-viewer");
 const openFileViewerExport = document.getElementById("open-file-viewer-export");
@@ -100,6 +101,24 @@ let currentFileModalStructured = false;
 let currentFileModalRawText = "";
 let fileViewerEditing = false;
 let fileViewerExportStructured = false;
+
+const FILE_EXPLANATIONS = {
+  cors_summary: "Summary of CORS checks: counts tested endpoints and risky Access-Control-Allow-* patterns.",
+  param_fuzz_summary: "Summary of parameter fuzzing signals across query/body/header/cookie inputs.",
+  injection_summary: "Summary of automated SQLi/NoSQL/XPath/LDAP response-delta findings.",
+  server_input_summary: "Summary of server-side input abuse checks (OS command, traversal, inclusion).",
+  adv_injection_summary: "Summary of advanced injection checks (XXE/SOAP/SSRF/SMTP) and potential findings.",
+  csrf_summary: "Summary of CSRF candidate replay outcomes and token/origin enforcement behavior.",
+  clickjacking_summary: "Summary of frame policy/header posture and potential clickjacking exposure.",
+  open_redirect_summary: "Summary of redirect candidate replay results and open-redirect findings.",
+  workflow_logic_summary: "Summary of workflow sequence/replay checks and possible state-machine gaps.",
+  smuggling_stack_summary: "Summary of request-smuggling stack checks (smuggling, hop-by-hop, h2c, SSI/ESI).",
+  nmap_summary: "Summary of Nmap enrichment results: targets, discovered services, and correlation counts.",
+  tier_isolation_summary: "Summary of IP/domain co-hosting observations and boundary-risk indicators.",
+  static_review_summary: "Summary of static scan coverage and correlated findings against discovered assets.",
+  runops_scorecard_json: "Run completion scorecard in JSON format for pipeline health and stage coverage.",
+  runops_scorecard_md: "Run completion scorecard in Markdown format for quick human review.",
+};
 const noteDrafts = {
   notes: "",
   manual_tips: "",
@@ -2371,6 +2390,9 @@ async function openScopeFileModal(type, label) {
   applyFileViewerExportFormatOptions(false);
   setFileViewerEditing(false);
   fileViewerTitle.textContent = label;
+  if (fileViewerDescription) {
+    fileViewerDescription.textContent = describeListFile(type, label);
+  }
   fileViewerContent.classList.remove("log-view--table");
   fileViewerContent.textContent = "Loading...";
   fileViewerModal.hidden = false;
@@ -2384,6 +2406,15 @@ async function openScopeFileModal(type, label) {
     fileViewerContent.classList.remove("log-view--table");
     fileViewerContent.textContent = `Error: ${error.message}`;
   }
+}
+
+function describeListFile(type, label) {
+  const key = String(type || "").trim();
+  if (FILE_EXPLANATIONS[key]) {
+    return FILE_EXPLANATIONS[key];
+  }
+  const fallback = String(label || key || "artifact").trim();
+  return `${fallback}: generated artifact from the flow; open to inspect entries and export for reporting.`;
 }
 
 function setFileViewerEditing(editing) {
@@ -2434,6 +2465,32 @@ function normalizeTableCellValue(value) {
     return JSON.stringify(value);
   }
   return String(value);
+}
+
+function isLikelyURL(value) {
+  const s = String(value || "").trim();
+  return /^https?:\/\/\S+$/i.test(s);
+}
+
+function renderTableCellValue(value) {
+  const text = normalizeTableCellValue(value);
+  if (isLikelyURL(text)) {
+    const safe = escapeHTML(text);
+    return `<a href="${safe}" target="_blank" rel="noopener noreferrer"><code>${safe}</code></a>`;
+  }
+  return escapeHTML(text);
+}
+
+function renderRawTextWithLinks(lines) {
+  if (!fileViewerContent) {
+    return;
+  }
+  const text = Array.isArray(lines) ? lines.join("\n") : String(lines || "");
+  const escaped = escapeHTML(text);
+  const linked = escaped.replace(/(https?:\/\/[^\s<]+)/g, (m) => (
+    `<a href="${m}" target="_blank" rel="noopener noreferrer"><code>${m}</code></a>`
+  ));
+  fileViewerContent.innerHTML = linked;
 }
 
 function parseJSONLRows(lines) {
@@ -2513,13 +2570,13 @@ function renderFileViewerData(lines) {
 
   if (!parsed.ok) {
     fileViewerContent.classList.remove("log-view--table");
-    fileViewerContent.textContent = lines.join("\n");
+    renderRawTextWithLinks(lines);
     return;
   }
 
   const header = parsed.columns.map((col) => `<th>${escapeHTML(col)}</th>`).join("");
   const body = parsed.rows.map((row) => {
-    const cells = parsed.columns.map((col) => `<td>${escapeHTML(normalizeTableCellValue(row[col]))}</td>`).join("");
+    const cells = parsed.columns.map((col) => `<td>${renderTableCellValue(row[col])}</td>`).join("");
     return `<tr>${cells}</tr>`;
   }).join("");
 
@@ -2650,6 +2707,15 @@ function severityPillClass(severity) {
   return "lead-severity--low";
 }
 
+function rootDomainFromHost(host) {
+  const raw = String(host || "").trim().toLowerCase();
+  const parts = raw.split(".").filter(Boolean);
+  if (parts.length < 2) {
+    return raw;
+  }
+  return `${parts[parts.length - 2]}.${parts[parts.length - 1]}`;
+}
+
 function renderLeads(data) {
   if (!leadsStatus || !leadsSummary || !leadsWildcards) {
     return;
@@ -2671,6 +2737,7 @@ function renderLeads(data) {
       <span class="muted">Wildcards</span>
       <strong>${escapeHTML(String(wildcards.length))}</strong>
     </div>
+    <p class="muted">ROI = relative triage score (higher means better attack path + impact signal for prioritization).</p>
   `;
 
   if (!wildcards.length) {
@@ -2680,36 +2747,61 @@ function renderLeads(data) {
 
   leadsWildcards.innerHTML = wildcards.map((wc) => {
     const domains = Array.isArray(wc.domains) ? wc.domains : [];
-    const domainHtml = domains.map((domain) => {
-      const leads = Array.isArray(domain.leads) ? domain.leads : [];
-      const leadsHtml = leads.map((lead) => `
-        <article class="lead-item">
-          <div class="lead-item__top">
-            <span class="lead-roi">ROI ${escapeHTML(String(lead.roi || 0))}</span>
-            <span class="lead-severity ${severityPillClass(lead.severity)}">${escapeHTML((lead.severity || "low").toUpperCase())}</span>
-            <span class="lead-category">${escapeHTML(lead.category || "unknown")}${lead.family ? `/${escapeHTML(lead.family)}` : ""}</span>
-          </div>
-          <div class="lead-item__target"><code>${escapeHTML(lead.target || "")}</code></div>
-          ${Array.isArray(lead.reasons) && lead.reasons.length ? `<div class="lead-item__reasons">${lead.reasons.slice(0, 4).map((reason) => `<span>${escapeHTML(reason)}</span>`).join("")}</div>` : ""}
-          ${lead.manual_action ? `<p class="muted">${escapeHTML(lead.manual_action)}</p>` : ""}
-        </article>
-      `).join("");
-      return `
-        <details class="lead-domain-card" open>
-          <summary>
-            <span><strong>${escapeHTML(domain.domain || "")}</strong></span>
-            <span class="lead-domain-meta">ROI ${escapeHTML(String(domain.roi || 0))} | Leads ${escapeHTML(String(domain.lead_count || 0))} | H:${escapeHTML(String(domain.high_count || 0))} M:${escapeHTML(String(domain.medium_count || 0))} L:${escapeHTML(String(domain.low_count || 0))}</span>
-          </summary>
-          <div class="lead-domain-items">${leadsHtml}</div>
-        </details>
-      `;
-    }).join("");
+    const groupedByRoot = new Map();
+    for (const domain of domains) {
+      const root = rootDomainFromHost(domain?.domain || "") || "(unmapped)";
+      if (!groupedByRoot.has(root)) {
+        groupedByRoot.set(root, []);
+      }
+      groupedByRoot.get(root).push(domain);
+    }
+    const rootBlocks = [...groupedByRoot.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: "base" }))
+      .map(([rootDomain, rootDomains]) => {
+        const domainHtml = rootDomains.map((domain) => {
+          const leads = Array.isArray(domain.leads) ? domain.leads : [];
+          const leadsHtml = leads.map((lead) => `
+            <article class="lead-item">
+              <div class="lead-item__top">
+                <span class="lead-roi">ROI ${escapeHTML(String(lead.roi || 0))}</span>
+                <span class="lead-severity ${severityPillClass(lead.severity)}">${escapeHTML((lead.severity || "low").toUpperCase())}</span>
+                <span class="lead-category">${escapeHTML(lead.category || "unknown")}${lead.family ? `/${escapeHTML(lead.family)}` : ""}</span>
+              </div>
+              <div class="lead-item__target">${
+                isLikelyURL(lead.target || "")
+                  ? `<a href="${escapeHTML(lead.target || "")}" target="_blank" rel="noopener noreferrer"><code>${escapeHTML(lead.target || "")}</code></a>`
+                  : `<code>${escapeHTML(lead.target || "")}</code>`
+              }</div>
+              ${Array.isArray(lead.reasons) && lead.reasons.length ? `<div class="lead-item__reasons">${lead.reasons.slice(0, 4).map((reason) => `<span>${escapeHTML(reason)}</span>`).join("")}</div>` : ""}
+              ${lead.manual_action ? `<p class="muted">${escapeHTML(lead.manual_action)}</p>` : ""}
+            </article>
+          `).join("");
+          return `
+            <details class="lead-domain-card" open>
+              <summary>
+                <span><strong>${escapeHTML(domain.domain || "")}</strong></span>
+                <span class="lead-domain-meta">ROI ${escapeHTML(String(domain.roi || 0))} | Leads ${escapeHTML(String(domain.lead_count || 0))} | H:${escapeHTML(String(domain.high_count || 0))} M:${escapeHTML(String(domain.medium_count || 0))} L:${escapeHTML(String(domain.low_count || 0))}</span>
+              </summary>
+              <div class="lead-domain-items">${leadsHtml}</div>
+            </details>
+          `;
+        }).join("");
+        return `
+          <details class="lead-domain-card" open>
+            <summary>
+              <span><strong>${escapeHTML(rootDomain)}</strong></span>
+              <span class="lead-domain-meta">Main domain group (${escapeHTML(String(rootDomains.length))} subdomain bucket${rootDomains.length === 1 ? "" : "s"})</span>
+            </summary>
+            <div class="lead-domain-items">${domainHtml}</div>
+          </details>
+        `;
+      }).join("");
 
     return `
       <section class="lead-wildcard-card">
         <h3>${escapeHTML(wc.wildcard || "(unmapped)")}</h3>
         <p class="muted">ROI ${escapeHTML(String(wc.roi || 0))} | Domains ${escapeHTML(String(wc.domain_count || 0))} | Leads ${escapeHTML(String(wc.lead_count || 0))}</p>
-        <div class="lead-domain-list">${domainHtml}</div>
+        <div class="lead-domain-list">${rootBlocks}</div>
       </section>
     `;
   }).join("");
