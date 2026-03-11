@@ -107,6 +107,7 @@ func New(cfg *config.Config) *Server {
 	s.mux.HandleFunc("/api/leads", s.corsMiddleware(s.leadsHandler))
 	s.mux.HandleFunc("/api/leads/state", s.corsMiddleware(s.leadStateHandler))
 	s.mux.HandleFunc("/api/leads/replay", s.corsMiddleware(s.leadReplayHandler))
+	s.mux.HandleFunc("/api/chaos", s.corsMiddleware(s.chaosHandler))
 	s.mux.HandleFunc("/api/manual/xss/run", s.corsMiddleware(s.manualXSSRunHandler))
 	s.mux.HandleFunc("/api/manual/xss/status", s.corsMiddleware(s.manualXSSStatusHandler))
 	s.mux.HandleFunc("/", s.corsMiddleware(s.rootHandler))

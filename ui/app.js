@@ -18,6 +18,9 @@ const proxyNetworkIndicator = document.getElementById("proxy-network-indicator")
 const leadsStatus = document.getElementById("leads-status");
 const leadsSummary = document.getElementById("leads-summary");
 const leadsWildcards = document.getElementById("leads-wildcards");
+const chaosStatus = document.getElementById("chaos-status");
+const chaosSummary = document.getElementById("chaos-summary");
+const chaosGroups = document.getElementById("chaos-groups");
 const strideTabs = document.querySelectorAll(".stride-tab");
 const strideSections = document.querySelectorAll(".stride-section");
 const learnQuestion = document.getElementById("learn-question");
@@ -96,6 +99,7 @@ let lastStepsSignature = "";
 let lastLogsSignature = "";
 let lastScopeSignature = "";
 let lastLeadsSignature = "";
+let lastChaosSignature = "";
 let manualDomainOptions = [];
 let manualDomainsReady = false;
 let currentFileModalType = "";
@@ -1237,6 +1241,9 @@ menuItems.forEach((item) => {
     }
     if (view === "leads") {
       void refreshLeads({ force: true });
+    }
+    if (view === "chaos") {
+      void refreshChaos({ force: true });
     }
     if (view === "notes") {
       void loadNoteCanvas("notes");
@@ -2770,6 +2777,14 @@ async function fetchLeads() {
   return response.json();
 }
 
+async function fetchChaos() {
+  const response = await fetch(`${BACKEND_URL}/api/chaos`);
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
 function severityPillClass(severity) {
   const normalized = normalizeFilterValue(severity);
   if (normalized === "high" || normalized === "critical") {
@@ -3053,6 +3068,87 @@ async function refreshLeads(options = {}) {
     renderLeads(data);
   } catch (error) {
     leadsStatus.textContent = `Leads fetch error: ${error.message}`;
+  }
+}
+
+function renderChaos(data) {
+  if (!chaosStatus || !chaosSummary || !chaosGroups) {
+    return;
+  }
+  const groups = Array.isArray(data?.groups) ? data.groups : [];
+  const updated = data?.updated_at ? `Last update: ${data.updated_at}` : "No Chaos data yet.";
+  chaosStatus.textContent = updated;
+  chaosSummary.innerHTML = `
+    <div class="lead-summary-card">
+      <span class="muted">Main Domains</span>
+      <strong>${escapeHTML(String(groups.length))}</strong>
+    </div>
+    <div class="lead-summary-card">
+      <span class="muted">Associated Domains</span>
+      <strong>${escapeHTML(String(data?.total_domains || 0))}</strong>
+    </div>
+    <div class="lead-summary-card">
+      <span class="muted">Source</span>
+      <strong>${escapeHTML(String(data?.source || "projectdiscovery-chaos"))}</strong>
+    </div>
+  `;
+  if (!groups.length) {
+    chaosGroups.innerHTML = '<p class="muted">No main domains found. Add wildcards/domains first.</p>';
+    return;
+  }
+  chaosGroups.innerHTML = groups.map((group) => {
+    const items = Array.isArray(group.items) ? group.items : [];
+    const list = items.map((item) => `
+      <tr>
+        <td><code>${escapeHTML(item.domain || "")}</code></td>
+        <td>${escapeHTML(String(item.subdomain_count || 0))}</td>
+        <td>${escapeHTML(String(item.distinct_ip_count || 0))}</td>
+        <td>${escapeHTML((item.sources || []).join(", ") || "-")}</td>
+      </tr>
+    `).join("");
+    return `
+      <details class="lead-wildcard-card">
+        <summary>
+          <span><strong>${escapeHTML(group.main_domain || "(unknown)")}</strong></span>
+          <span class="lead-domain-meta">Associated domains: ${escapeHTML(String(group.count || 0))}</span>
+        </summary>
+        ${group.error ? `<p class="muted">Error: ${escapeHTML(group.error)}</p>` : ""}
+        <div class="modal-table-wrap">
+          <table class="lws-table">
+            <thead>
+              <tr>
+                <th>Domain</th>
+                <th>Subdomains</th>
+                <th>IPs</th>
+                <th>Sources</th>
+              </tr>
+            </thead>
+            <tbody>${list || "<tr><td colspan='4' class='muted'>No records returned.</td></tr>"}</tbody>
+          </table>
+        </div>
+      </details>
+    `;
+  }).join("");
+}
+
+async function refreshChaos(options = {}) {
+  if (!chaosStatus || !chaosSummary || !chaosGroups) {
+    return;
+  }
+  try {
+    const data = await fetchChaos();
+    const signature = JSON.stringify({
+      total_domains: data?.total_domains || 0,
+      updated_at: data?.updated_at || "",
+      groups: (data?.groups || []).map((g) => `${g.main_domain}:${g.count}:${g.error || ""}`),
+    });
+    if (!options.force && signature === lastChaosSignature) {
+      return;
+    }
+    lastChaosSignature = signature;
+    renderChaos(data);
+  } catch (error) {
+    chaosStatus.textContent = `Chaos fetch error: ${error.message}`;
   }
 }
 
@@ -4036,6 +4132,10 @@ refreshLeads({ force: true });
 setInterval(() => {
   refreshLeads({ force: false });
 }, 7000);
+refreshChaos({ force: true });
+setInterval(() => {
+  refreshChaos({ force: false });
+}, 15000);
 
 renderStrideLearning();
 loadStrideAnswer();
