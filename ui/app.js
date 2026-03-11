@@ -13,6 +13,8 @@ const menuItems = document.querySelectorAll(".menu-item");
 const views = document.querySelectorAll(".view");
 const torRouteToggle = document.getElementById("tor-route-toggle");
 const torNetworkIndicator = document.getElementById("tor-network-indicator");
+const proxyRouteToggle = document.getElementById("proxy-route-toggle");
+const proxyNetworkIndicator = document.getElementById("proxy-network-indicator");
 const leadsStatus = document.getElementById("leads-status");
 const leadsSummary = document.getElementById("leads-summary");
 const leadsWildcards = document.getElementById("leads-wildcards");
@@ -41,6 +43,10 @@ const githubKeyValue = document.getElementById("github-key-value");
 const githubKeyActive = document.getElementById("github-key-active");
 const githubKeyAdd = document.getElementById("github-key-add");
 const githubKeysList = document.getElementById("github-keys-list");
+const proxyConfigEnabled = document.getElementById("proxy-config-enabled");
+const proxyConfigHost = document.getElementById("proxy-config-host");
+const proxyConfigPort = document.getElementById("proxy-config-port");
+const proxyConfigSave = document.getElementById("proxy-config-save");
 const scopeCards = document.getElementById("scope-cards");
 const scopeCardsStatus = document.getElementById("scope-cards-status");
 const fileViewerModal = document.getElementById("file-viewer-modal");
@@ -2840,36 +2846,11 @@ function renderLeadEvidenceValue(value) {
   return `<code>${escapeHTML(normalized)}</code>`;
 }
 
-function renderLeads(data) {
-  if (!leadsStatus || !leadsSummary || !leadsWildcards) {
-    return;
+function renderLeadListBlocks(wildcards, sectionClass = "") {
+  if (!Array.isArray(wildcards) || !wildcards.length) {
+    return '<p class="muted">No leads in this section.</p>';
   }
-
-  const wildcards = Array.isArray(data?.wildcards) ? data.wildcards : [];
-  const updated = data?.updated_at ? `Last update: ${data.updated_at}` : "No findings yet.";
-  leadsStatus.textContent = updated;
-  leadsSummary.innerHTML = `
-    <div class="lead-summary-card">
-      <span class="muted">Total Leads</span>
-      <strong>${escapeHTML(String(data?.total_leads || 0))}</strong>
-    </div>
-    <div class="lead-summary-card">
-      <span class="muted">Total ROI</span>
-      <strong>${escapeHTML(String(data?.total_roi || 0))}</strong>
-    </div>
-    <div class="lead-summary-card">
-      <span class="muted">Wildcards</span>
-      <strong>${escapeHTML(String(wildcards.length))}</strong>
-    </div>
-    <p class="muted">ROI = relative triage score (higher means better attack path + impact signal for prioritization).</p>
-  `;
-
-  if (!wildcards.length) {
-    leadsWildcards.innerHTML = '<p class="muted">No leads found yet. Run the flow to populate semi-automated findings.</p>';
-    return;
-  }
-
-  leadsWildcards.innerHTML = wildcards.map((wc) => {
+  return wildcards.map((wc) => {
     const wildcardName = String(wc.wildcard || "(unmapped)").trim().toLowerCase();
     const domains = Array.isArray(wc.domains) ? wc.domains : [];
     const groupedByRoot = new Map();
@@ -2886,12 +2867,20 @@ function renderLeads(data) {
         const domainHtml = rootDomains.map((domain) => {
           const leads = Array.isArray(domain.leads) ? domain.leads : [];
           const leadsHtml = leads.map((lead) => `
-            <details class="lead-item">
+            <details class="lead-item" data-lead-id="${escapeHTML(lead.id || "")}">
               <summary>
                 <div class="lead-item__top">
                   <span class="lead-roi">ROI ${escapeHTML(String(lead.roi || 0))}</span>
                   <span class="lead-severity ${severityPillClass(lead.severity)}">${escapeHTML((lead.severity || "low").toUpperCase())}</span>
                   <span class="lead-category">${escapeHTML(lead.category || "unknown")}${lead.family ? `/${escapeHTML(lead.family)}` : ""}</span>
+                  <span class="lead-item__actions">
+                    <label class="lead-done-toggle">
+                      <input type="checkbox" data-lead-action="done" data-lead-id="${escapeHTML(lead.id || "")}" ${lead.done ? "checked" : ""} />
+                      DONE
+                    </label>
+                    <button type="button" class="lead-options-button" data-lead-action="toggle-menu" data-lead-id="${escapeHTML(lead.id || "")}">Options</button>
+                    <button type="button" class="lead-replay-button" data-lead-action="replay" data-lead-id="${escapeHTML(lead.id || "")}">Replay</button>
+                  </span>
                 </div>
                 <div class="lead-item__target">${
                 isLikelyURL(lead.target || "")
@@ -2899,6 +2888,13 @@ function renderLeads(data) {
                   : `<code>${escapeHTML(lead.target || "")}</code>`
               }</div>
               </summary>
+              <div class="lead-options-menu" data-lead-menu="${escapeHTML(lead.id || "")}" hidden>
+                <button type="button" data-lead-action="bucket" data-bucket="hits" data-lead-id="${escapeHTML(lead.id || "")}">Hits</button>
+                <button type="button" data-lead-action="bucket" data-bucket="investigation" data-lead-id="${escapeHTML(lead.id || "")}">Further Investigation</button>
+                <button type="button" data-lead-action="bucket" data-bucket="archive" data-lead-id="${escapeHTML(lead.id || "")}">Archive</button>
+                <button type="button" data-lead-action="bucket" data-bucket="active" data-lead-id="${escapeHTML(lead.id || "")}">Reset to Leads</button>
+                <button type="button" data-lead-action="delete" data-lead-id="${escapeHTML(lead.id || "")}">Delete</button>
+              </div>
               ${Array.isArray(lead.reasons) && lead.reasons.length ? `<div class="lead-item__reasons">${lead.reasons.slice(0, 4).map((reason) => `<span>${escapeHTML(reason)}</span>`).join("")}</div>` : ""}
               <div class="lead-item__evidence">
                 ${
@@ -2920,7 +2916,7 @@ function renderLeads(data) {
             </details>
           `).join("");
           return `
-            <details class="lead-domain-card">
+            <details class="lead-domain-card ${sectionClass}">
               <summary>
                 <span><strong>${escapeHTML(domain.domain || "")}</strong></span>
                 <span class="lead-domain-meta">ROI ${escapeHTML(String(domain.roi || 0))} | Leads ${escapeHTML(String(domain.lead_count || 0))} | H:${escapeHTML(String(domain.high_count || 0))} M:${escapeHTML(String(domain.medium_count || 0))} L:${escapeHTML(String(domain.low_count || 0))}</span>
@@ -2934,7 +2930,7 @@ function renderLeads(data) {
           return domainHtml;
         }
         return `
-          <details class="lead-domain-card">
+          <details class="lead-domain-card ${sectionClass}">
             <summary>
               <span><strong>${escapeHTML(rootDomain)}</strong></span>
               <span class="lead-domain-meta">Main domain group (${escapeHTML(String(rootDomains.length))} subdomain bucket${rootDomains.length === 1 ? "" : "s"})</span>
@@ -2945,7 +2941,7 @@ function renderLeads(data) {
       }).join("");
 
     return `
-      <details class="lead-wildcard-card">
+      <details class="lead-wildcard-card ${sectionClass}">
         <summary>
           <span><strong>${escapeHTML(wc.wildcard || "(unmapped)")}</strong></span>
           <span class="lead-domain-meta">ROI ${escapeHTML(String(wc.roi || 0))} | Domains ${escapeHTML(String(wc.domain_count || 0))} | Leads ${escapeHTML(String(wc.lead_count || 0))}</span>
@@ -2954,6 +2950,65 @@ function renderLeads(data) {
       </details>
     `;
   }).join("");
+}
+
+function renderLeads(data) {
+  if (!leadsStatus || !leadsSummary || !leadsWildcards) {
+    return;
+  }
+
+  const wildcards = Array.isArray(data?.wildcards) ? data.wildcards : [];
+  const hitsWildcards = Array.isArray(data?.hits_wildcards) ? data.hits_wildcards : [];
+  const investigationWildcards = Array.isArray(data?.investigation_wildcards) ? data.investigation_wildcards : [];
+  const archiveWildcards = Array.isArray(data?.archive_wildcards) ? data.archive_wildcards : [];
+  const updated = data?.updated_at ? `Last update: ${data.updated_at}` : "No findings yet.";
+  leadsStatus.textContent = updated;
+  leadsSummary.innerHTML = `
+    <div class="lead-summary-card">
+      <span class="muted">Total Leads</span>
+      <strong>${escapeHTML(String(data?.total_leads || 0))}</strong>
+    </div>
+    <div class="lead-summary-card">
+      <span class="muted">Total ROI</span>
+      <strong>${escapeHTML(String(data?.total_roi || 0))}</strong>
+    </div>
+    <div class="lead-summary-card">
+      <span class="muted">Wildcards</span>
+      <strong>${escapeHTML(String(wildcards.length))}</strong>
+    </div>
+    <div class="lead-summary-card">
+      <span class="muted">Hits Bucket</span>
+      <strong>${escapeHTML(String(data?.hits_count || 0))}</strong>
+    </div>
+    <div class="lead-summary-card">
+      <span class="muted">Investigation Bucket</span>
+      <strong>${escapeHTML(String(data?.investigation_count || 0))}</strong>
+    </div>
+    <div class="lead-summary-card">
+      <span class="muted">Archive Bucket</span>
+      <strong>${escapeHTML(String(data?.archive_count || 0))}</strong>
+    </div>
+    <p class="muted">ROI = relative triage score (higher means better attack path + impact signal for prioritization).</p>
+  `;
+
+  leadsWildcards.innerHTML = `
+    <section class="lead-bucket-section">
+      <h3>Leads</h3>
+      ${renderLeadListBlocks(wildcards)}
+    </section>
+    <section class="lead-bucket-section lead-bucket-section--hits">
+      <h3>Hits</h3>
+      ${renderLeadListBlocks(hitsWildcards, "lead-card--hits")}
+    </section>
+    <section class="lead-bucket-section lead-bucket-section--investigation">
+      <h3>Further Investigation</h3>
+      ${renderLeadListBlocks(investigationWildcards, "lead-card--investigation")}
+    </section>
+    <section class="lead-bucket-section lead-bucket-section--archive">
+      <h3>Archive</h3>
+      ${renderLeadListBlocks(archiveWildcards, "lead-card--archive")}
+    </section>
+  `;
 }
 
 async function refreshLeads(options = {}) {
@@ -2966,11 +3021,29 @@ async function refreshLeads(options = {}) {
       total_leads: data?.total_leads || 0,
       total_roi: data?.total_roi || 0,
       updated_at: data?.updated_at || "",
+      hits_count: data?.hits_count || 0,
+      investigation_count: data?.investigation_count || 0,
+      archive_count: data?.archive_count || 0,
       wildcards: (data?.wildcards || []).map((wc) => ({
         wildcard: wc.wildcard,
         roi: wc.roi,
         lead_count: wc.lead_count,
         domain_count: wc.domain_count,
+      })),
+      hits_wildcards: (data?.hits_wildcards || []).map((wc) => ({
+        wildcard: wc.wildcard,
+        roi: wc.roi,
+        lead_count: wc.lead_count,
+      })),
+      investigation_wildcards: (data?.investigation_wildcards || []).map((wc) => ({
+        wildcard: wc.wildcard,
+        roi: wc.roi,
+        lead_count: wc.lead_count,
+      })),
+      archive_wildcards: (data?.archive_wildcards || []).map((wc) => ({
+        wildcard: wc.wildcard,
+        roi: wc.roi,
+        lead_count: wc.lead_count,
       })),
     });
     if (!options.force && signature === lastLeadsSignature) {
@@ -2982,6 +3055,95 @@ async function refreshLeads(options = {}) {
     leadsStatus.textContent = `Leads fetch error: ${error.message}`;
   }
 }
+
+async function updateLeadState(payload) {
+  const response = await fetch(`${BACKEND_URL}/api/leads/state`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
+async function replayLead(id) {
+  const response = await fetch(`${BACKEND_URL}/api/leads/replay`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
+leadsWildcards?.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-lead-action]");
+  if (!button) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  const action = button.dataset.leadAction;
+  const leadId = button.dataset.leadId;
+  if (!leadId) {
+    return;
+  }
+  if (action === "toggle-menu") {
+    const menu = leadsWildcards.querySelector(`[data-lead-menu="${CSS.escape(leadId)}"]`);
+    if (menu) {
+      menu.hidden = !menu.hidden;
+    }
+    return;
+  }
+  try {
+    if (action === "bucket") {
+      await updateLeadState({ id: leadId, bucket: button.dataset.bucket || "" });
+      await refreshLeads({ force: true });
+      return;
+    }
+    if (action === "delete") {
+      await updateLeadState({ id: leadId, action: "delete" });
+      await refreshLeads({ force: true });
+      return;
+    }
+    if (action === "replay") {
+      button.disabled = true;
+      const result = await replayLead(leadId);
+      const statusCode = Number(result?.status_code || 0);
+      const url = String(result?.url || "");
+      const proxied = result?.proxy_enabled ? ` via ${result.proxy_url}` : "";
+      leadsStatus.textContent = `Replay ${statusCode} ${url}${proxied}`;
+      return;
+    }
+  } catch (error) {
+    leadsStatus.textContent = `Lead action failed: ${error.message}`;
+  } finally {
+    if (action === "replay") {
+      button.disabled = false;
+    }
+  }
+});
+
+leadsWildcards?.addEventListener("change", async (event) => {
+  const checkbox = event.target.closest("input[data-lead-action='done']");
+  if (!checkbox) {
+    return;
+  }
+  const leadId = checkbox.dataset.leadId;
+  if (!leadId) {
+    return;
+  }
+  try {
+    await updateLeadState({ id: leadId, done: checkbox.checked });
+  } catch (error) {
+    checkbox.checked = !checkbox.checked;
+    leadsStatus.textContent = `Lead update failed: ${error.message}`;
+  }
+});
 
 function updateAmassEnumButton(present, count) {
   if (!openAmassEnum) {
@@ -3628,10 +3790,25 @@ async function loadNetworkSettings() {
   try {
     const data = await fetchNetworkSettings();
     torRouteToggle.checked = Boolean(data.tor_enabled);
+    if (proxyRouteToggle) {
+      proxyRouteToggle.checked = Boolean(data.proxy_enabled);
+    }
+    if (proxyConfigEnabled) {
+      proxyConfigEnabled.checked = Boolean(data.proxy_enabled);
+    }
+    if (proxyConfigHost) {
+      proxyConfigHost.value = String(data.proxy_host || "localhost");
+    }
+    if (proxyConfigPort) {
+      proxyConfigPort.value = String(data.proxy_port || 8080);
+    }
     renderNetworkIndicator(data);
   } catch {
     torRouteToggle.checked = false;
-    renderNetworkIndicator({ tor_enabled: false, probe_error: "Network status unavailable" });
+    if (proxyRouteToggle) {
+      proxyRouteToggle.checked = false;
+    }
+    renderNetworkIndicator({ tor_enabled: false, proxy_enabled: false, probe_error: "Network status unavailable" });
   }
 }
 
@@ -3643,34 +3820,94 @@ function renderNetworkIndicator(data) {
   const torOn = Boolean(data?.tor_enabled);
   if (!torOn) {
     torNetworkIndicator.textContent = "Tor off";
-    return;
+  } else {
+    const ip = String(data?.probe_ip || "").trim();
+    const error = String(data?.probe_error || "").trim();
+    const probeAtRaw = String(data?.probe_at || "").trim();
+    const probeAt = probeAtRaw ? new Date(probeAtRaw).toLocaleTimeString() : "";
+    if (ip) {
+      torNetworkIndicator.classList.add("tor-indicator--ok");
+      torNetworkIndicator.textContent = probeAt ? `Tor IP: ${ip} (${probeAt})` : `Tor IP: ${ip}`;
+    } else if (error) {
+      torNetworkIndicator.classList.add("tor-indicator--error");
+      torNetworkIndicator.textContent = `Tor check failed: ${error}`;
+    } else {
+      torNetworkIndicator.textContent = "Checking Tor egress...";
+    }
   }
-  const ip = String(data?.probe_ip || "").trim();
-  const error = String(data?.probe_error || "").trim();
-  const probeAtRaw = String(data?.probe_at || "").trim();
-  const probeAt = probeAtRaw ? new Date(probeAtRaw).toLocaleTimeString() : "";
-  if (ip) {
-    torNetworkIndicator.classList.add("tor-indicator--ok");
-    torNetworkIndicator.textContent = probeAt ? `Tor IP: ${ip} (${probeAt})` : `Tor IP: ${ip}`;
-    return;
+  if (proxyNetworkIndicator) {
+    proxyNetworkIndicator.classList.remove("tor-indicator--ok", "tor-indicator--error");
+    const proxyOn = Boolean(data?.proxy_enabled);
+    if (!proxyOn) {
+      proxyNetworkIndicator.textContent = "Proxy off";
+    } else {
+      const host = String(data?.proxy_host || "localhost").trim() || "localhost";
+      const port = Number(data?.proxy_port || 8080) || 8080;
+      proxyNetworkIndicator.classList.add("tor-indicator--ok");
+      proxyNetworkIndicator.textContent = `Proxy on: ${host}:${port}`;
+    }
   }
-  if (error) {
-    torNetworkIndicator.classList.add("tor-indicator--error");
-    torNetworkIndicator.textContent = `Tor check failed: ${error}`;
-    return;
-  }
-  torNetworkIndicator.textContent = "Checking Tor egress...";
 }
 
 torRouteToggle?.addEventListener("change", async () => {
   try {
-    await updateNetworkSettings({ tor_enabled: Boolean(torRouteToggle.checked) });
+    await updateNetworkSettings({
+      tor_enabled: Boolean(torRouteToggle.checked),
+      proxy_enabled: Boolean(proxyRouteToggle?.checked),
+      proxy_host: String(proxyConfigHost?.value || "localhost").trim() || "localhost",
+      proxy_port: Number(proxyConfigPort?.value || 8080) || 8080,
+    });
     await loadNetworkSettings();
   } catch (error) {
     torRouteToggle.checked = !torRouteToggle.checked;
     if (flowStatus) {
       flowStatus.textContent = `Network toggle failed: ${error.message}`;
     }
+  }
+});
+
+proxyRouteToggle?.addEventListener("change", async () => {
+  try {
+    await updateNetworkSettings({
+      tor_enabled: Boolean(torRouteToggle?.checked),
+      proxy_enabled: Boolean(proxyRouteToggle.checked),
+      proxy_host: String(proxyConfigHost?.value || "localhost").trim() || "localhost",
+      proxy_port: Number(proxyConfigPort?.value || 8080) || 8080,
+    });
+    await loadNetworkSettings();
+  } catch (error) {
+    proxyRouteToggle.checked = !proxyRouteToggle.checked;
+    if (flowStatus) {
+      flowStatus.textContent = `Proxy toggle failed: ${error.message}`;
+    }
+  }
+});
+
+proxyConfigSave?.addEventListener("click", async () => {
+  const host = String(proxyConfigHost?.value || "localhost").trim() || "localhost";
+  const port = Number(proxyConfigPort?.value || 8080) || 8080;
+  const enabled = Boolean(proxyConfigEnabled?.checked || proxyRouteToggle?.checked);
+  try {
+    await updateNetworkSettings({
+      tor_enabled: Boolean(torRouteToggle?.checked),
+      proxy_enabled: enabled,
+      proxy_host: host,
+      proxy_port: port,
+    });
+    await loadNetworkSettings();
+    if (flowStatus) {
+      flowStatus.textContent = `Proxy updated: ${host}:${port}`;
+    }
+  } catch (error) {
+    if (flowStatus) {
+      flowStatus.textContent = `Proxy save failed: ${error.message}`;
+    }
+  }
+});
+
+proxyConfigEnabled?.addEventListener("change", () => {
+  if (proxyRouteToggle) {
+    proxyRouteToggle.checked = Boolean(proxyConfigEnabled.checked);
   }
 });
 

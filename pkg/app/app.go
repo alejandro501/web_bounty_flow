@@ -137,15 +137,18 @@ func FlowSteps() []Step {
 
 // App coordinates each stage of the bounty flow.
 type App struct {
-	cfg         *config.Config
-	logger      *log.Logger
-	httpClient  *http.Client
-	liveCSVPath string
-	logWriter   io.Writer
-	stepUpdate  func(id string, status StepStatus)
-	configStore *configstore.Store
-	torEnabled  bool
-	resumeDone  map[string]bool
+	cfg          *config.Config
+	logger       *log.Logger
+	httpClient   *http.Client
+	liveCSVPath  string
+	logWriter    io.Writer
+	stepUpdate   func(id string, status StepStatus)
+	configStore  *configstore.Store
+	torEnabled   bool
+	proxyEnabled bool
+	proxyHost    string
+	proxyPort    int
+	resumeDone   map[string]bool
 }
 
 // EgressProbe describes best-effort outbound IP detection.
@@ -251,6 +254,22 @@ func (a *App) SetTorEnabled(enabled bool) {
 		a.logger.Printf("network mode: tor enabled")
 	} else {
 		a.logger.Printf("network mode: direct")
+	}
+}
+
+// SetProxy configures optional HTTP(S) proxy routing for command execution.
+func (a *App) SetProxy(enabled bool, host string, port int) {
+	a.proxyEnabled = enabled
+	a.proxyHost = strings.TrimSpace(host)
+	if a.proxyHost == "" {
+		a.proxyHost = "localhost"
+	}
+	if port <= 0 {
+		port = 8080
+	}
+	a.proxyPort = port
+	if enabled {
+		a.logger.Printf("network mode: proxy enabled (%s:%d)", a.proxyHost, a.proxyPort)
 	}
 }
 
@@ -5539,11 +5558,29 @@ func (a *App) withTorPrefix(name string, args ...string) (string, []string) {
 
 func (a *App) networkEnv() []string {
 	env := os.Environ()
-	if !a.torEnabled {
+	if a.torEnabled {
+		// Do not force SOCKS env globally: some tools (notably Python requests-based)
+		// fail without optional SOCKS dependencies. Tor routing is handled via torify.
 		return env
 	}
-	// Do not force SOCKS env globally: some tools (notably Python requests-based)
-	// fail without optional SOCKS dependencies. Tor routing is handled via torify.
+	if !a.proxyEnabled {
+		return env
+	}
+	host := strings.TrimSpace(a.proxyHost)
+	if host == "" {
+		host = "localhost"
+	}
+	port := a.proxyPort
+	if port <= 0 {
+		port = 8080
+	}
+	proxyURL := fmt.Sprintf("http://%s:%d", host, port)
+	env = upsertEnv(env, "HTTP_PROXY", proxyURL)
+	env = upsertEnv(env, "HTTPS_PROXY", proxyURL)
+	env = upsertEnv(env, "ALL_PROXY", proxyURL)
+	env = upsertEnv(env, "http_proxy", proxyURL)
+	env = upsertEnv(env, "https_proxy", proxyURL)
+	env = upsertEnv(env, "all_proxy", proxyURL)
 	return env
 }
 

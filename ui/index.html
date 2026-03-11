@@ -36,6 +36,12 @@
               <span class="tor-switch__label">Route Through Tor</span>
             </label>
             <span id="tor-network-indicator" class="tor-indicator muted">Tor off</span>
+            <label class="tor-switch">
+              <input id="proxy-route-toggle" type="checkbox" />
+              <span class="tor-switch__slider"></span>
+              <span class="tor-switch__label">Proxy</span>
+            </label>
+            <span id="proxy-network-indicator" class="tor-indicator muted">Proxy off</span>
           </div>
         </div>
       </section>
@@ -538,6 +544,29 @@
 
       <section class="view view-config">
         <h2 class="page-title">Configuration</h2>
+        <section class="panel panel-config">
+          <div class="config-header">
+            <div>
+              <h3>Proxy</h3>
+              <p class="muted">Replay and flow traffic proxy endpoint. Default: localhost:8080.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="proxy-config-enabled" />
+              <span>Proxy enabled</span>
+            </label>
+          </div>
+          <div class="config-form">
+            <label>
+              Host
+              <input type="text" id="proxy-config-host" placeholder="localhost" />
+            </label>
+            <label>
+              Port
+              <input type="number" id="proxy-config-port" min="1" max="65535" placeholder="8080" />
+            </label>
+            <button id="proxy-config-save" type="button">Save proxy</button>
+          </div>
+        </section>
         <section class="panel panel-config">
           <div class="config-header">
             <div>

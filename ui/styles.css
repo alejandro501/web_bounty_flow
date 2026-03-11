@@ -428,7 +428,7 @@ main {
 
 .leads-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 0.8rem;
   margin: 0.9rem 0 1.1rem;
 }
@@ -450,6 +450,19 @@ main {
 .leads-wildcards {
   display: grid;
   gap: 0.95rem;
+}
+
+.lead-bucket-section {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.85rem;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.lead-bucket-section > h3 {
+  margin: 0 0 0.7rem;
+  font-size: 0.95rem;
+  color: #ffd7de;
 }
 
 .lead-wildcard-card {
@@ -520,10 +533,88 @@ main {
 
 .lead-item__top {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  justify-content: space-between;
   align-items: center;
   gap: 0.45rem;
   margin-bottom: 0.35rem;
+}
+
+.lead-item__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.lead-done-toggle {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0;
+  font-size: 0.7rem;
+  color: #ffb3bc;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+
+.lead-done-toggle input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #e1062c;
+}
+
+.lead-options-button,
+.lead-replay-button {
+  padding: 0.36rem 0.58rem;
+  border-radius: 7px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  box-shadow: none;
+}
+
+.lead-options-button {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.lead-replay-button {
+  background: rgba(62, 132, 255, 0.22);
+  border: 1px solid rgba(140, 184, 255, 0.28);
+}
+
+.lead-options-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.2rem 0 0.45rem;
+}
+
+.lead-options-menu button {
+  padding: 0.3rem 0.48rem;
+  border-radius: 7px;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.lead-options-menu button[data-lead-action="delete"] {
+  background: rgba(225, 6, 44, 0.26);
+  border: 1px solid rgba(255, 90, 124, 0.32);
+}
+
+.lead-card--hits {
+  border-color: rgba(255, 110, 110, 0.35);
+}
+
+.lead-card--investigation {
+  border-color: rgba(255, 196, 109, 0.35);
+}
+
+.lead-card--archive {
+  border-color: rgba(143, 173, 255, 0.35);
+  opacity: 0.9;
 }
 
 .lead-roi {
@@ -881,6 +972,10 @@ main {
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--panel);
+}
+
+#proxy-config-port {
+  max-width: 140px;
 }
 
 .config-row input[type="text"],
@@ -1656,6 +1751,15 @@ button:active {
   .lead-domain-card > summary {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .lead-item__top {
+    flex-wrap: wrap;
+  }
+
+  .lead-item__actions {
+    width: 100%;
+    margin-left: 0;
   }
 
   .modal-filters {

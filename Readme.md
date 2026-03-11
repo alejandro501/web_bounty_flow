@@ -1,81 +1,46 @@
 # Web Bounty Flow
 
-Go backend + static web UI for running recon flow tasks.
+## 0. What This Is
+Web Bounty Flow is a Go backend + static UI that runs a recon and security-testing pipeline from scope seeds to triageable findings.
+It automates discovery, enrichment, fuzzing, and lead generation while keeping artifacts in `data/` for manual follow-up.
+Use it as an operator console for repeatable bounty workflows, not as a “fire-and-forget” scanner.
 
-## Steps
-1. Input and config setup
-- load config and input lists (`organizations`, `wildcards`, `domains`, `out-of-scope`, etc.)
-- verify required recon files are loaded in `data/` (`organizations`, `wildcards`, `domains`, `out-of-scope`)
+## 1. Setup + Useful Commands
 
-2. Subdomain discovery (combined tools)
-- generate org-level dork links (API-focused)
-- run `subfinder`, `assetfinder`, and `amass` on wildcard entries and append to `data/domains`
-- filter out-of-scope domains from discovered results
-- resolve/live-check domains with `dnsx` + `httpx` (`httprobe` fallback) and overwrite `data/domains` with live protocol URLs
-- derive API-focused live protocol targets into `data/apidomains`
-
-3. Passive recon enrichment
-- generate dork links for `wildcards`, `domains`, and `apidomains`
-- bucket dork outputs into `data/dorking/github`, `data/dorking/google`, `data/dorking/shodan`, `data/dorking/wayback`
-- optional GitHub dork automation (token-based API search + hits)
-- fetch `robots.txt` and extract disallowed paths/sitemaps for wildcard/domain/api targets
-- run `sort_http` on domains to keep live HTTP targets organized
-
-4. URL discovery (combined tools)
-- run `waybackurls`, `gau`, and `katana` against live targets
-- save outputs under `data/recon/`:
-- `urls_waybackurls.txt`, `urls_gau.txt`, `urls_katana.txt`
-- consolidated `urls_all.txt` and API-like subset `urls_api_like.txt`
-
-## Quick Start (recommended)
+### Quick Start
 ```bash
 ./startup.sh
 ```
+This bootstraps `.env` if needed, sets `BFLOW_CONFIG_KEY` if missing, starts Docker services, and opens the UI.
 
-`startup.sh` will:
-- create `.env` from `.env.example` if missing
-- set `BFLOW_CONFIG_KEY` if missing (base64 string for 32-byte key)
-- run `docker compose up --build -d`
-- open `http://localhost:5001`
-
-## Docker (manual)
+### Docker (manual)
 ```bash
 docker compose up --build
 ```
+- UI: `http://localhost:5001`
+- API: `http://localhost:5050`
 
-Open:
-- UI: http://localhost:5001
-- API health: http://localhost:5050/
-
-## Docker Dev Hot Reload
-Use this when editing backend Go code frequently.
-
-Start with hot reload:
+### Dev hot reload
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-```
-
-Watch backend logs (you will see rebuild/restart on `.go` and `flow.yaml` changes):
-```bash
 docker compose logs -f backend
 ```
 
-Notes:
-- Frontend is already live-mounted (`./ui`), so UI edits are instant.
-- In hot-reload mode, backend source is bind-mounted and rebuilt by `air` inside the container.
-- Full rebuild is only needed when Dockerfile-level dependencies change.
-
-## Local Run (no Docker)
+### Local backend (no Docker)
 ```bash
 go run ./cmd/server -config flow.yaml -addr :8080
 ```
-Then serve `ui/` with any static server and set `data-backend-url` in `ui/index.html` if needed.
 
-## Notes
-- `BFLOW_CONFIG_KEY` encrypts/decrypts provider tokens in the config store.
-- Generate one manually if needed:
+### Useful checks
 ```bash
-openssl rand -base64 32
+go test ./...
+rg -n "TODO|FIXME" .
 ```
-- Main config is `flow.yaml`.
-- Persistent data is under `data/`.
+
+## 2. Steps (Brief)
+1. **Input + validation**: load scope files (`wildcards`, `domains`, `organizations`, `out-of-scope`) and verify prerequisites.
+2. **Subdomain discovery**: run passive tools (e.g., `subfinder`, `assetfinder`, `amass`, etc.), merge and deduplicate domains.
+3. **HTTP probing + API extraction**: identify live web targets (`domains_http`) and API-like live targets (`apidomains_http`).
+4. **Recon enrichment**: generate dorks, collect robots/sitemap signals, gather URL intel from sources like `gau`/Wayback/katana.
+5. **Fuzzing + checks**: run parameter/injection/workflow/CORS/CSRF/clickjacking/open-redirect and related modules.
+6. **Leads + triage**: group findings in Leads, review evidence, replay requests, and move items to `Hits`, `Further Investigation`, or `Archive`.

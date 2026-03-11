@@ -34,27 +34,33 @@ type Server struct {
 	logger *log.Logger
 	mux    *http.ServeMux
 
-	mu          sync.Mutex
-	running     bool
-	status      string
-	runCancel   context.CancelFunc
-	abortMode   string
-	paused      bool
-	logMu       sync.Mutex
-	logLines    []string
-	logPath     string
-	stepMu      sync.Mutex
-	steps       []app.Step
-	stepState   map[string]app.StepStatus
-	stepsPath   string
-	configStore *configstore.Store
-	xssMu       sync.Mutex
-	xssRunning  bool
-	xssStatus   string
-	xssLastRun  string
-	torEnabled  bool
-	torProbe    app.EgressProbe
-	torProbeAt  string
+	mu            sync.Mutex
+	running       bool
+	status        string
+	runCancel     context.CancelFunc
+	abortMode     string
+	paused        bool
+	logMu         sync.Mutex
+	logLines      []string
+	logPath       string
+	stepMu        sync.Mutex
+	steps         []app.Step
+	stepState     map[string]app.StepStatus
+	stepsPath     string
+	configStore   *configstore.Store
+	xssMu         sync.Mutex
+	xssRunning    bool
+	xssStatus     string
+	xssLastRun    string
+	torEnabled    bool
+	torProbe      app.EgressProbe
+	torProbeAt    string
+	proxyHost     string
+	proxyPort     int
+	proxyEnabled  bool
+	leadStateMu   sync.Mutex
+	leadStatePath string
+	leadStates    map[string]leadState
 }
 
 // New creates a new HTTP server wired to the bounty flow.
@@ -66,12 +72,18 @@ func New(cfg *config.Config) *Server {
 	}
 	s.logPath = filepath.Join(cfg.Paths.LogsDir, "flow.log")
 	s.stepsPath = filepath.Join(cfg.Paths.LogsDir, "steps_state.json")
+	s.leadStatePath = filepath.Join(filepath.Dir(cfg.Lists.Domains), "leads_state.json")
+	s.proxyHost = "localhost"
+	s.proxyPort = 8080
+	s.leadStates = map[string]leadState{}
 	s.initSteps()
 	s.loadPersistedLogs()
+	s.loadLeadStates()
 	s.logger = log.New(io.MultiWriter(os.Stdout, s), "[bflow-server] ", log.LstdFlags)
 	s.initConfigStore()
 	appLogger := log.New(io.MultiWriter(os.Stdout, s), "[bflow] ", log.LstdFlags)
 	s.app = app.New(cfg, appLogger, s, s.updateStep, s.configStore)
+	s.applyNetworkSettingsToApp()
 
 	s.mux.HandleFunc("/api/upload", s.corsMiddleware(s.uploadHandler))
 	s.mux.HandleFunc("/api/url", s.corsMiddleware(s.urlHandler))
@@ -93,6 +105,8 @@ func New(cfg *config.Config) *Server {
 	s.mux.HandleFunc("/api/amass-enum", s.corsMiddleware(s.amassEnumHandler))
 	s.mux.HandleFunc("/api/progress/subdomain", s.corsMiddleware(s.subdomainProgressHandler))
 	s.mux.HandleFunc("/api/leads", s.corsMiddleware(s.leadsHandler))
+	s.mux.HandleFunc("/api/leads/state", s.corsMiddleware(s.leadStateHandler))
+	s.mux.HandleFunc("/api/leads/replay", s.corsMiddleware(s.leadReplayHandler))
 	s.mux.HandleFunc("/api/manual/xss/run", s.corsMiddleware(s.manualXSSRunHandler))
 	s.mux.HandleFunc("/api/manual/xss/status", s.corsMiddleware(s.manualXSSStatusHandler))
 	s.mux.HandleFunc("/", s.corsMiddleware(s.rootHandler))
@@ -122,16 +136,22 @@ type settingsPayload struct {
 }
 
 type networkResponse struct {
-	TorEnabled bool   `json:"tor_enabled"`
-	ProbeMode  string `json:"probe_mode,omitempty"`
-	ProbeIP    string `json:"probe_ip,omitempty"`
-	ProbeAt    string `json:"probe_at,omitempty"`
-	ProbeError string `json:"probe_error,omitempty"`
-	ProbeSrc   string `json:"probe_source,omitempty"`
+	TorEnabled   bool   `json:"tor_enabled"`
+	ProxyEnabled bool   `json:"proxy_enabled"`
+	ProxyHost    string `json:"proxy_host,omitempty"`
+	ProxyPort    int    `json:"proxy_port,omitempty"`
+	ProbeMode    string `json:"probe_mode,omitempty"`
+	ProbeIP      string `json:"probe_ip,omitempty"`
+	ProbeAt      string `json:"probe_at,omitempty"`
+	ProbeError   string `json:"probe_error,omitempty"`
+	ProbeSrc     string `json:"probe_source,omitempty"`
 }
 
 type networkPayload struct {
-	TorEnabled bool `json:"tor_enabled"`
+	TorEnabled   bool   `json:"tor_enabled"`
+	ProxyEnabled bool   `json:"proxy_enabled"`
+	ProxyHost    string `json:"proxy_host"`
+	ProxyPort    int    `json:"proxy_port"`
 }
 
 // ListenAndServe starts the configured HTTP server.
@@ -247,6 +267,8 @@ type leadItem struct {
 	Evidence     map[string]any `json:"evidence,omitempty"`
 	Source       string         `json:"source"`
 	Timestamp    string         `json:"timestamp,omitempty"`
+	Done         bool           `json:"done"`
+	Bucket       string         `json:"bucket,omitempty"`
 }
 
 type leadsDomainGroup struct {
@@ -269,11 +291,23 @@ type leadsWildcardGroup struct {
 }
 
 type leadsResponse struct {
-	Present    bool                 `json:"present"`
-	UpdatedAt  string               `json:"updated_at"`
-	TotalLeads int                  `json:"total_leads"`
-	TotalROI   int                  `json:"total_roi"`
-	Wildcards  []leadsWildcardGroup `json:"wildcards"`
+	Present                bool                 `json:"present"`
+	UpdatedAt              string               `json:"updated_at"`
+	TotalLeads             int                  `json:"total_leads"`
+	TotalROI               int                  `json:"total_roi"`
+	Wildcards              []leadsWildcardGroup `json:"wildcards"`
+	HitsWildcards          []leadsWildcardGroup `json:"hits_wildcards"`
+	InvestigationWildcards []leadsWildcardGroup `json:"investigation_wildcards"`
+	ArchiveWildcards       []leadsWildcardGroup `json:"archive_wildcards"`
+	HitsCount              int                  `json:"hits_count"`
+	InvestigationCount     int                  `json:"investigation_count"`
+	ArchiveCount           int                  `json:"archive_count"`
+}
+
+type leadState struct {
+	Done      bool   `json:"done"`
+	Bucket    string `json:"bucket,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
 type toolStatus struct {
@@ -432,145 +466,46 @@ func (s *Server) subdomainProgressHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) leadsHandler(w http.ResponseWriter, r *http.Request) {
-	baseDir := filepath.Dir(s.cfg.Lists.Domains)
-	fuzzDir := filepath.Join(baseDir, "fuzzing")
-	roots := readListLines(s.cfg.Lists.Wildcards)
-
-	specs := []struct {
-		category string
-		source   string
-		path     string
-	}{
-		{category: "injection", source: "injection/sqli_hits.jsonl", path: filepath.Join(fuzzDir, "injection", "sqli_hits.jsonl")},
-		{category: "injection", source: "injection/nosqli_hits.jsonl", path: filepath.Join(fuzzDir, "injection", "nosqli_hits.jsonl")},
-		{category: "injection", source: "injection/xpath_hits.jsonl", path: filepath.Join(fuzzDir, "injection", "xpath_hits.jsonl")},
-		{category: "injection", source: "injection/ldap_hits.jsonl", path: filepath.Join(fuzzDir, "injection", "ldap_hits.jsonl")},
-		{category: "server-input", source: "server-input/os_command_hits.jsonl", path: filepath.Join(fuzzDir, "server-input", "os_command_hits.jsonl")},
-		{category: "server-input", source: "server-input/path_traversal_hits.jsonl", path: filepath.Join(fuzzDir, "server-input", "path_traversal_hits.jsonl")},
-		{category: "server-input", source: "server-input/file_inclusion_hits.jsonl", path: filepath.Join(fuzzDir, "server-input", "file_inclusion_hits.jsonl")},
-		{category: "adv-injection", source: "adv-injection/xxe_hits.jsonl", path: filepath.Join(fuzzDir, "adv-injection", "xxe_hits.jsonl")},
-		{category: "adv-injection", source: "adv-injection/soap_hits.jsonl", path: filepath.Join(fuzzDir, "adv-injection", "soap_hits.jsonl")},
-		{category: "adv-injection", source: "adv-injection/ssrf_hits.jsonl", path: filepath.Join(fuzzDir, "adv-injection", "ssrf_hits.jsonl")},
-		{category: "adv-injection", source: "adv-injection/smtp_hits.jsonl", path: filepath.Join(fuzzDir, "adv-injection", "smtp_hits.jsonl")},
-		{category: "csrf", source: "csrf/findings.jsonl", path: filepath.Join(fuzzDir, "csrf", "findings.jsonl")},
-		{category: "clickjacking", source: "clickjacking/findings.jsonl", path: filepath.Join(fuzzDir, "clickjacking", "findings.jsonl")},
-		{category: "cors", source: "cors/findings.jsonl", path: filepath.Join(fuzzDir, "cors", "findings.jsonl")},
-		{category: "open-redirect", source: "open-redirect/findings.jsonl", path: filepath.Join(fuzzDir, "open-redirect", "findings.jsonl")},
-		{category: "nuclei", source: "nuclei/findings.jsonl", path: filepath.Join(fuzzDir, "nuclei", "findings.jsonl")},
-		{category: "xss", source: "xss/reflected_hits.jsonl", path: filepath.Join(fuzzDir, "xss", "reflected_hits.jsonl")},
-		{category: "xss", source: "xss/dom_hits.jsonl", path: filepath.Join(fuzzDir, "xss", "dom_hits.jsonl")},
-		{category: "xss", source: "xss/stored_hits.jsonl", path: filepath.Join(fuzzDir, "xss", "stored_hits.jsonl")},
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
-
-	var leads []leadItem
-	latest := time.Time{}
-	for _, spec := range specs {
-		rows, modTime := readJSONLRecords(spec.path)
-		if modTime.After(latest) {
-			latest = modTime
-		}
-		for _, row := range rows {
-			lead := buildLeadItem(spec.category, spec.source, row, roots)
-			if lead.ID == "" || lead.Domain == "" {
-				continue
-			}
-			leads = append(leads, lead)
-		}
+	uniqueLeads, latest, err := s.collectLeads()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-
-	dedup := make(map[string]leadItem, len(leads))
-	for _, lead := range leads {
-		if current, ok := dedup[lead.ID]; ok {
-			if lead.ROI > current.ROI {
-				dedup[lead.ID] = lead
-			}
-			continue
-		}
-		dedup[lead.ID] = lead
-	}
-
-	uniqueLeads := make([]leadItem, 0, len(dedup))
-	for _, lead := range dedup {
-		uniqueLeads = append(uniqueLeads, lead)
-	}
-	sort.Slice(uniqueLeads, func(i, j int) bool {
-		if uniqueLeads[i].ROI == uniqueLeads[j].ROI {
-			return uniqueLeads[i].ID < uniqueLeads[j].ID
-		}
-		return uniqueLeads[i].ROI > uniqueLeads[j].ROI
-	})
-
-	wildcardBuckets := make(map[string]map[string][]leadItem)
+	var active []leadItem
+	var hits []leadItem
+	var investigation []leadItem
+	var archive []leadItem
 	totalROI := 0
 	for _, lead := range uniqueLeads {
 		totalROI += lead.ROI
-		wc := lead.Wildcard
-		if wc == "" {
-			wc = "(unmapped)"
+		switch lead.Bucket {
+		case "hits":
+			hits = append(hits, lead)
+		case "investigation":
+			investigation = append(investigation, lead)
+		case "archive":
+			archive = append(archive, lead)
+		default:
+			active = append(active, lead)
 		}
-		if wildcardBuckets[wc] == nil {
-			wildcardBuckets[wc] = make(map[string][]leadItem)
-		}
-		wildcardBuckets[wc][lead.Domain] = append(wildcardBuckets[wc][lead.Domain], lead)
 	}
-
-	var wildcardGroups []leadsWildcardGroup
-	for wildcard, domains := range wildcardBuckets {
-		group := leadsWildcardGroup{Wildcard: wildcard}
-		var domainGroups []leadsDomainGroup
-		for domain, items := range domains {
-			dg := leadsDomainGroup{
-				Domain:    domain,
-				Wildcard:  wildcard,
-				Leads:     append([]leadItem{}, items...),
-				LeadCount: len(items),
-			}
-			sort.Slice(dg.Leads, func(i, j int) bool {
-				if dg.Leads[i].ROI == dg.Leads[j].ROI {
-					return dg.Leads[i].ID < dg.Leads[j].ID
-				}
-				return dg.Leads[i].ROI > dg.Leads[j].ROI
-			})
-			for _, lead := range dg.Leads {
-				dg.ROI += lead.ROI
-				switch strings.ToLower(strings.TrimSpace(lead.Severity)) {
-				case "high", "critical":
-					dg.HighCount++
-				case "medium":
-					dg.MediumCount++
-				default:
-					dg.LowCount++
-				}
-			}
-			domainGroups = append(domainGroups, dg)
-		}
-		sort.Slice(domainGroups, func(i, j int) bool {
-			if domainGroups[i].ROI == domainGroups[j].ROI {
-				return domainGroups[i].Domain < domainGroups[j].Domain
-			}
-			return domainGroups[i].ROI > domainGroups[j].ROI
-		})
-		group.Domains = domainGroups
-		group.DomainCount = len(domainGroups)
-		for _, dg := range domainGroups {
-			group.ROI += dg.ROI
-			group.LeadCount += dg.LeadCount
-		}
-		wildcardGroups = append(wildcardGroups, group)
-	}
-	sort.Slice(wildcardGroups, func(i, j int) bool {
-		if wildcardGroups[i].ROI == wildcardGroups[j].ROI {
-			return wildcardGroups[i].Wildcard < wildcardGroups[j].Wildcard
-		}
-		return wildcardGroups[i].ROI > wildcardGroups[j].ROI
-	})
 
 	resp := leadsResponse{
-		Present:    len(uniqueLeads) > 0,
-		UpdatedAt:  latest.UTC().Format(time.RFC3339),
-		TotalLeads: len(uniqueLeads),
-		TotalROI:   totalROI,
-		Wildcards:  wildcardGroups,
+		Present:                len(uniqueLeads) > 0,
+		UpdatedAt:              latest.UTC().Format(time.RFC3339),
+		TotalLeads:             len(uniqueLeads),
+		TotalROI:               totalROI,
+		Wildcards:              buildWildcardGroups(active),
+		HitsWildcards:          buildWildcardGroups(hits),
+		InvestigationWildcards: buildWildcardGroups(investigation),
+		ArchiveWildcards:       buildWildcardGroups(archive),
+		HitsCount:              len(hits),
+		InvestigationCount:     len(investigation),
+		ArchiveCount:           len(archive),
 	}
 	if latest.IsZero() {
 		resp.UpdatedAt = ""
@@ -1025,9 +960,8 @@ func (s *Server) initConfigStore() {
 		return
 	}
 	s.configStore = store
-	if s.app != nil {
-		s.app.SetTorEnabled(s.loadTorEnabled())
-	}
+	s.loadProxySettings()
+	s.applyNetworkSettingsToApp()
 }
 
 func (s *Server) loadTorEnabled() bool {
@@ -1077,7 +1011,7 @@ func (s *Server) startFlow() error {
 		s.stepMu.Unlock()
 	}
 	if s.app != nil {
-		s.app.SetTorEnabled(torEnabled)
+		s.applyNetworkSettingsToApp()
 		s.app.SetResumeCompleted(doneSteps)
 	}
 	s.paused = false
