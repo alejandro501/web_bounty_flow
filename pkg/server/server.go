@@ -94,6 +94,7 @@ func New(cfg *config.Config) *Server {
 	s.mux.HandleFunc("/api/status", s.corsMiddleware(s.statusHandler))
 	s.mux.HandleFunc("/api/logs", s.corsMiddleware(s.logsHandler))
 	s.mux.HandleFunc("/api/config", s.corsMiddleware(s.configHandler))
+	s.mux.HandleFunc("/api/config/flow-tools", s.corsMiddleware(s.flowToolsConfigHandler))
 	s.mux.HandleFunc("/api/config/providers/", s.corsMiddleware(s.providerConfigHandler))
 	s.mux.HandleFunc("/api/network", s.corsMiddleware(s.networkHandler))
 	s.mux.HandleFunc("/api/dorking/github/run", s.corsMiddleware(s.githubRunHandler))
@@ -394,7 +395,16 @@ func (s *Server) subdomainProgressHandler(w http.ResponseWriter, r *http.Request
 		{name: "gau", dir: filepath.Join(rawRoot, "gau"), ext: ".txt"},
 		{name: "ctl", dir: filepath.Join(rawRoot, "ctl"), ext: ".json"},
 		{name: "subfinder", dir: filepath.Join(rawRoot, "subfinder"), ext: ".txt"},
+		{name: "chaos", dir: filepath.Join(rawRoot, "chaos"), ext: ".json"},
 	}
+	enabledTools := s.loadSubdomainToolSettings()
+	filtered := toolCounts[:0]
+	for _, tool := range toolCounts {
+		if enabledTools[tool.name] {
+			filtered = append(filtered, tool)
+		}
+	}
+	toolCounts = filtered
 
 	resp := subdomainProgressResponse{TotalWildcards: total}
 	if total <= 0 {
@@ -432,12 +442,14 @@ func (s *Server) subdomainProgressHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	subdomainStepIDs := []string{
+		app.StepSubdomainEnum,
 		app.StepAmass,
 		app.StepSublist3r,
 		app.StepAssetfinder,
 		app.StepGAU,
 		app.StepCTL,
 		app.StepSubfinder,
+		app.StepChaos,
 	}
 	s.mu.Lock()
 	isRunning := s.running
@@ -872,6 +884,7 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 
 	doneIfPending("load-config", true)
 	doneIfPending("validate-inputs", hasAnyScope)
+	doneIfPending("subdomain-enumeration", fileHasNonEmpty(s.cfg.Lists.Domains))
 	doneIfPending("amass", dirHasNonEmptyExt(amassDir, ".txt"))
 	doneIfPending("sublist3r",
 		dirHasExt(filepath.Join(rawDir, "sublist3r"), ".txt") ||
@@ -893,6 +906,9 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 		dirHasExt(filepath.Join(rawDir, "subfinder"), ".txt") ||
 			globHasAny(filepath.Join(reconDir, "subfinder_*.txt")),
 	)
+	doneIfPending("chaos",
+		dirHasExt(filepath.Join(rawDir, "chaos"), ".json"),
+	)
 	doneIfPending("persist-raw-outputs",
 		fileExists(amassDir) &&
 			fileExists(filepath.Join(rawDir, "amass")) &&
@@ -900,7 +916,8 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 			fileExists(filepath.Join(rawDir, "assetfinder")) &&
 			fileExists(filepath.Join(rawDir, "gau")) &&
 			fileExists(filepath.Join(rawDir, "ctl")) &&
-			fileExists(filepath.Join(rawDir, "subfinder")),
+			fileExists(filepath.Join(rawDir, "subfinder")) &&
+			fileExists(filepath.Join(rawDir, "chaos")),
 	)
 	doneIfPending("dnsx-validate",
 		fileExists(filepath.Join(rawDir, "dnsx-validate", "validated_hosts.txt")) ||
@@ -1190,7 +1207,23 @@ func (s *Server) missingRequiredToolsForRun() []string {
 		return nil
 	}
 
-	required := []string{"amass", "assetfinder", "gau", "subfinder", "httpx"}
+	enabled := s.loadSubdomainToolSettings()
+	required := []string{}
+	if enabled["amass"] {
+		required = append(required, "amass")
+	}
+	if enabled["assetfinder"] {
+		required = append(required, "assetfinder")
+	}
+	if enabled["gau"] {
+		required = append(required, "gau")
+	}
+	if enabled["subfinder"] {
+		required = append(required, "subfinder")
+	}
+	if len(required) > 0 {
+		required = append(required, "httpx")
+	}
 	var missing []string
 	for _, name := range required {
 		if _, err := exec.LookPath(name); err != nil {
@@ -1198,6 +1231,31 @@ func (s *Server) missingRequiredToolsForRun() []string {
 		}
 	}
 	return missing
+}
+
+func (s *Server) loadSubdomainToolSettings() map[string]bool {
+	settings := map[string]bool{
+		"amass":       true,
+		"sublist3r":   true,
+		"assetfinder": true,
+		"gau":         true,
+		"ctl":         true,
+		"subfinder":   true,
+		"chaos":       true,
+	}
+	if s.configStore == nil {
+		return settings
+	}
+	cfg, err := s.configStore.LoadDecrypted()
+	if err != nil {
+		return settings
+	}
+	for tool := range settings {
+		if provider := cfg.Providers[tool]; provider != nil {
+			settings[tool] = provider.AutoRun
+		}
+	}
+	return settings
 }
 
 func (s *Server) listPath(name string) (string, error) {

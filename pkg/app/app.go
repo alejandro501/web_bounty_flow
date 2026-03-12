@@ -52,12 +52,14 @@ type Step struct {
 const (
 	StepLoadConfig     = "load-config"
 	StepValidateInputs = "validate-inputs"
+	StepSubdomainEnum  = "subdomain-enumeration"
 	StepAmass          = "amass"
 	StepSublist3r      = "sublist3r"
 	StepAssetfinder    = "assetfinder"
 	StepGAU            = "gau"
 	StepCTL            = "ctl"
 	StepSubfinder      = "subfinder"
+	StepChaos          = "chaos"
 	StepRawOutputs     = "persist-raw-outputs"
 	StepDNSX           = "dnsx-validate"
 	StepRobotsSitemaps = "robots-sitemaps"
@@ -92,12 +94,14 @@ const (
 var flowSteps = []Step{
 	{ID: StepLoadConfig, Label: "Load flow.yaml and initialize recon runtime."},
 	{ID: StepValidateInputs, Label: "Validate scope readiness (at least one non-empty input list is required)."},
+	{ID: StepSubdomainEnum, Label: "Run subdomain enumeration with enabled tools from Flow configuration."},
 	{ID: StepAmass, Label: "Run amass enum for each wildcard."},
 	{ID: StepSublist3r, Label: "Run sublist3r in parallel with other passive tools."},
 	{ID: StepAssetfinder, Label: "Run assetfinder in parallel with other passive tools."},
 	{ID: StepGAU, Label: "Run gau in parallel with other passive tools."},
 	{ID: StepCTL, Label: "Query certificate transparency logs in parallel."},
 	{ID: StepSubfinder, Label: "Run subfinder in parallel with other passive tools."},
+	{ID: StepChaos, Label: "Run Chaos DNS enumeration in parallel with other passive tools."},
 	{ID: StepRawOutputs, Label: "Persist per-tool raw outputs in dedicated folders."},
 	{ID: StepDNSX, Label: "Validate discovered hosts with dnsx before consolidation."},
 	{ID: StepConsolidate, Label: "Consolidate all discovered hosts and remove duplicates."},
@@ -381,6 +385,32 @@ func (a *App) githubDorking(ctx context.Context) error {
 	return dorking.RunGithubSearch(ctx, opts)
 }
 
+func (a *App) loadSubdomainToolSettings() map[string]bool {
+	settings := map[string]bool{
+		"amass":       true,
+		"sublist3r":   true,
+		"assetfinder": true,
+		"gau":         true,
+		"ctl":         true,
+		"subfinder":   true,
+		"chaos":       true,
+	}
+	if a.configStore == nil {
+		return settings
+	}
+	cfg, err := a.configStore.LoadDecrypted()
+	if err != nil {
+		a.logger.Printf("subdomain tool settings: failed to load config (%v), using defaults", err)
+		return settings
+	}
+	for key := range settings {
+		if provider := cfg.Providers[key]; provider != nil {
+			settings[key] = provider.AutoRun
+		}
+	}
+	return settings
+}
+
 func (a *App) prepareDirectories() error {
 	ffufBase := a.fuzzingFFUFDir()
 	docBase := a.fuzzingDocsDir()
@@ -431,21 +461,21 @@ func (a *App) prepareDirectories() error {
 
 func (a *App) passiveRecon(ctx context.Context) error {
 	for _, step := range []string{
-		StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepRawOutputs, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepClickjacking, StepCORSChecks, StepOpenRedirect, StepWorkflowLogic, StepSmugglingStack, StepNmapEnrich, StepNucleiScan, StepTierIsolation, StepStaticReview, StepRunOpsBundle, StepStageScorecard, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
+		StepSubdomainEnum, StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepChaos, StepRawOutputs, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepClickjacking, StepCORSChecks, StepOpenRedirect, StepWorkflowLogic, StepSmugglingStack, StepNmapEnrich, StepNucleiScan, StepTierIsolation, StepStaticReview, StepRunOpsBundle, StepStageScorecard, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
 	} {
 		a.updateStep(step, StepPending)
 	}
 
 	if !fileExists(a.cfg.Lists.Wildcards) || len(readSafeLines(a.cfg.Lists.Wildcards)) == 0 {
 		for _, step := range []string{
-			StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepRawOutputs, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepClickjacking, StepCORSChecks, StepOpenRedirect, StepWorkflowLogic, StepSmugglingStack, StepNmapEnrich, StepNucleiScan, StepTierIsolation, StepStaticReview, StepRunOpsBundle, StepStageScorecard, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
+			StepSubdomainEnum, StepAmass, StepSublist3r, StepAssetfinder, StepGAU, StepCTL, StepSubfinder, StepChaos, StepRawOutputs, StepDNSX, StepConsolidate, StepHTTPX, StepRobotsSitemaps, StepWaybackURLs, StepKatana, StepURLCorpus, StepParamFuzz, StepInjectionCheck, StepServerInputChk, StepAdvInjection, StepCSRFChecks, StepClickjacking, StepCORSChecks, StepOpenRedirect, StepWorkflowLogic, StepSmugglingStack, StepNmapEnrich, StepNucleiScan, StepTierIsolation, StepStaticReview, StepRunOpsBundle, StepStageScorecard, StepDorkLinks, StepCeWL, StepFuzzDocs, StepFuzzDirs,
 		} {
 			a.skipStep(step)
 		}
 		return nil
 	}
 
-	return a.runSubdomainDiscovery(ctx)
+	return a.runStep(StepSubdomainEnum, func() error { return a.runSubdomainDiscovery(ctx) })
 }
 
 func (a *App) validateReconInputs() error {
@@ -554,6 +584,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 			filepath.Join(rawDir, StepGAU),
 			filepath.Join(rawDir, StepCTL),
 			filepath.Join(rawDir, StepSubfinder),
+			filepath.Join(rawDir, StepChaos),
 			filepath.Join(rawDir, StepDNSX),
 		} {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -572,6 +603,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		StepGAU:         {},
 		StepCTL:         {},
 		StepSubfinder:   {},
+		StepChaos:       {},
 	}
 	var resultMu sync.Mutex
 	appendResults := func(step string, hosts []string) {
@@ -649,8 +681,11 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		return nil
 	}
 
+	toolEnabled := a.loadSubdomainToolSettings()
+
 	type toolRunner struct {
 		step       string
+		provider   string
 		required   string
 		attempts   int
 		backoff    time.Duration
@@ -661,6 +696,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 	runners := []toolRunner{
 		{
 			step:     StepAmass,
+			provider: "amass",
 			required: "amass",
 			attempts: defaultRetryAttempts,
 			backoff:  defaultRetryBackoff,
@@ -703,6 +739,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		},
 		{
 			step:     StepSublist3r,
+			provider: "sublist3r",
 			required: "sublist3r",
 			attempts: defaultRetryAttempts,
 			backoff:  defaultRetryBackoff,
@@ -725,6 +762,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		},
 		{
 			step:     StepAssetfinder,
+			provider: "assetfinder",
 			required: "assetfinder",
 			attempts: defaultRetryAttempts,
 			backoff:  defaultRetryBackoff,
@@ -741,6 +779,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		},
 		{
 			step:     StepGAU,
+			provider: "gau",
 			required: "gau",
 			attempts: defaultRetryAttempts,
 			backoff:  defaultRetryBackoff,
@@ -757,6 +796,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		},
 		{
 			step:     StepCTL,
+			provider: "ctl",
 			required: "",
 			attempts: ctlRetryAttempts,
 			backoff:  ctlRetryBackoff,
@@ -773,6 +813,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		},
 		{
 			step:     StepSubfinder,
+			provider: "subfinder",
 			required: "subfinder",
 			attempts: defaultRetryAttempts,
 			backoff:  defaultRetryBackoff,
@@ -787,10 +828,71 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 				return parseDomainLines(stdout, seed), nil
 			},
 		},
+		{
+			step:     StepChaos,
+			provider: "chaos",
+			required: "",
+			attempts: defaultRetryAttempts,
+			backoff:  defaultRetryBackoff,
+			runForSeed: func(ctx context.Context, seed string) ([]string, error) {
+				key := strings.TrimSpace(os.Getenv("BFLOW_CHAOS_API_KEY"))
+				if key == "" {
+					key = "5b1e13ba-b805-4202-bc9a-1779affb3676"
+				}
+				url := fmt.Sprintf("https://dns.projectdiscovery.io/dns/%s/subdomains", seed)
+				req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+				if err != nil {
+					return nil, err
+				}
+				req.Header.Set("Authorization", key)
+				req.Header.Set("Accept", "application/json")
+				client := &http.Client{Timeout: 15 * time.Second}
+				resp, err := client.Do(req)
+				if err != nil {
+					return nil, err
+				}
+				defer resp.Body.Close()
+				raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+				if writeErr := os.WriteFile(filepath.Join(rawDir, StepChaos, fmt.Sprintf("%s.json", sanitizeFilename(seed))), raw, 0o644); writeErr != nil {
+					a.logger.Printf("%s: failed to persist raw output for %s: %v", StepChaos, seed, writeErr)
+				}
+				if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+					return nil, fmt.Errorf("chaos status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(raw)))
+				}
+				var parsed struct {
+					Domain     string   `json:"domain"`
+					Subdomains []string `json:"subdomains"`
+				}
+				if err := json.Unmarshal(raw, &parsed); err != nil {
+					return nil, err
+				}
+				var hosts []string
+				for _, sub := range parsed.Subdomains {
+					sub = strings.TrimSpace(strings.TrimPrefix(sub, "*."))
+					sub = strings.Trim(sub, ".")
+					if sub == "" || sub == "*" {
+						continue
+					}
+					host := sub
+					if !strings.HasSuffix(strings.ToLower(host), "."+strings.ToLower(seed)) && !strings.EqualFold(host, seed) {
+						host = sub + "." + seed
+					}
+					host = normalizeDorkTarget(host)
+					if host != "" {
+						hosts = append(hosts, host)
+					}
+				}
+				return unique(hosts), nil
+			},
+		},
 	}
 
 	available := make(map[string]bool, len(runners))
 	for _, runner := range runners {
+		if !toolEnabled[runner.provider] {
+			available[runner.step] = false
+			continue
+		}
 		if runner.required == "" {
 			available[runner.step] = true
 			continue
@@ -815,14 +917,23 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		return ok
 	}
 
+	activeRunners := 0
 	for _, runner := range runners {
 		if !available[runner.step] {
 			a.skipStep(runner.step)
-			a.logger.Printf("%s: skipped (binary not found)", runner.step)
+			if !toolEnabled[runner.provider] {
+				a.logger.Printf("%s: skipped (disabled in flow configuration)", runner.step)
+			} else {
+				a.logger.Printf("%s: skipped (binary not found)", runner.step)
+			}
 			continue
 		}
+		activeRunners++
 		a.updateStep(runner.step, StepRunning)
 		a.logger.Printf("%s: running", runner.step)
+	}
+	if activeRunners == 0 {
+		return errors.New("no enabled subdomain enumeration tools are available; enable at least one tool in Flow configuration")
 	}
 
 	for _, seed := range normalizedSeeds {

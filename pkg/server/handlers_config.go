@@ -12,6 +12,10 @@ import (
 	"github.com/rojo/hack/web_bounty_flow/pkg/configstore"
 )
 
+type flowToolsPayload struct {
+	Tools map[string]bool `json:"tools"`
+}
+
 func (s *Server) configHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -29,6 +33,42 @@ func (s *Server) configHandler(w http.ResponseWriter, r *http.Request) {
 	resp := configResponse{Version: cfg.Version, Providers: cfg.Providers}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) flowToolsConfigHandler(w http.ResponseWriter, r *http.Request) {
+	if s.configStore == nil {
+		http.Error(w, "config store not available (BFLOW_CONFIG_KEY missing)", http.StatusServiceUnavailable)
+		return
+	}
+	if r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var payload flowToolsPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	allowed := map[string]bool{
+		"amass":       true,
+		"sublist3r":   true,
+		"assetfinder": true,
+		"gau":         true,
+		"ctl":         true,
+		"subfinder":   true,
+		"chaos":       true,
+	}
+	for provider, enabled := range payload.Tools {
+		if !allowed[provider] {
+			http.Error(w, "unsupported flow tool provider: "+provider, http.StatusBadRequest)
+			return
+		}
+		if err := s.configStore.UpdateProviderSettings(provider, enabled); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) networkHandler(w http.ResponseWriter, r *http.Request) {

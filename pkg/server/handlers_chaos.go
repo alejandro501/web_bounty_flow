@@ -12,10 +12,32 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 const defaultChaosAPIKey = "5b1e13ba-b805-4202-bc9a-1779affb3676"
+const chaosMaxMainDomains = 12
+const chaosParallelism = 2
+const chaosAssocCacheTTL = 10 * time.Minute
+const chaosDNSCacheTTL = 10 * time.Minute
+
+var (
+	chaosAssocCacheMu sync.Mutex
+	chaosAssocCache   = map[string]chaosAssocCacheEntry{}
+	chaosDNSCacheMu   sync.Mutex
+	chaosDNSCache     = map[string]chaosDNSCacheEntry{}
+)
+
+type chaosAssocCacheEntry struct {
+	Data      chaosAssociatedData
+	FetchedAt time.Time
+}
+
+type chaosDNSCacheEntry struct {
+	Data      chaosDNSData
+	FetchedAt time.Time
+}
 
 type chaosDomainItem struct {
 	Domain          string   `json:"domain"`
@@ -27,10 +49,15 @@ type chaosDomainItem struct {
 }
 
 type chaosGroup struct {
-	MainDomain string            `json:"main_domain"`
-	Count      int               `json:"count"`
-	Items      []chaosDomainItem `json:"items"`
-	Error      string            `json:"error,omitempty"`
+	MainDomain          string            `json:"main_domain"`
+	Count               int               `json:"count"`
+	Items               []chaosDomainItem `json:"items"`
+	Sources             []string          `json:"sources,omitempty"`
+	SourceCounts        map[string]int    `json:"source_counts,omitempty"`
+	DNSTotalSubdomains  int               `json:"dns_total_subdomains,omitempty"`
+	DNSSampleSubdomains []string          `json:"dns_sample_subdomains,omitempty"`
+	Error               string            `json:"error,omitempty"`
+	DNSError            string            `json:"dns_error,omitempty"`
 }
 
 type chaosResponse struct {
@@ -38,6 +65,7 @@ type chaosResponse struct {
 	UpdatedAt    string       `json:"updated_at,omitempty"`
 	Source       string       `json:"source"`
 	TotalDomains int          `json:"total_domains"`
+	TotalDNSSubs int          `json:"total_dns_subdomains"`
 	Groups       []chaosGroup `json:"groups"`
 }
 
@@ -48,6 +76,9 @@ func (s *Server) chaosHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mainDomains := s.chaosMainDomains()
+	if len(mainDomains) > chaosMaxMainDomains {
+		mainDomains = mainDomains[:chaosMaxMainDomains]
+	}
 	if len(mainDomains) == 0 {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(chaosResponse{
@@ -64,21 +95,44 @@ func (s *Server) chaosHandler(w http.ResponseWriter, r *http.Request) {
 		key = defaultChaosAPIKey
 	}
 
-	client := &http.Client{Timeout: 25 * time.Second}
-	groups := make([]chaosGroup, 0, len(mainDomains))
+	client := &http.Client{Timeout: 10 * time.Second}
+	groups := make([]chaosGroup, len(mainDomains))
+	sem := make(chan struct{}, chaosParallelism)
+	var wg sync.WaitGroup
+	for idx, domain := range mainDomains {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, d string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+			defer cancel()
+			assoc, err := fetchChaosAssociatedDomainsCached(ctx, client, key, d)
+			dnsInfo, dnsErr := fetchChaosDNSDomainDataCached(ctx, client, key, d)
+			group := chaosGroup{
+				MainDomain:          d,
+				Count:               len(assoc.Items),
+				Items:               assoc.Items,
+				Sources:             assoc.Sources,
+				SourceCounts:        assoc.SourceCounts,
+				DNSTotalSubdomains:  dnsInfo.TotalSubdomains,
+				DNSSampleSubdomains: dnsInfo.SampleSubdomains,
+			}
+			if err != nil {
+				group.Error = err.Error()
+			}
+			if dnsErr != nil {
+				group.DNSError = dnsErr.Error()
+			}
+			groups[i] = group
+		}(idx, domain)
+	}
+	wg.Wait()
 	total := 0
-	for _, domain := range mainDomains {
-		items, err := fetchChaosAssociatedDomains(r.Context(), client, key, domain)
-		group := chaosGroup{
-			MainDomain: domain,
-			Count:      len(items),
-			Items:      items,
-		}
-		if err != nil {
-			group.Error = err.Error()
-		}
-		total += len(items)
-		groups = append(groups, group)
+	totalDNS := 0
+	for _, group := range groups {
+		total += group.Count
+		totalDNS += group.DNSTotalSubdomains
 	}
 
 	sort.Slice(groups, func(i, j int) bool {
@@ -94,6 +148,7 @@ func (s *Server) chaosHandler(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
 		Source:       "projectdiscovery-chaos",
 		TotalDomains: total,
+		TotalDNSSubs: totalDNS,
 		Groups:       groups,
 	})
 }
@@ -111,12 +166,15 @@ func (s *Server) chaosMainDomains() []string {
 	for _, item := range readListLines(s.cfg.Lists.Wildcards) {
 		add(item)
 	}
-	for _, item := range readListLines(s.cfg.Lists.Domains) {
-		add(item)
-	}
-	baseDir := filepath.Dir(s.cfg.Lists.Domains)
-	for _, item := range readListLines(filepath.Join(baseDir, "domains_http")) {
-		add(item)
+	// Fallback only when wildcards are missing.
+	if len(candidates) == 0 {
+		baseDir := filepath.Dir(s.cfg.Lists.Domains)
+		for _, item := range readListLines(filepath.Join(baseDir, "domains_http")) {
+			add(item)
+		}
+		for _, item := range readListLines(s.cfg.Lists.Domains) {
+			add(item)
+		}
 	}
 
 	out := make([]string, 0, len(candidates))
@@ -149,41 +207,102 @@ func normalizeMainDomain(raw string) string {
 	return value
 }
 
-func fetchChaosAssociatedDomains(ctx context.Context, client *http.Client, key, domain string) ([]chaosDomainItem, error) {
+type chaosAssociatedData struct {
+	Items        []chaosDomainItem
+	Sources      []string
+	SourceCounts map[string]int
+}
+
+func fetchChaosAssociatedDomainsCached(ctx context.Context, client *http.Client, key, domain string) (chaosAssociatedData, error) {
+	cacheKey := strings.ToLower(strings.TrimSpace(domain))
+	now := time.Now()
+	chaosAssocCacheMu.Lock()
+	if cached, ok := chaosAssocCache[cacheKey]; ok && now.Sub(cached.FetchedAt) < chaosAssocCacheTTL {
+		chaosAssocCacheMu.Unlock()
+		return cached.Data, nil
+	}
+	chaosAssocCacheMu.Unlock()
+
+	data, err := fetchChaosAssociatedDomains(ctx, client, key, domain)
+	if err != nil {
+		// If API is rate-limited, return stale cache when available.
+		if strings.Contains(strings.ToLower(err.Error()), "too many requests") {
+			chaosAssocCacheMu.Lock()
+			if cached, ok := chaosAssocCache[cacheKey]; ok {
+				chaosAssocCacheMu.Unlock()
+				return cached.Data, nil
+			}
+			chaosAssocCacheMu.Unlock()
+		}
+		return data, err
+	}
+	chaosAssocCacheMu.Lock()
+	chaosAssocCache[cacheKey] = chaosAssocCacheEntry{Data: data, FetchedAt: now}
+	chaosAssocCacheMu.Unlock()
+	return data, nil
+}
+
+func fetchChaosAssociatedDomains(ctx context.Context, client *http.Client, key, domain string) (chaosAssociatedData, error) {
 	const endpoint = "https://api.projectdiscovery.io/v1/domain/associated"
+	out := chaosAssociatedData{SourceCounts: map[string]int{}}
 	u, err := url.Parse(endpoint)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 	q := u.Query()
 	q.Set("domain", domain)
-	q.Set("limit", "100")
+	q.Set("limit", "20")
 	q.Set("page", "1")
 	q.Set("sort", "subdomain_count")
 	u.RawQuery = q.Encode()
 
 	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 	req.Header.Set("X-Api-Key", key)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := client.Do(req.WithContext(ctx))
-	if err != nil {
-		return nil, err
+	var raw []byte
+	var resp *http.Response
+	var doErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		resp, doErr = client.Do(req.WithContext(ctx))
+		if doErr != nil {
+			return out, doErr
+		}
+		raw, _ = io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusTooManyRequests {
+			if attempt < 2 {
+				select {
+				case <-ctx.Done():
+					return out, ctx.Err()
+				case <-time.After(time.Duration(attempt+1) * 1200 * time.Millisecond):
+				}
+				continue
+			}
+		}
+		break
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if resp == nil {
+		return out, fmt.Errorf("chaos api %s: empty response", domain)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("chaos api %s: %s", domain, strings.TrimSpace(string(raw)))
+		return out, fmt.Errorf("chaos api %s: %s", domain, strings.TrimSpace(string(raw)))
 	}
 	var parsed map[string]any
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, err
+		return out, err
+	}
+	out.Sources = asStringSlice(parsed["sources"])
+	if counts, ok := parsed["sources_count"].(map[string]any); ok {
+		for k, v := range counts {
+			out.SourceCounts[k] = asInt(v)
+		}
 	}
 	records := extractChaosRecords(parsed)
-	out := make([]chaosDomainItem, 0, len(records))
+	items := make([]chaosDomainItem, 0, len(records))
 	seen := map[string]struct{}{}
 	for _, record := range records {
 		item := chaosDomainItem{
@@ -205,14 +324,15 @@ func fetchChaosAssociatedDomains(ctx context.Context, client *http.Client, key, 
 			continue
 		}
 		seen[key] = struct{}{}
-		out = append(out, item)
+		items = append(items, item)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].SubdomainCount == out[j].SubdomainCount {
-			return out[i].Domain < out[j].Domain
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].SubdomainCount == items[j].SubdomainCount {
+			return items[i].Domain < items[j].Domain
 		}
-		return out[i].SubdomainCount > out[j].SubdomainCount
+		return items[i].SubdomainCount > items[j].SubdomainCount
 	})
+	out.Items = items
 	return out, nil
 }
 
@@ -262,4 +382,96 @@ func asInt(value any) int {
 	default:
 		return 0
 	}
+}
+
+type chaosDNSData struct {
+	TotalSubdomains  int
+	SampleSubdomains []string
+}
+
+func fetchChaosDNSDomainDataCached(ctx context.Context, client *http.Client, key, domain string) (chaosDNSData, error) {
+	cacheKey := strings.ToLower(strings.TrimSpace(domain))
+	now := time.Now()
+	chaosDNSCacheMu.Lock()
+	if cached, ok := chaosDNSCache[cacheKey]; ok && now.Sub(cached.FetchedAt) < chaosDNSCacheTTL {
+		chaosDNSCacheMu.Unlock()
+		return cached.Data, nil
+	}
+	chaosDNSCacheMu.Unlock()
+
+	data, err := fetchChaosDNSDomainData(ctx, client, key, domain)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "too many requests") {
+			chaosDNSCacheMu.Lock()
+			if cached, ok := chaosDNSCache[cacheKey]; ok {
+				chaosDNSCacheMu.Unlock()
+				return cached.Data, nil
+			}
+			chaosDNSCacheMu.Unlock()
+		}
+		return data, err
+	}
+	chaosDNSCacheMu.Lock()
+	chaosDNSCache[cacheKey] = chaosDNSCacheEntry{Data: data, FetchedAt: now}
+	chaosDNSCacheMu.Unlock()
+	return data, nil
+}
+
+func fetchChaosDNSDomainData(ctx context.Context, client *http.Client, key, domain string) (chaosDNSData, error) {
+	out := chaosDNSData{}
+	base := fmt.Sprintf("https://dns.projectdiscovery.io/dns/%s", url.PathEscape(domain))
+	reqCount, err := http.NewRequest(http.MethodGet, base, nil)
+	if err != nil {
+		return out, err
+	}
+	reqCount.Header.Set("Authorization", key)
+	reqCount.Header.Set("Accept", "application/json")
+	respCount, err := client.Do(reqCount.WithContext(ctx))
+	if err != nil {
+		return out, err
+	}
+	defer respCount.Body.Close()
+	rawCount, _ := io.ReadAll(io.LimitReader(respCount.Body, 1<<20))
+	if respCount.StatusCode < 200 || respCount.StatusCode >= 300 {
+		return out, fmt.Errorf("dns api %s: %s", domain, strings.TrimSpace(string(rawCount)))
+	}
+	var countParsed map[string]any
+	if err := json.Unmarshal(rawCount, &countParsed); err != nil {
+		return out, err
+	}
+	out.TotalSubdomains = asInt(countParsed["subdomains"])
+
+	reqList, err := http.NewRequest(http.MethodGet, base+"/subdomains", nil)
+	if err != nil {
+		return out, err
+	}
+	reqList.Header.Set("Authorization", key)
+	reqList.Header.Set("Accept", "application/json")
+	respList, err := client.Do(reqList.WithContext(ctx))
+	if err != nil {
+		return out, err
+	}
+	defer respList.Body.Close()
+	rawList, _ := io.ReadAll(io.LimitReader(respList.Body, 2<<20))
+	if respList.StatusCode < 200 || respList.StatusCode >= 300 {
+		return out, fmt.Errorf("dns api %s subdomains: %s", domain, strings.TrimSpace(string(rawList)))
+	}
+	var listParsed map[string]any
+	if err := json.Unmarshal(rawList, &listParsed); err != nil {
+		return out, err
+	}
+	subs := asStringSlice(listParsed["subdomains"])
+	sample := make([]string, 0, len(subs))
+	for _, sub := range subs {
+		sub = strings.TrimSpace(sub)
+		if sub == "" {
+			continue
+		}
+		sample = append(sample, sub)
+		if len(sample) >= 50 {
+			break
+		}
+	}
+	out.SampleSubdomains = sample
+	return out, nil
 }

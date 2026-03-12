@@ -328,7 +328,7 @@ main {
 }
 
 .panel-config {
-  max-width: 1200px;
+  max-width: none;
 }
 
 .view-stride {
@@ -346,6 +346,16 @@ main {
 .view-notes,
 .view-manual-tips {
   display: none;
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.panel-config--wide {
+  grid-column: 1 / -1;
 }
 
 .notes-panel {
@@ -972,6 +982,14 @@ main {
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--panel);
+}
+
+.config-row[data-flow-provider] {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.config-row[data-flow-provider] .muted {
+  margin-top: 0.25rem;
 }
 
 #proxy-config-port {
@@ -1706,6 +1724,10 @@ button:active {
   }
 
   .config-row {
+    grid-template-columns: 1fr;
+  }
+
+  .config-grid {
     grid-template-columns: 1fr;
   }
 

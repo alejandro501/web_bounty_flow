@@ -46,6 +46,9 @@ const githubKeyValue = document.getElementById("github-key-value");
 const githubKeyActive = document.getElementById("github-key-active");
 const githubKeyAdd = document.getElementById("github-key-add");
 const githubKeysList = document.getElementById("github-keys-list");
+const flowConfigTools = document.getElementById("flow-config-tools");
+const flowConfigStatus = document.getElementById("flow-config-status");
+const flowConfigSave = document.getElementById("flow-config-save");
 const proxyConfigEnabled = document.getElementById("proxy-config-enabled");
 const proxyConfigHost = document.getElementById("proxy-config-host");
 const proxyConfigPort = document.getElementById("proxy-config-port");
@@ -100,6 +103,7 @@ let lastLogsSignature = "";
 let lastScopeSignature = "";
 let lastLeadsSignature = "";
 let lastChaosSignature = "";
+let flowConfigDraft = {};
 let manualDomainOptions = [];
 let manualDomainsReady = false;
 let currentFileModalType = "";
@@ -391,12 +395,7 @@ const FLOW_SEGMENTS = [
   {
     title: "1) Mapping - Subdomain Enumeration (Chapter 4)",
     items: [
-      { label: "Run amass enum for each wildcard.", stepId: "amass", implemented: true },
-      { label: "Run sublist3r in parallel with other passive tools.", stepId: "sublist3r", implemented: true },
-      { label: "Run assetfinder in parallel with other passive tools.", stepId: "assetfinder", implemented: true },
-      { label: "Run gau in parallel with other passive tools.", stepId: "gau", implemented: true },
-      { label: "Query certificate transparency logs in parallel.", stepId: "ctl", implemented: true },
-      { label: "Run subfinder in parallel with other passive tools.", stepId: "subfinder", implemented: true },
+      { label: "Subdomain enumeration (uses enabled tools from Flow configuration).", stepId: "subdomain-enumeration", implemented: true },
       { label: "Persist per-tool raw outputs in dedicated folders.", stepId: "persist-raw-outputs", implemented: true },
       { label: "Validate discovered hosts with dnsx before consolidation.", stepId: "dnsx-validate", implemented: true },
       { label: "Consolidate all discovered hosts and remove duplicates.", stepId: "consolidate", implemented: true },
@@ -453,6 +452,16 @@ const FLOW_SEGMENTS = [
       { label: "Build chapter-aligned stage gates and completion scorecard.", stepId: "stage-gates-scorecard", implemented: true },
     ],
   },
+];
+
+const FLOW_SUBDOMAIN_TOOLS = [
+  { provider: "amass", label: "Amass", notes: "Passive DNS + graph-based discovery." },
+  { provider: "sublist3r", label: "Sublist3r", notes: "OSINT-based subdomain enumeration." },
+  { provider: "assetfinder", label: "Assetfinder", notes: "Fast passive domain discovery." },
+  { provider: "gau", label: "GAU", notes: "Extract hosts from archived URL sources." },
+  { provider: "ctl", label: "Certificate Transparency Logs", notes: "Collect domains from CT log search." },
+  { provider: "subfinder", label: "Subfinder", notes: "ProjectDiscovery passive subdomain discovery." },
+  { provider: "chaos", label: "Chaos", notes: "ProjectDiscovery DNS subdomain API source." },
 ];
 
 const MANUAL_DOMAIN_CHECKLIST_ITEMS = [
@@ -1244,6 +1253,10 @@ menuItems.forEach((item) => {
     }
     if (view === "chaos") {
       void refreshChaos({ force: true });
+    }
+    if (view === "config") {
+      void loadConfig();
+      void loadFlowConfig();
     }
     if (view === "notes") {
       void loadNoteCanvas("notes");
@@ -3091,6 +3104,10 @@ function renderChaos(data) {
       <span class="muted">Source</span>
       <strong>${escapeHTML(String(data?.source || "projectdiscovery-chaos"))}</strong>
     </div>
+    <div class="lead-summary-card">
+      <span class="muted">DNS Subdomains</span>
+      <strong>${escapeHTML(String(data?.total_dns_subdomains || 0))}</strong>
+    </div>
   `;
   if (!groups.length) {
     chaosGroups.innerHTML = '<p class="muted">No main domains found. Add wildcards/domains first.</p>';
@@ -3110,9 +3127,13 @@ function renderChaos(data) {
       <details class="lead-wildcard-card">
         <summary>
           <span><strong>${escapeHTML(group.main_domain || "(unknown)")}</strong></span>
-          <span class="lead-domain-meta">Associated domains: ${escapeHTML(String(group.count || 0))}</span>
+          <span class="lead-domain-meta">Associated: ${escapeHTML(String(group.count || 0))} | DNS subs: ${escapeHTML(String(group.dns_total_subdomains || 0))}</span>
         </summary>
         ${group.error ? `<p class="muted">Error: ${escapeHTML(group.error)}</p>` : ""}
+        ${group.dns_error ? `<p class="muted">DNS Error: ${escapeHTML(group.dns_error)}</p>` : ""}
+        ${group.sources?.length ? `<p class="muted">Sources: ${escapeHTML(group.sources.join(", "))}</p>` : ""}
+        ${group.source_counts && Object.keys(group.source_counts).length ? `<p class="muted">Source counts: ${escapeHTML(Object.entries(group.source_counts).map(([k, v]) => `${k}=${v}`).join(", "))}</p>` : ""}
+        ${group.dns_sample_subdomains?.length ? `<p class="muted">Sample subdomains: <code>${escapeHTML(group.dns_sample_subdomains.slice(0, 15).join(", "))}</code></p>` : ""}
         <div class="modal-table-wrap">
           <table class="lws-table">
             <thead>
@@ -3806,6 +3827,47 @@ async function loadConfig() {
   }
 }
 
+async function loadFlowConfig() {
+  if (!flowConfigTools || !flowConfigStatus) {
+    return;
+  }
+  flowConfigStatus.textContent = "Loading...";
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/config`);
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
+    const data = await res.json();
+    const providers = data?.providers || {};
+    flowConfigDraft = {};
+    for (const tool of FLOW_SUBDOMAIN_TOOLS) {
+      const enabled = providers?.[tool.provider]?.auto_run;
+      flowConfigDraft[tool.provider] = enabled === undefined ? true : Boolean(enabled);
+    }
+    flowConfigTools.innerHTML = FLOW_SUBDOMAIN_TOOLS.map((tool) => {
+      const checked = flowConfigDraft[tool.provider] ? "checked" : "";
+      return `
+        <div class="config-row" data-flow-provider="${tool.provider}">
+          <div>
+            <strong>${escapeHTML(tool.label)}</strong>
+            <p class="muted">${escapeHTML(tool.notes)}</p>
+          </div>
+          <label class="inline">
+            <input type="checkbox" data-flow-provider-toggle="${tool.provider}" ${checked} />
+            Enabled
+          </label>
+        </div>
+      `;
+    }).join("");
+    if (flowConfigSave) {
+      flowConfigSave.disabled = true;
+    }
+    flowConfigStatus.textContent = "Loaded";
+  } catch (error) {
+    flowConfigStatus.textContent = `Failed to load flow configuration: ${error.message}`;
+  }
+}
+
 function renderGithubKeys(keys) {
   if (!githubKeysList) {
     return;
@@ -3876,6 +3938,46 @@ githubAutoRun?.addEventListener("change", async () => {
     }
   } catch (error) {
     githubKeysList.textContent = `Failed to update auto-run: ${error.message}`;
+  }
+});
+
+flowConfigTools?.addEventListener("change", (event) => {
+  const input = event.target.closest("input[data-flow-provider-toggle]");
+  if (!input) {
+    return;
+  }
+  const provider = input.dataset.flowProviderToggle;
+  if (!provider) {
+    return;
+  }
+  flowConfigDraft[provider] = Boolean(input.checked);
+  if (flowConfigSave) {
+    flowConfigSave.disabled = false;
+  }
+  if (flowConfigStatus) {
+    flowConfigStatus.textContent = "Unsaved changes...";
+  }
+});
+
+flowConfigSave?.addEventListener("click", async () => {
+  if (!flowConfigStatus) {
+    return;
+  }
+  flowConfigStatus.textContent = "Saving...";
+  flowConfigSave.disabled = true;
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/config/flow-tools`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tools: flowConfigDraft }),
+    });
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
+    flowConfigStatus.textContent = "Saved";
+  } catch (error) {
+    flowConfigStatus.textContent = `Failed to save flow configuration: ${error.message}`;
+    flowConfigSave.disabled = false;
   }
 });
 
@@ -4072,6 +4174,7 @@ manualTipsEditor?.addEventListener("input", () => {
 });
 
 loadConfig();
+loadFlowConfig();
 loadNetworkSettings();
 setInterval(loadNetworkSettings, 8000);
 
@@ -4135,7 +4238,7 @@ setInterval(() => {
 refreshChaos({ force: true });
 setInterval(() => {
   refreshChaos({ force: false });
-}, 15000);
+}, 120000);
 
 renderStrideLearning();
 loadStrideAnswer();

@@ -554,59 +554,74 @@
 
       <section class="view view-config">
         <h2 class="page-title">Configuration</h2>
-        <section class="panel panel-config">
-          <div class="config-header">
-            <div>
-              <h3>Proxy</h3>
-              <p class="muted">Replay and flow traffic proxy endpoint. Default: localhost:8080.</p>
+        <div class="config-grid">
+          <section class="panel panel-config">
+            <div class="config-header">
+              <div>
+                <h3>Proxy</h3>
+                <p class="muted">Replay and flow traffic proxy endpoint. Default: localhost:8080.</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="proxy-config-enabled" />
+                <span>Proxy enabled</span>
+              </label>
             </div>
-            <label class="toggle">
-              <input type="checkbox" id="proxy-config-enabled" />
-              <span>Proxy enabled</span>
-            </label>
-          </div>
-          <div class="config-form">
-            <label>
-              Host
-              <input type="text" id="proxy-config-host" placeholder="localhost" />
-            </label>
-            <label>
-              Port
-              <input type="number" id="proxy-config-port" min="1" max="65535" placeholder="8080" />
-            </label>
-            <button id="proxy-config-save" type="button">Save proxy</button>
-          </div>
-        </section>
-        <section class="panel panel-config">
-          <div class="config-header">
-            <div>
-              <h3>GitHub API Keys</h3>
-              <p class="muted">Add multiple keys for rotation and rate limits.</p>
+            <div class="config-form">
+              <label>
+                Host
+                <input type="text" id="proxy-config-host" placeholder="localhost" />
+              </label>
+              <label>
+                Port
+                <input type="number" id="proxy-config-port" min="1" max="65535" placeholder="8080" />
+              </label>
+              <button id="proxy-config-save" type="button">Save proxy</button>
             </div>
-            <label class="toggle">
-              <input type="checkbox" id="github-auto-run" />
-              <span>Auto-run GitHub dorking</span>
-            </label>
-          </div>
+          </section>
+          <section class="panel panel-config">
+            <div class="config-header">
+              <div>
+                <h3>GitHub API Keys</h3>
+                <p class="muted">Add multiple keys for rotation and rate limits.</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="github-auto-run" />
+                <span>Auto-run GitHub dorking</span>
+              </label>
+            </div>
 
-          <div class="config-form">
-            <label>
-              Label
-              <input type="text" id="github-key-label" placeholder="primary" />
-            </label>
-            <label>
-              Token
-              <input type="password" id="github-key-value" placeholder="ghp_..." />
-            </label>
-            <label class="inline">
-              <input type="checkbox" id="github-key-active" checked />
-              Active
-            </label>
-            <button id="github-key-add" type="button">Add key</button>
-          </div>
+            <div class="config-form">
+              <label>
+                Label
+                <input type="text" id="github-key-label" placeholder="primary" />
+              </label>
+              <label>
+                Token
+                <input type="password" id="github-key-value" placeholder="ghp_..." />
+              </label>
+              <label class="inline">
+                <input type="checkbox" id="github-key-active" checked />
+                Active
+              </label>
+              <button id="github-key-add" type="button">Add key</button>
+            </div>
 
-          <div id="github-keys-list" class="config-list"></div>
-        </section>
+            <div id="github-keys-list" class="config-list"></div>
+          </section>
+          <section class="panel panel-config panel-config--wide">
+            <div class="config-header">
+              <div>
+                <h3>Flow configuration</h3>
+                <p class="muted">Enable only the subdomain enumeration tools you want to run.</p>
+              </div>
+            </div>
+            <div class="config-actions">
+              <button id="flow-config-save" type="button">Save</button>
+            </div>
+            <div id="flow-config-tools" class="config-list"></div>
+            <p id="flow-config-status" class="muted">Loading...</p>
+          </section>
+        </div>
       </section>
 
       <div id="live-webservers-modal" class="modal-shell" hidden>
