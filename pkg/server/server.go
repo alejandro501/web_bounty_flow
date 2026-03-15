@@ -3,7 +3,6 @@ package server
 import (
 	"bufio"
 	"context"
-	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -332,12 +331,12 @@ type manualXSSStatusResponse struct {
 }
 
 func (s *Server) liveWebserversHandler(w http.ResponseWriter, r *http.Request) {
-	path := filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "live-webservers.csv")
+	path := filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "live-webservers.jsonl")
 	resp := liveWebserverResponse{Present: false, Rows: nil, Count: 0}
 
 	if info, err := os.Stat(path); err == nil && !info.IsDir() {
 		resp.Present = true
-		rows, readErr := readLiveWebserversCSV(path)
+		rows, readErr := readLiveWebserversJSONL(path)
 		if readErr == nil {
 			resp.Rows = rows
 			resp.Count = len(rows)
@@ -924,7 +923,10 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 			fileExists(filepath.Join(reconDir, "dnsx_validated_hosts.txt")),
 	)
 	doneIfPending("consolidate", fileHasNonEmpty(s.cfg.Lists.Domains))
-	doneIfPending("httpx", fileHasNonEmpty(filepath.Join(baseDir, "live-webservers.csv")))
+	doneIfPending("httpx",
+		fileHasNonEmpty(filepath.Join(baseDir, "live-webservers.jsonl")) ||
+			fileHasNonEmpty(filepath.Join(baseDir, "domains_http")),
+	)
 	doneIfPending("robots-sitemaps",
 		fileExists(filepath.Join(s.cfg.Paths.RobotsDir, "robots_urls.txt")) ||
 			fileExists(filepath.Join(s.cfg.Paths.RobotsDir, "_hits.txt")) ||
@@ -942,20 +944,71 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 		fileExists(filepath.Join(reconDir, "all_urls.txt")) ||
 			fileExists(filepath.Join(reconDir, "urls_all.txt")),
 	)
-	doneIfPending("param-fuzz", fileExists(filepath.Join(baseDir, "fuzzing", "params", "summary.csv")))
-	doneIfPending("injection-checks", fileExists(filepath.Join(baseDir, "fuzzing", "injection", "summary.csv")))
-	doneIfPending("server-input-checks", fileExists(filepath.Join(baseDir, "fuzzing", "server-input", "summary.csv")))
-	doneIfPending("adv-injection-checks", fileExists(filepath.Join(baseDir, "fuzzing", "adv-injection", "summary.csv")))
-	doneIfPending("csrf-checks", fileExists(filepath.Join(baseDir, "fuzzing", "csrf", "summary.csv")))
-	doneIfPending("clickjacking-checks", fileExists(filepath.Join(baseDir, "fuzzing", "clickjacking", "summary.csv")))
-	doneIfPending("cors-checks", fileExists(filepath.Join(baseDir, "fuzzing", "cors", "summary.csv")))
-	doneIfPending("open-redirect-checks", fileExists(filepath.Join(baseDir, "fuzzing", "open-redirect", "summary.csv")))
-	doneIfPending("workflow-logic-checks", fileExists(filepath.Join(baseDir, "fuzzing", "workflow-logic", "summary.csv")))
-	doneIfPending("smuggling-stack-checks", fileExists(filepath.Join(baseDir, "fuzzing", "smuggling-stack", "summary.csv")))
-	doneIfPending("nmap-enrichment-checks", fileExists(filepath.Join(baseDir, "fuzzing", "nmap", "summary.csv")))
-	doneIfPending("nuclei-scan", fileExists(filepath.Join(baseDir, "fuzzing", "nuclei", "summary.csv")))
-	doneIfPending("tier-isolation-checks", fileExists(filepath.Join(baseDir, "fuzzing", "tier-isolation", "summary.csv")))
-	doneIfPending("static-review-correlation", fileExists(filepath.Join(baseDir, "fuzzing", "static-review", "summary.csv")))
+	doneIfPending("param-fuzz",
+		fileExists(filepath.Join(baseDir, "fuzzing", "params", "query_hits.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "params", "body_hits.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "params", "header_hits.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "params", "cookie_hits.jsonl")),
+	)
+	doneIfPending("injection-checks",
+		fileExists(filepath.Join(baseDir, "fuzzing", "injection", "sqli_hits.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "injection", "nosqli_hits.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "injection", "xpath_hits.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "injection", "ldap_hits.jsonl")),
+	)
+	doneIfPending("server-input-checks",
+		fileExists(filepath.Join(baseDir, "fuzzing", "server-input", "os_command_hits.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "server-input", "path_traversal_hits.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "server-input", "file_inclusion_hits.jsonl")),
+	)
+	doneIfPending("adv-injection-checks",
+		fileExists(filepath.Join(baseDir, "fuzzing", "adv-injection", "xxe_hits.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "adv-injection", "soap_hits.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "adv-injection", "ssrf_hits.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "adv-injection", "smtp_hits.jsonl")),
+	)
+	doneIfPending("csrf-checks",
+		fileExists(filepath.Join(baseDir, "fuzzing", "csrf", "candidates.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "csrf", "findings.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "csrf", "replay_log.jsonl")),
+	)
+	doneIfPending("clickjacking-checks",
+		fileExists(filepath.Join(baseDir, "fuzzing", "clickjacking", "headers.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "clickjacking", "findings.jsonl")),
+	)
+	doneIfPending("cors-checks",
+		fileExists(filepath.Join(baseDir, "fuzzing", "cors", "replay_log.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "cors", "findings.jsonl")),
+	)
+	doneIfPending("open-redirect-checks",
+		fileExists(filepath.Join(baseDir, "fuzzing", "open-redirect", "candidates.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "open-redirect", "findings.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "open-redirect", "replay_log.jsonl")),
+	)
+	doneIfPending("workflow-logic-checks",
+		fileExists(filepath.Join(baseDir, "fuzzing", "workflow-logic", "candidates.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "workflow-logic", "findings.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "workflow-logic", "replay_log.jsonl")),
+	)
+	doneIfPending("smuggling-stack-checks",
+		fileExists(filepath.Join(baseDir, "fuzzing", "smuggling-stack", "tool_runs.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "smuggling-stack", "findings.jsonl")),
+	)
+	doneIfPending("nmap-enrichment-checks",
+		fileExists(filepath.Join(baseDir, "fuzzing", "nmap", "targets.txt")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "nmap", "services.csv")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "nmap", "searchsploit.txt")),
+	)
+	doneIfPending("nuclei-scan", fileExists(filepath.Join(baseDir, "fuzzing", "nuclei", "findings.jsonl")))
+	doneIfPending("tier-isolation-checks",
+		fileExists(filepath.Join(baseDir, "fuzzing", "tier-isolation", "ip_map.jsonl")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "tier-isolation", "findings.jsonl")),
+	)
+	doneIfPending("static-review-correlation",
+		fileExists(filepath.Join(baseDir, "fuzzing", "static-review", "semgrep.json")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "static-review", "gosec.json")) ||
+			fileExists(filepath.Join(baseDir, "fuzzing", "static-review", "correlated_findings.jsonl")),
+	)
 	doneIfPending("runops-manifest-export", globHasNonEmpty(filepath.Join(s.cfg.Paths.LogsDir, "runops", "manifest_*.json")))
 	doneIfPending("stage-gates-scorecard", fileExists(filepath.Join(s.cfg.Paths.LogsDir, "runops", "scorecard.json")))
 	doneIfPending("dork-links", hasDorkLinkFiles(s.cfg.Paths.DorkingDir))
@@ -1132,7 +1185,7 @@ func (s *Server) clearResults() error {
 		s.cfg.Paths.RobotsDir,
 		s.cfg.Paths.DorkingDir,
 		filepath.Join(s.cfg.Paths.LogsDir, "runops"),
-		filepath.Join(baseDir, "live-webservers.csv"),
+		filepath.Join(baseDir, "live-webservers.jsonl"),
 		s.cfg.Paths.SitemapsFile,
 		"robots",
 		"fuzzing",
@@ -1151,6 +1204,7 @@ func (s *Server) clearResults() error {
 	// Remove generated scope outputs entirely; they will be recreated by relevant steps.
 	for _, generatedList := range []string{
 		s.cfg.Lists.Domains,
+		filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "domains_resolved"),
 		filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "domains_http"),
 		filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "domains_dead"),
 		s.cfg.Lists.APIDomains,
@@ -1280,8 +1334,6 @@ func (s *Server) listPath(name string) (string, error) {
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "apidomains_dead"), nil
 	case "out_of_scope":
 		return s.cfg.Lists.OutOfScope, nil
-	case "live_webservers_csv":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "live-webservers.csv"), nil
 	case "fuzzing_doc_hits":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "documentation", "doc_hits.txt"), nil
 	case "fuzzing_dir_hits":
@@ -1304,8 +1356,6 @@ func (s *Server) listPath(name string) (string, error) {
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "params", "header_hits.jsonl"), nil
 	case "param_fuzz_cookie_hits":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "params", "cookie_hits.jsonl"), nil
-	case "param_fuzz_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "params", "summary.csv"), nil
 	case "injection_sqli_hits":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "injection", "sqli_hits.jsonl"), nil
 	case "injection_nosqli_hits":
@@ -1314,16 +1364,12 @@ func (s *Server) listPath(name string) (string, error) {
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "injection", "xpath_hits.jsonl"), nil
 	case "injection_ldap_hits":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "injection", "ldap_hits.jsonl"), nil
-	case "injection_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "injection", "summary.csv"), nil
 	case "server_input_os_command_hits":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "server-input", "os_command_hits.jsonl"), nil
 	case "server_input_path_traversal_hits":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "server-input", "path_traversal_hits.jsonl"), nil
 	case "server_input_file_inclusion_hits":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "server-input", "file_inclusion_hits.jsonl"), nil
-	case "server_input_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "server-input", "summary.csv"), nil
 	case "adv_injection_xxe_hits":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "adv-injection", "xxe_hits.jsonl"), nil
 	case "adv_injection_soap_hits":
@@ -1332,76 +1378,54 @@ func (s *Server) listPath(name string) (string, error) {
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "adv-injection", "ssrf_hits.jsonl"), nil
 	case "adv_injection_smtp_hits":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "adv-injection", "smtp_hits.jsonl"), nil
-	case "adv_injection_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "adv-injection", "summary.csv"), nil
 	case "csrf_candidates":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "csrf", "candidates.jsonl"), nil
 	case "csrf_findings":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "csrf", "findings.jsonl"), nil
 	case "csrf_replay_log":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "csrf", "replay_log.jsonl"), nil
-	case "csrf_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "csrf", "summary.csv"), nil
 	case "clickjacking_headers":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "clickjacking", "headers.jsonl"), nil
 	case "clickjacking_findings":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "clickjacking", "findings.jsonl"), nil
-	case "clickjacking_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "clickjacking", "summary.csv"), nil
 	case "cors_replay_log":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "cors", "replay_log.jsonl"), nil
 	case "cors_findings":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "cors", "findings.jsonl"), nil
-	case "cors_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "cors", "summary.csv"), nil
 	case "open_redirect_candidates":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "open-redirect", "candidates.jsonl"), nil
 	case "open_redirect_replay_log":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "open-redirect", "replay_log.jsonl"), nil
 	case "open_redirect_findings":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "open-redirect", "findings.jsonl"), nil
-	case "open_redirect_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "open-redirect", "summary.csv"), nil
 	case "workflow_logic_candidates":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "workflow-logic", "candidates.jsonl"), nil
 	case "workflow_logic_findings":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "workflow-logic", "findings.jsonl"), nil
 	case "workflow_logic_replay_log":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "workflow-logic", "replay_log.jsonl"), nil
-	case "workflow_logic_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "workflow-logic", "summary.csv"), nil
 	case "smuggling_stack_tool_runs":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "smuggling-stack", "tool_runs.jsonl"), nil
 	case "smuggling_stack_findings":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "smuggling-stack", "findings.jsonl"), nil
-	case "smuggling_stack_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "smuggling-stack", "summary.csv"), nil
 	case "nmap_targets":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "nmap", "targets.txt"), nil
 	case "nmap_services":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "nmap", "services.csv"), nil
 	case "nmap_searchsploit":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "nmap", "searchsploit.txt"), nil
-	case "nmap_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "nmap", "summary.csv"), nil
 	case "nuclei_findings":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "nuclei", "findings.jsonl"), nil
-	case "nuclei_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "nuclei", "summary.csv"), nil
 	case "tier_isolation_ip_map":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "tier-isolation", "ip_map.jsonl"), nil
 	case "tier_isolation_findings":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "tier-isolation", "findings.jsonl"), nil
-	case "tier_isolation_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "tier-isolation", "summary.csv"), nil
 	case "static_review_semgrep":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "static-review", "semgrep.json"), nil
 	case "static_review_gosec":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "static-review", "gosec.json"), nil
 	case "static_review_correlated":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "static-review", "correlated_findings.jsonl"), nil
-	case "static_review_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "static-review", "summary.csv"), nil
 	case "runops_scorecard_json":
 		return filepath.Join(s.cfg.Paths.LogsDir, "runops", "scorecard.json"), nil
 	case "runops_scorecard_md":
@@ -1412,8 +1436,6 @@ func (s *Server) listPath(name string) (string, error) {
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "xss", "dom_hits.jsonl"), nil
 	case "xss_stored_hits":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "xss", "stored_hits.jsonl"), nil
-	case "xss_summary":
-		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "xss", "summary.csv"), nil
 	case "xss_scan_log":
 		return filepath.Join(filepath.Dir(s.cfg.Lists.Domains), "fuzzing", "xss", "scan.log"), nil
 	default:
@@ -1472,48 +1494,28 @@ func readListLines(path string) []string {
 	return lines
 }
 
-func readLiveWebserversCSV(path string) ([]liveWebserverRow, error) {
+func readLiveWebserversJSONL(path string) ([]liveWebserverRow, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	r := csv.NewReader(f)
-	records, err := r.ReadAll()
-	if err != nil {
-		return nil, err
-	}
-	if len(records) <= 1 {
-		return nil, nil
-	}
-
 	var out []liveWebserverRow
-	for i := 1; i < len(records); i++ {
-		rec := records[i]
-		if len(rec) < 6 {
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
 			continue
 		}
-		statusCode, _ := strconv.Atoi(strings.TrimSpace(rec[1]))
-		contentLength, _ := strconv.Atoi(strings.TrimSpace(rec[5]))
-		tech := strings.TrimSpace(rec[4])
-		var techs []string
-		if tech != "" {
-			for _, t := range strings.Split(tech, ";") {
-				t = strings.TrimSpace(t)
-				if t != "" {
-					techs = append(techs, t)
-				}
-			}
+		var row liveWebserverRow
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			continue
 		}
-		out = append(out, liveWebserverRow{
-			URL:           strings.TrimSpace(rec[0]),
-			StatusCode:    statusCode,
-			Title:         strings.TrimSpace(rec[2]),
-			WebServer:     strings.TrimSpace(rec[3]),
-			Technologies:  techs,
-			ContentLength: contentLength,
-		})
+		out = append(out, row)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

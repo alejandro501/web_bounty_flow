@@ -628,7 +628,18 @@
         <div class="modal-panel">
           <div class="modal-header">
             <h3>Live Web Servers</h3>
-            <button id="close-live-webservers" type="button">Close</button>
+            <div class="modal-actions">
+              <div class="export-menu-wrap">
+                <button id="export-live-webservers" type="button">Export</button>
+                <div id="live-webservers-export-menu" class="export-menu" hidden>
+                  <button type="button" data-export-format="csv">CSV</button>
+                  <button type="button" data-export-format="json">JSON</button>
+                  <button type="button" data-export-format="txt" disabled>TXT</button>
+                  <button type="button" data-export-format="md">Markdown</button>
+                </div>
+              </div>
+              <button id="close-live-webservers" type="button">Close</button>
+            </div>
           </div>
           <div class="modal-filters">
             <input id="lws-search-url" type="text" placeholder="Search URL..." />
@@ -663,7 +674,15 @@
           <div class="modal-header">
             <h3>Amass Enum</h3>
             <div class="modal-actions">
-              <button id="export-amass-enum" type="button">Export</button>
+              <div class="export-menu-wrap">
+                <button id="export-amass-enum" type="button">Export</button>
+                <div id="amass-enum-export-menu" class="export-menu" hidden>
+                  <button type="button" data-export-format="csv">CSV</button>
+                  <button type="button" data-export-format="json">JSON</button>
+                  <button type="button" data-export-format="txt" disabled>TXT</button>
+                  <button type="button" data-export-format="md">Markdown</button>
+                </div>
+              </div>
               <button id="close-amass-enum" type="button">Close</button>
             </div>
           </div>
@@ -696,10 +715,11 @@
             <div class="modal-actions">
               <div class="export-menu-wrap">
                 <button id="open-file-viewer-export" type="button">Export</button>
-                <div id="file-viewer-export-menu" class="export-menu" hidden>
+              <div id="file-viewer-export-menu" class="export-menu" hidden>
                   <button type="button" data-export-format="csv">CSV</button>
                   <button type="button" data-export-format="json">JSON</button>
                   <button type="button" data-export-format="txt">TXT</button>
+                  <button type="button" data-export-format="md">Markdown</button>
                 </div>
               </div>
               <button id="edit-file-viewer" type="button">Edit</button>
@@ -708,11 +728,19 @@
             </div>
           </div>
           <p id="file-viewer-description" class="muted">Open, inspect, edit, and export this artifact.</p>
+          <div id="file-viewer-filters" class="modal-filters" hidden>
+            <select id="param-fuzz-baseline-filter">
+              <option value="">All baseline status codes</option>
+            </select>
+            <select id="param-fuzz-mutated-filter">
+              <option value="">All mutated status codes</option>
+            </select>
+          </div>
           <textarea id="file-viewer-editor" class="notes-editor" rows="22" hidden></textarea>
           <div id="file-viewer-content" class="log-view log-view--tall">Loading...</div>
         </div>
       </div>
     </main>
-    <script src="app.js?v=20260310-3"></script>
+    <script type="module" src="app.js?v=20260315-2"></script>
   </body>
 </html>

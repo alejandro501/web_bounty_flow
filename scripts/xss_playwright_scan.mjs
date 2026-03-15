@@ -41,12 +41,6 @@ async function writeJSONL(filePath, rows) {
   await fs.writeFile(filePath, content ? `${content}\n` : "", "utf8");
 }
 
-async function writeSummaryCSV(filePath, data) {
-  const lines = ["metric,value"];
-  Object.entries(data).forEach(([k, v]) => lines.push(`${k},${v}`));
-  await fs.writeFile(filePath, `${lines.join("\n")}\n`, "utf8");
-}
-
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const target = String(args.target || "").trim();
@@ -232,7 +226,7 @@ async function main() {
   await writeJSONL(path.join(outDir, "dom_hits.jsonl"), domHits);
   await writeJSONL(path.join(outDir, "stored_hits.jsonl"), storedHits);
   await fs.writeFile(path.join(outDir, "visited_urls.txt"), `${[...visited].join("\n")}\n`, "utf8");
-  await writeSummaryCSV(path.join(outDir, "summary.csv"), {
+  console.log(JSON.stringify({
     target,
     visited_pages: visited.size,
     discovered_urls: discovered.size,
@@ -242,7 +236,7 @@ async function main() {
     reflected_hits: reflectedHits.length,
     dom_hits: domHits.length,
     stored_hits: storedHits.length,
-  });
+  }));
 
   await context.close();
   await browser.close();

@@ -144,7 +144,6 @@ type App struct {
 	cfg          *config.Config
 	logger       *log.Logger
 	httpClient   *http.Client
-	liveCSVPath  string
 	logWriter    io.Writer
 	stepUpdate   func(id string, status StepStatus)
 	configStore  *configstore.Store
@@ -1002,6 +1001,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 	sort.Strings(mergedHosts)
 
 	validatedHosts := mergedHosts
+	validatedHostsPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "domains_resolved")
 	if _, err := exec.LookPath("dnsx"); err != nil {
 		a.skipStep(StepDNSX)
 		a.logger.Printf("%s: skipped (binary not found)", StepDNSX)
@@ -1030,12 +1030,12 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 	}
 
 	if err := a.runStep(StepConsolidate, func() error {
-		tmpFile, err := os.CreateTemp("", "bflow-consolidate-raw-")
+		tmpFile, err := os.CreateTemp("", "bflow-consolidate-all-")
 		if err != nil {
 			return err
 		}
 		defer os.Remove(tmpFile.Name())
-		if _, err := tmpFile.WriteString(strings.Join(validatedHosts, "\n")); err != nil {
+		if _, err := tmpFile.WriteString(strings.Join(mergedHosts, "\n")); err != nil {
 			tmpFile.Close()
 			return err
 		}
@@ -1045,10 +1045,26 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		if err := a.runShell(ctx, fmt.Sprintf("cat %s | awk 'NF' | sort -fu > %s", tmpFile.Name(), a.cfg.Lists.Domains)); err != nil {
 			return err
 		}
+		validatedTmpFile, err := os.CreateTemp("", "bflow-consolidate-resolved-")
+		if err != nil {
+			return err
+		}
+		defer os.Remove(validatedTmpFile.Name())
+		if _, err := validatedTmpFile.WriteString(strings.Join(validatedHosts, "\n")); err != nil {
+			validatedTmpFile.Close()
+			return err
+		}
+		if err := validatedTmpFile.Close(); err != nil {
+			return err
+		}
+		if err := a.runShell(ctx, fmt.Sprintf("cat %s | awk 'NF' | sort -fu > %s", validatedTmpFile.Name(), validatedHostsPath)); err != nil {
+			return err
+		}
 		if err := a.generateAPIDomainsFromDomains(); err != nil {
 			return err
 		}
 		a.logger.Printf("consolidate: wrote %d unique domain(s) to %s", len(readSafeLines(a.cfg.Lists.Domains)), a.cfg.Lists.Domains)
+		a.logger.Printf("consolidate: wrote %d DNS-resolved domain(s) to %s", len(readSafeLines(validatedHostsPath)), validatedHostsPath)
 		a.logger.Printf("consolidate: wrote %d API-related domain(s) to %s", len(readSafeLines(a.cfg.Lists.APIDomains)), a.cfg.Lists.APIDomains)
 		return nil
 	}); err != nil {
@@ -1865,11 +1881,7 @@ func (a *App) runCSRFChecks(ctx context.Context) error {
 		})
 	}
 
-	summaryPath := filepath.Join(outDir, "summary.csv")
-	if err := a.writeCSRFSummary(summaryPath, metrics); err != nil {
-		return err
-	}
-	a.logger.Printf("%s: summary written to %s", StepCSRFChecks, summaryPath)
+	a.logger.Printf("%s: candidates=%d tested=%d findings=%d", StepCSRFChecks, metrics["candidates"], metrics["tested"], metrics["potential_findings"])
 	return nil
 }
 
@@ -1997,19 +2009,7 @@ func (a *App) runClickjackingChecks(ctx context.Context) error {
 		})
 	}
 
-	summaryPath := filepath.Join(outDir, "summary.csv")
-	if err := writeMetricSummaryCSV(summaryPath, []string{
-		"targets_tested",
-		"protected",
-		"potential_findings",
-		"missing_x_frame_options",
-		"missing_frame_ancestors",
-		"weak_x_frame_options",
-		"weak_frame_ancestors",
-	}, metrics); err != nil {
-		return err
-	}
-	a.logger.Printf("%s: summary written to %s", StepClickjacking, summaryPath)
+	a.logger.Printf("%s: targets=%d protected=%d findings=%d", StepClickjacking, metrics["targets_tested"], metrics["protected"], metrics["potential_findings"])
 	return nil
 }
 
@@ -2158,19 +2158,7 @@ func (a *App) runCORSChecks(ctx context.Context) error {
 		})
 	}
 
-	summaryPath := filepath.Join(outDir, "summary.csv")
-	if err := writeMetricSummaryCSV(summaryPath, []string{
-		"endpoints_tested",
-		"responses_with_acao",
-		"reflected_origin",
-		"wildcard_origin",
-		"null_origin",
-		"credentialed",
-		"potential_findings",
-	}, metrics); err != nil {
-		return err
-	}
-	a.logger.Printf("%s: summary written to %s", StepCORSChecks, summaryPath)
+	a.logger.Printf("%s: endpoints=%d findings=%d reflected=%d wildcard=%d", StepCORSChecks, metrics["endpoints_tested"], metrics["potential_findings"], metrics["reflected_origin"], metrics["wildcard_origin"])
 	return nil
 }
 
@@ -2294,17 +2282,7 @@ func (a *App) runOpenRedirectChecks(ctx context.Context) error {
 		}
 	}
 
-	summaryPath := filepath.Join(outDir, "summary.csv")
-	if err := writeMetricSummaryCSV(summaryPath, []string{
-		"candidates",
-		"payload_replays",
-		"external_redirects",
-		"potential_findings",
-		"chain_signal_findings",
-	}, metrics); err != nil {
-		return err
-	}
-	a.logger.Printf("%s: summary written to %s", StepOpenRedirect, summaryPath)
+	a.logger.Printf("%s: candidates=%d replays=%d findings=%d", StepOpenRedirect, metrics["candidates"], metrics["payload_replays"], metrics["potential_findings"])
 	return nil
 }
 
@@ -2445,18 +2423,7 @@ func (a *App) runWorkflowLogicChecks(ctx context.Context) error {
 		})
 	}
 
-	summaryPath := filepath.Join(outDir, "summary.csv")
-	if err := writeMetricSummaryCSV(summaryPath, []string{
-		"candidates",
-		"tested",
-		"replay_requests",
-		"step_skip_signals",
-		"sequence_bypass_signal",
-		"potential_findings",
-	}, metrics); err != nil {
-		return err
-	}
-	a.logger.Printf("%s: summary written to %s", StepWorkflowLogic, summaryPath)
+	a.logger.Printf("%s: candidates=%d tested=%d findings=%d", StepWorkflowLogic, metrics["candidates"], metrics["tested"], metrics["potential_findings"])
 	return nil
 }
 
@@ -2582,21 +2549,7 @@ func (a *App) runSmugglingStackChecks(ctx context.Context) error {
 		})
 	}
 
-	summaryPath := filepath.Join(outDir, "summary.csv")
-	if err := writeMetricSummaryCSV(summaryPath, []string{
-		"targets",
-		"tools_available",
-		"tools_executed",
-		"tools_failed",
-		"request_smuggling_hits",
-		"hop_by_hop_hits",
-		"h2c_hits",
-		"ssi_esi_hits",
-		"potential_findings",
-	}, metrics); err != nil {
-		return err
-	}
-	a.logger.Printf("%s: summary written to %s", StepSmugglingStack, summaryPath)
+	a.logger.Printf("%s: targets=%d tools_executed=%d findings=%d", StepSmugglingStack, metrics["targets"], metrics["tools_executed"], metrics["potential_findings"])
 	return nil
 }
 
@@ -2622,9 +2575,8 @@ func (a *App) runNmapEnrichmentChecks(ctx context.Context) error {
 		"searchsploit_lines":          0,
 	}
 	if len(targets) == 0 {
-		return writeMetricSummaryCSV(filepath.Join(outDir, "summary.csv"), []string{
-			"targets", "open_service_rows", "unique_service_fingerprints", "searchsploit_lines",
-		}, metrics)
+		a.logger.Printf("%s: no targets available", StepNmapEnrich)
+		return nil
 	}
 
 	prefix := filepath.Join(outDir, "scan")
@@ -2655,16 +2607,7 @@ func (a *App) runNmapEnrichmentChecks(ctx context.Context) error {
 		metrics["searchsploit_lines"] = countNonEmptyLines(ssStdout)
 	}
 
-	summaryPath := filepath.Join(outDir, "summary.csv")
-	if err := writeMetricSummaryCSV(summaryPath, []string{
-		"targets",
-		"open_service_rows",
-		"unique_service_fingerprints",
-		"searchsploit_lines",
-	}, metrics); err != nil {
-		return err
-	}
-	a.logger.Printf("%s: summary written to %s", StepNmapEnrich, summaryPath)
+	a.logger.Printf("%s: targets=%d services=%d fingerprints=%d", StepNmapEnrich, metrics["targets"], metrics["open_service_rows"], metrics["unique_service_fingerprints"])
 	return nil
 }
 
@@ -2697,19 +2640,9 @@ func (a *App) runNucleiScan(ctx context.Context) error {
 		"unknown":          0,
 	}
 
-	summaryPath := filepath.Join(outDir, "summary.csv")
 	if len(targets) == 0 {
-		return writeMetricSummaryCSV(summaryPath, []string{
-			"targets",
-			"findings",
-			"unique_templates",
-			"critical",
-			"high",
-			"medium",
-			"low",
-			"info",
-			"unknown",
-		}, metrics)
+		a.logger.Printf("%s: no targets available", StepNucleiScan)
+		return nil
 	}
 
 	findingsPath := filepath.Join(outDir, "findings.jsonl")
@@ -2762,20 +2695,7 @@ func (a *App) runNucleiScan(ctx context.Context) error {
 	}
 	metrics["unique_templates"] = len(templateSet)
 
-	if err := writeMetricSummaryCSV(summaryPath, []string{
-		"targets",
-		"findings",
-		"unique_templates",
-		"critical",
-		"high",
-		"medium",
-		"low",
-		"info",
-		"unknown",
-	}, metrics); err != nil {
-		return err
-	}
-	a.logger.Printf("%s: summary written to %s", StepNucleiScan, summaryPath)
+	a.logger.Printf("%s: targets=%d findings=%d templates=%d", StepNucleiScan, metrics["targets"], metrics["findings"], metrics["unique_templates"])
 	return nil
 }
 
@@ -2888,18 +2808,7 @@ func (a *App) runTierIsolationChecks(ctx context.Context) error {
 		}
 	}
 
-	summaryPath := filepath.Join(outDir, "summary.csv")
-	if err := writeMetricSummaryCSV(summaryPath, []string{
-		"domains_considered",
-		"domains_resolved",
-		"unique_ips",
-		"shared_hosting_candidates",
-		"tier_overlap_candidates",
-		"potential_findings",
-	}, metrics); err != nil {
-		return err
-	}
-	a.logger.Printf("%s: summary written to %s", StepTierIsolation, summaryPath)
+	a.logger.Printf("%s: domains=%d resolved=%d findings=%d", StepTierIsolation, metrics["domains_considered"], metrics["domains_resolved"], metrics["potential_findings"])
 	return nil
 }
 
@@ -2973,15 +2882,7 @@ func (a *App) runStaticReviewCorrelation(ctx context.Context) error {
 		_ = writeJSONLine(corrWriter, finding)
 	}
 
-	summaryPath := filepath.Join(outDir, "summary.csv")
-	if err := writeMetricSummaryCSV(summaryPath, []string{
-		"semgrep_findings",
-		"gosec_findings",
-		"correlated_findings",
-	}, metrics); err != nil {
-		return err
-	}
-	a.logger.Printf("%s: summary written to %s", StepStaticReview, summaryPath)
+	a.logger.Printf("%s: semgrep=%d gosec=%d correlated=%d", StepStaticReview, metrics["semgrep_findings"], metrics["gosec_findings"], metrics["correlated_findings"])
 	return nil
 }
 
@@ -3059,27 +2960,27 @@ func (a *App) runStageGatesScorecard(ctx context.Context) error {
 	base := a.fuzzingBaseDir()
 	gates := []gate{
 		{Chapter: "4", Name: "Mapping coverage", Required: []string{
-			filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "live-webservers.csv"),
+			filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "live-webservers.jsonl"),
 			filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "recon", "all_urls.txt"),
 		}},
 		{Chapter: "9-10", Name: "Injection coverage", Required: []string{
-			filepath.Join(base, "injection", "summary.csv"),
-			filepath.Join(base, "server-input", "summary.csv"),
-			filepath.Join(base, "adv-injection", "summary.csv"),
+			filepath.Join(base, "injection", "sqli_hits.jsonl"),
+			filepath.Join(base, "server-input", "os_command_hits.jsonl"),
+			filepath.Join(base, "adv-injection", "xxe_hits.jsonl"),
 		}},
 		{Chapter: "12-13", Name: "Client-side coverage", Required: []string{
-			filepath.Join(base, "csrf", "summary.csv"),
-			filepath.Join(base, "clickjacking", "summary.csv"),
-			filepath.Join(base, "cors", "summary.csv"),
-			filepath.Join(base, "open-redirect", "summary.csv"),
+			filepath.Join(base, "csrf", "findings.jsonl"),
+			filepath.Join(base, "clickjacking", "findings.jsonl"),
+			filepath.Join(base, "cors", "findings.jsonl"),
+			filepath.Join(base, "open-redirect", "findings.jsonl"),
 		}},
 		{Chapter: "16-18", Name: "Infra/architecture coverage", Required: []string{
-			filepath.Join(base, "smuggling-stack", "summary.csv"),
-			filepath.Join(base, "nmap", "summary.csv"),
-			filepath.Join(base, "tier-isolation", "summary.csv"),
+			filepath.Join(base, "smuggling-stack", "findings.jsonl"),
+			filepath.Join(base, "nmap", "services.csv"),
+			filepath.Join(base, "tier-isolation", "findings.jsonl"),
 		}},
 		{Chapter: "19-21", Name: "Methodology orchestration", Required: []string{
-			filepath.Join(base, "static-review", "summary.csv"),
+			filepath.Join(base, "static-review", "correlated_findings.jsonl"),
 			filepath.Join(a.cfg.Paths.LogsDir, "runops"),
 		}},
 	}
@@ -4034,7 +3935,7 @@ func collectSummaryArtifacts(baseDir string) []string {
 			return nil
 		}
 		name := strings.ToLower(strings.TrimSpace(d.Name()))
-		if name == "summary.csv" || name == "findings.jsonl" || strings.HasSuffix(name, "scorecard.json") || strings.HasSuffix(name, "scorecard.md") {
+		if name == "findings.jsonl" || strings.HasSuffix(name, "scorecard.json") || strings.HasSuffix(name, "scorecard.md") {
 			out = append(out, path)
 		}
 		return nil
@@ -4091,30 +3992,55 @@ func fileSHA256(path string) string {
 
 func writeScorecardMarkdown(path string, gates []map[string]any, completed int, total int, pct int) error {
 	var lines []string
-	lines = append(lines, "# Chapter Stage Gates Scorecard")
+	lines = append(lines, "# RunOps Scorecard")
 	lines = append(lines, "")
-	lines = append(lines, fmt.Sprintf("Completion: **%d / %d** (%d%%)", completed, total, pct))
+	lines = append(lines, fmt.Sprintf("Generated: %s", time.Now().UTC().Format(time.RFC3339)))
 	lines = append(lines, "")
-	lines = append(lines, "| Chapter | Gate | Status | Missing Evidence |")
-	lines = append(lines, "|---|---|---|---|")
+	lines = append(lines, "## Overview")
+	lines = append(lines, "")
+	lines = append(lines, fmt.Sprintf("- Completed gates: **%d / %d**", completed, total))
+	lines = append(lines, fmt.Sprintf("- Completion: **%d%%**", pct))
+	lines = append(lines, "")
+	lines = append(lines, "## Gate Status")
+	lines = append(lines, "")
+
+	grouped := make(map[string][]map[string]any)
+	var chapters []string
 	for _, gate := range gates {
-		missing := ""
-		switch m := gate["missing"].(type) {
-		case []string:
-			missing = strings.Join(m, "; ")
-		case []any:
-			var parts []string
-			for _, item := range m {
-				parts = append(parts, asAnyString(item))
-			}
-			missing = strings.Join(parts, "; ")
+		chapter := asAnyString(gate["chapter"])
+		if _, ok := grouped[chapter]; !ok {
+			chapters = append(chapters, chapter)
 		}
-		lines = append(lines, fmt.Sprintf("| %s | %s | %s | %s |",
-			asAnyString(gate["chapter"]),
-			asAnyString(gate["gate"]),
-			asAnyString(gate["status"]),
-			missing,
-		))
+		grouped[chapter] = append(grouped[chapter], gate)
+	}
+	sort.Strings(chapters)
+	for _, chapter := range chapters {
+		lines = append(lines, fmt.Sprintf("### Chapter %s", chapter))
+		lines = append(lines, "")
+		for _, gate := range grouped[chapter] {
+			status := strings.ToLower(asAnyString(gate["status"]))
+			prefix := "[ ]"
+			if status == "done" {
+				prefix = "[x]"
+			}
+			lines = append(lines, fmt.Sprintf("- %s **%s**", prefix, asAnyString(gate["gate"])))
+			var missingItems []string
+			switch m := gate["missing"].(type) {
+			case []string:
+				missingItems = append(missingItems, m...)
+			case []any:
+				for _, item := range m {
+					missingItems = append(missingItems, asAnyString(item))
+				}
+			}
+			if len(missingItems) > 0 {
+				lines = append(lines, "  Missing evidence:")
+				for _, item := range missingItems {
+					lines = append(lines, fmt.Sprintf("  - `%s`", item))
+				}
+			}
+		}
+		lines = append(lines, "")
 	}
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
 }
@@ -5148,8 +5074,13 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 		return "", nil
 	}
 
-	csvPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "live-webservers.csv")
+	jsonlPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "live-webservers.jsonl")
 	domainsHTTPPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "domains_http")
+	probeSource := a.cfg.Lists.Domains
+	resolvedPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "domains_resolved")
+	if fileExists(resolvedPath) && len(readSafeLines(resolvedPath)) > 0 {
+		probeSource = resolvedPath
+	}
 
 	stdout, err := a.runCommandCapture(
 		ctx,
@@ -5162,7 +5093,7 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 		"-tech-detect",
 		"-content-length",
 		"-l",
-		a.cfg.Lists.Domains,
+		probeSource,
 	)
 	if err != nil {
 		tmpOutput, mkErr := os.CreateTemp("", "bflow-httprobe-live-")
@@ -5173,7 +5104,7 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 		_ = tmpOutput.Close()
 		defer os.Remove(tmpOutputPath)
 
-		httprobeCmd := fmt.Sprintf("cat %s | awk '{print $1}' | httprobe -prefer-https | sort -u > %s", shellQuote(a.cfg.Lists.Domains), shellQuote(tmpOutputPath))
+		httprobeCmd := fmt.Sprintf("cat %s | awk '{print $1}' | httprobe -prefer-https | sort -u > %s", shellQuote(probeSource), shellQuote(tmpOutputPath))
 		if fallbackErr := a.runShell(ctx, httprobeCmd); fallbackErr != nil {
 			return "", fmt.Errorf("http probing failed: httpx=%v; httprobe=%v", err, fallbackErr)
 		}
@@ -5194,10 +5125,9 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 			}
 			fallbackRows = append(fallbackRows, liveWebserverRecord{URL: u})
 		}
-		if err := a.writeLiveWebserversCSV(csvPath, fallbackRows); err != nil {
+		if err := a.writeLiveWebserversJSONL(jsonlPath, fallbackRows); err != nil {
 			return "", err
 		}
-		a.liveCSVPath = csvPath
 		return domainsHTTPPath, nil
 	}
 
@@ -5221,11 +5151,9 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 	if err := a.syncProbedDomainViews(urls); err != nil {
 		return "", err
 	}
-	if err := a.writeLiveWebserversCSV(csvPath, rows); err != nil {
+	if err := a.writeLiveWebserversJSONL(jsonlPath, rows); err != nil {
 		return "", err
 	}
-
-	a.liveCSVPath = csvPath
 	return domainsHTTPPath, nil
 }
 
@@ -5440,32 +5368,22 @@ func isAPIRelatedHost(host string) bool {
 	return false
 }
 
-func (a *App) writeLiveWebserversCSV(path string, rows []liveWebserverRecord) error {
+func (a *App) writeLiveWebserversJSONL(path string, rows []liveWebserverRecord) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-
-	w := csv.NewWriter(f)
-	defer w.Flush()
-
-	if err := w.Write([]string{"url", "status_code", "title", "web_server", "technologies", "content_length"}); err != nil {
-		return err
-	}
 	for _, row := range rows {
-		if err := w.Write([]string{
-			row.URL,
-			strconv.Itoa(row.StatusCode),
-			row.Title,
-			row.WebServer,
-			strings.Join(row.Technologies, "; "),
-			strconv.Itoa(row.ContentLength),
-		}); err != nil {
+		raw, err := json.Marshal(row)
+		if err != nil {
+			return err
+		}
+		if _, err := f.Write(append(raw, '\n')); err != nil {
 			return err
 		}
 	}
-	return w.Error()
+	return nil
 }
 
 func asString(v any) string {

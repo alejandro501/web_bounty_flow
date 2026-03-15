@@ -849,11 +849,41 @@ main {
 }
 
 .manual-recon__answer-item {
+  position: relative;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
-  padding: 0.5rem 0.6rem;
+  padding: 0.5rem 2.2rem 0.5rem 0.6rem;
   margin-bottom: 0.45rem;
   background: rgba(255, 255, 255, 0.03);
+}
+
+.manual-recon__answer-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.manual-recon__answer-delete {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.manual-recon__answer-delete:hover,
+.manual-recon__answer-delete:focus-visible {
+  color: #fff;
+  background: rgba(225, 6, 44, 0.22);
+  border-color: rgba(225, 6, 44, 0.45);
 }
 
 .manual-recon__answer-item small {
@@ -1545,6 +1575,11 @@ button:active {
 .file-viewer-table-wrap {
   margin-top: 0;
   max-height: 70vh;
+}
+
+#file-viewer-filters {
+  margin-top: 0.8rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 #file-viewer-editor {

@@ -62,15 +62,7 @@ func (a *App) runParamFuzz(ctx context.Context) error {
 	if len(endpoints) == 0 {
 		a.logger.Printf("%s: no eligible endpoints in %s", StepParamFuzz, allURLsPath)
 		_ = os.WriteFile(filepath.Join(reconDir, "params_candidates.txt"), []byte{}, 0o644)
-		return a.writeParamFuzzSummary(filepath.Join(paramsDir, "summary.csv"), map[string]struct {
-			requests int
-			hits     int
-		}{
-			"query":  {},
-			"body":   {},
-			"header": {},
-			"cookie": {},
-		})
+		return nil
 	}
 	if len(endpoints) > paramFuzzMaxEndpoints {
 		a.logger.Printf("%s: limiting endpoints from %d to %d for safe runtime", StepParamFuzz, len(endpoints), paramFuzzMaxEndpoints)
@@ -324,11 +316,6 @@ func (a *App) runParamFuzz(ctx context.Context) error {
 		}
 	}
 
-	summaryPath := filepath.Join(paramsDir, "summary.csv")
-	if err := a.writeParamFuzzSummary(summaryPath, metrics); err != nil {
-		return err
-	}
-	a.logger.Printf("%s: summary written to %s", StepParamFuzz, summaryPath)
 	for mode, data := range metrics {
 		a.logger.Printf("%s: mode=%s requests=%d hits=%d", StepParamFuzz, mode, data.requests, data.hits)
 	}
@@ -512,11 +499,6 @@ func (a *App) runInjectionChecks(ctx context.Context) error {
 		}
 	}
 
-	summaryPath := filepath.Join(injectionDir, "summary.csv")
-	if err := a.writeInjectionSummary(summaryPath, metrics); err != nil {
-		return err
-	}
-	a.logger.Printf("%s: summary written to %s", StepInjectionCheck, summaryPath)
 	for family, row := range metrics {
 		a.logger.Printf("%s: family=%s requests=%d hits=%d", StepInjectionCheck, family, row.requests, row.hits)
 	}
@@ -659,11 +641,6 @@ func (a *App) runServerInputChecks(ctx context.Context) error {
 		}
 	}
 
-	summaryPath := filepath.Join(outDir, "summary.csv")
-	if err := a.writeServerInputSummary(summaryPath, metrics); err != nil {
-		return err
-	}
-	a.logger.Printf("%s: summary written to %s", StepServerInputChk, summaryPath)
 	for family, row := range metrics {
 		a.logger.Printf("%s: family=%s requests=%d hits=%d", StepServerInputChk, family, row.requests, row.hits)
 	}
@@ -826,11 +803,6 @@ func (a *App) runAdvancedInjectionChecks(ctx context.Context) error {
 		}
 	}
 
-	summaryPath := filepath.Join(outDir, "summary.csv")
-	if err := a.writeAdvInjectionSummary(summaryPath, metrics); err != nil {
-		return err
-	}
-	a.logger.Printf("%s: summary written to %s", StepAdvInjection, summaryPath)
 	for family, row := range metrics {
 		a.logger.Printf("%s: family=%s requests=%d hits=%d", StepAdvInjection, family, row.requests, row.hits)
 	}
