@@ -152,7 +152,7 @@ export function initManualDomainFeature({
 
   async function refreshManualXSSStatus() {
     try {
-      const response = await fetch(`${backendUrl}/api/manual/xss-status`);
+      const response = await fetch(`${backendUrl}/api/manual/xss/status`);
       if (!response.ok) {
         throw new Error(await response.text());
       }
@@ -307,7 +307,7 @@ export function initManualDomainFeature({
         manualXSSStatus.textContent = "Starting manual XSS scan...";
       }
       try {
-        const response = await fetch(`${backendUrl}/api/manual/xss-run`, {
+        const response = await fetch(`${backendUrl}/api/manual/xss/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ domain: selected, target, auth_header: authHeader }),

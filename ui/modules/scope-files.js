@@ -172,20 +172,15 @@ export function initScopeFilesFeature({
       });
   }
 
-  function isParamFuzzHitsType(type) {
-    return [
-      "param_fuzz_query_hits",
-      "param_fuzz_body_hits",
-      "param_fuzz_header_hits",
-      "param_fuzz_cookie_hits",
-    ].includes(String(type || "").trim());
+  function isHopByHopDifferingStatusType(type) {
+    return String(type || "").trim() === "smuggling_stack_findings";
   }
 
-  function updateParamFuzzFilterOptions(rows) {
+  function updateHopByHopFilterOptions(rows) {
     if (!fileViewerFilters || !paramFuzzBaselineFilter || !paramFuzzMutatedFilter) {
       return;
     }
-    const enabled = isParamFuzzHitsType(currentFileModalType) && Array.isArray(rows) && rows.length > 0;
+    const enabled = isHopByHopDifferingStatusType(currentFileModalType) && Array.isArray(rows) && rows.length > 0;
     fileViewerFilters.hidden = !enabled || fileViewerEditing;
     if (!enabled) {
       return;
@@ -208,7 +203,7 @@ export function initScopeFilesFeature({
     return (value || "").toString().toLowerCase().trim();
   }
 
-  function getFilteredParamFuzzRows(rows) {
+  function getFilteredHopByHopRows(rows) {
     const baselineNeedle = normalizeFilterValue(paramFuzzBaselineFilter?.value);
     const mutatedNeedle = normalizeFilterValue(paramFuzzMutatedFilter?.value);
     return (rows || []).filter((row) => (
@@ -276,7 +271,7 @@ export function initScopeFilesFeature({
       fileViewerExportMenu.hidden = true;
     }
     if (fileViewerFilters) {
-      fileViewerFilters.hidden = fileViewerEditing || !isParamFuzzHitsType(currentFileModalType) || currentFileModalRows.length === 0;
+      fileViewerFilters.hidden = fileViewerEditing || !isHopByHopDifferingStatusType(currentFileModalType) || currentFileModalRows.length === 0;
     }
   }
 
@@ -285,7 +280,7 @@ export function initScopeFilesFeature({
     currentFileModalRows = parsed.rows;
     currentFileModalColumns = parsed.columns;
     applyFileViewerExportFormatOptions(parsed.ok);
-    updateParamFuzzFilterOptions(parsed.rows);
+    updateHopByHopFilterOptions(parsed.rows);
 
     if (!fileViewerContent) {
       return;
@@ -306,8 +301,8 @@ export function initScopeFilesFeature({
     }
 
     fileViewerContent.classList.add("log-view--table");
-    if (isParamFuzzHitsType(currentFileModalType)) {
-      const filteredRows = getFilteredParamFuzzRows(parsed.rows);
+    if (isHopByHopDifferingStatusType(currentFileModalType)) {
+      const filteredRows = getFilteredHopByHopRows(parsed.rows);
       fileViewerContent.innerHTML = renderStructuredTable(filteredRows, parsed.columns, {
         rowClass: (row) => {
           const statusClass = statusCodeClass(row?.mutated_status_code);
@@ -374,7 +369,7 @@ export function initScopeFilesFeature({
         .replace(/[^a-z0-9]+/g, "_")
         .replace(/^_+|_+$/g, "");
       if (parsed.ok) {
-        const rows = isParamFuzzHitsType(type) ? getFilteredParamFuzzRows(parsed.rows) : parsed.rows;
+        const rows = isHopByHopDifferingStatusType(type) ? getFilteredHopByHopRows(parsed.rows) : parsed.rows;
         exportStructuredRows(rows, parsed.columns, base || "export", exportFormat, currentFileModalLabel || type || "Export", normalizeTableCellValue);
         return;
       }

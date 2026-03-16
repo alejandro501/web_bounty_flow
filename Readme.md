@@ -37,7 +37,7 @@ go test ./...
 rg -n "TODO|FIXME" .
 ```
 
-## 2. Steps (Brief)
+## 2. Steps
 1. **Input + validation**: load scope files (`wildcards`, `domains`, `organizations`, `out-of-scope`) and verify prerequisites.
 2. **Subdomain discovery**: run passive tools (e.g., `subfinder`, `assetfinder`, `amass`, etc.), merge and deduplicate domains.
 3. **HTTP probing + API extraction**: identify live web targets (`domains_http`) and API-like live targets (`apidomains_http`).
