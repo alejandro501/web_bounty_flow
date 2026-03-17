@@ -1,5 +1,6 @@
 export const FILE_EXPLANATIONS = {
   wildcards: "Root scope domains you provided (e.g., example.com). Recon tools expand these into discovered subdomains.",
+  regex_wildcards: "Burp-ready regex host patterns generated from your wildcard roots. Each entry matches the apex domain and its subdomains.",
   domains: "All discovered domains/subdomains in scope before HTTP liveness filtering.",
   domains_http: "Live HTTP(S) domains that responded to probing; these are primary attack targets.",
   domains_dead: "Discovered domains that did not respond to HTTP probing (useful for passive review only).",
@@ -65,6 +66,7 @@ export const FILE_EXPLANATIONS = {
 
 export const LIST_FILES = [
   { type: "wildcards", label: "Wildcards", uploadable: true },
+  { type: "regex_wildcards", label: "Regex Wildcards", uploadable: false },
   { type: "domains", label: "All Domains", uploadable: true },
   { type: "domains_http", label: "HTTP Domains", uploadable: false },
   { type: "domains_dead", label: "Dead Domains", uploadable: false },

@@ -1,4 +1,10 @@
 # starting tips
+
+## [burp]
+
+### regex wildcard syntax
+-  ^.*\.domain\.com$
+
 ## [xss]
 - basic payload: ` <u>test123</u> ` 
 - urlencoded:    ` %3Cu%3E%3Ch3%3Etest123%3C%2Fh3%3E%3C%2Fu%3E `

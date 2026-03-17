@@ -1,9 +1,10 @@
 import { downloadTextExport, exportStructuredRows, linesToMarkdown } from "./modules/export-utils.js";
 import { initDiscoveryTablesFeature } from "./modules/discovery-tables.js";
 import { initConfigNetworkFeature } from "./modules/config-network.js";
+import { initCookieAuthFeature } from "./modules/cookie-auth.js?v=20260317-2";
 import { initLeadsChaosFeature } from "./modules/leads-chaos.js";
 import { initManualDomainFeature } from "./modules/manual-domain.js";
-import { initNotesFeature } from "./modules/notes.js";
+import { initNotesFeature } from "./modules/notes.js?v=20260317-2";
 import { initScopeFilesFeature } from "./modules/scope-files.js";
 import { initStrideFeature } from "./modules/stride.js";
 import { initFlowRuntimeFeature } from "./modules/flow-runtime.js";
@@ -49,6 +50,14 @@ const notesEditor = document.getElementById("notes-editor");
 const notesSave = document.getElementById("notes-save");
 const notesStatus = document.getElementById("notes-status");
 const notesPreview = document.getElementById("notes-preview");
+const cookieRows = document.getElementById("cookie-pairs");
+const cookieAddRow = document.getElementById("cookie-add-row");
+const cookieSave = document.getElementById("cookie-save");
+const cookieStatus = document.getElementById("cookie-status");
+const authEditor = document.getElementById("auth-editor");
+const authSave = document.getElementById("auth-save");
+const authStatus = document.getElementById("auth-status");
+const authPreview = document.getElementById("auth-preview");
 const manualTipsEditor = document.getElementById("manual-tips-editor");
 const manualTipsSave = document.getElementById("manual-tips-save");
 const manualTipsStatus = document.getElementById("manual-tips-status");
@@ -73,8 +82,7 @@ const fileViewerTitle = document.getElementById("file-viewer-title");
 const fileViewerDescription = document.getElementById("file-viewer-description");
 const fileViewerContent = document.getElementById("file-viewer-content");
 const fileViewerFilters = document.getElementById("file-viewer-filters");
-const paramFuzzBaselineFilter = document.getElementById("param-fuzz-baseline-filter");
-const paramFuzzMutatedFilter = document.getElementById("param-fuzz-mutated-filter");
+const hopByHopStatusFilter = document.getElementById("hop-by-hop-status-filter");
 const closeFileViewer = document.getElementById("close-file-viewer");
 const openFileViewerExport = document.getElementById("open-file-viewer-export");
 const fileViewerExportMenu = document.getElementById("file-viewer-export-menu");
@@ -126,6 +134,18 @@ const notesFeature = initNotesFeature({
   manualTipsStatus,
   manualTipsPreview,
 });
+const cookieAuthFeature = initCookieAuthFeature({
+  backendUrl: BACKEND_URL,
+  escapeHTML,
+  cookieRows,
+  cookieAddRow,
+  cookieSave,
+  cookieStatus,
+  authEditor,
+  authSave,
+  authStatus,
+  authPreview,
+});
 const discoveryTablesFeature = initDiscoveryTablesFeature({
   escapeHTML,
   normalizeFilterValue,
@@ -175,8 +195,7 @@ const scopeFilesFeature = initScopeFilesFeature({
   fileViewerDescription,
   fileViewerContent,
   fileViewerFilters,
-  paramFuzzBaselineFilter,
-  paramFuzzMutatedFilter,
+  hopByHopStatusFilter,
   closeFileViewer,
   openFileViewerExport,
   fileViewerExportMenu,
@@ -375,6 +394,7 @@ menuItems.forEach((item) => {
       void configNetworkFeature.loadFlowConfig();
     }
     notesFeature.activateView(view);
+    cookieAuthFeature.activateView(view);
   });
 });
 

@@ -16,6 +16,7 @@
           <button class="menu-item" data-view="leads">Leads</button>
           <button class="menu-item" data-view="chaos">Chaos</button>
           <button class="menu-item" data-view="stride">STRIDE Threat Model</button>
+          <button class="menu-item" data-view="cookie-auth">Cookie &amp; Auth</button>
           <button class="menu-item" data-view="notes">Notes</button>
           <button class="menu-item" data-view="manual-tips">Manual Tips</button>
           <button class="menu-item" data-view="config">Configuration</button>
@@ -538,6 +539,47 @@
         </section>
       </section>
 
+      <section class="view view-cookie-auth">
+        <h2 class="page-title">Cookie &amp; Auth</h2>
+        <div class="cookie-auth-stack">
+          <details class="panel notes-panel cookie-auth-panel" open>
+            <summary class="cookie-auth-panel__summary">
+              <span>Cookies</span>
+              <span class="muted"><code>_notes/cookie.md</code></span>
+            </summary>
+            <div class="cookie-auth-panel__body">
+              <div class="notes-toolbar">
+                <span class="muted">Synchronized with <code>_notes/cookie.md</code></span>
+                <div class="cookie-auth-actions">
+                  <button id="cookie-add-row" type="button">Add Cookie</button>
+                  <button id="cookie-save" type="button">Save</button>
+                </div>
+              </div>
+              <div id="cookie-pairs" class="cookie-pairs"></div>
+              <p id="cookie-status" class="muted">Loading...</p>
+            </div>
+          </details>
+
+          <details class="panel notes-panel cookie-auth-panel" open>
+            <summary class="cookie-auth-panel__summary">
+              <span>Auth</span>
+              <span class="muted"><code>_notes/auth.md</code></span>
+            </summary>
+            <div class="cookie-auth-panel__body">
+              <div class="notes-toolbar">
+                <span class="muted">Synchronized with <code>_notes/auth.md</code></span>
+                <button id="auth-save" type="button">Save</button>
+              </div>
+              <div class="notes-layout">
+                <textarea id="auth-editor" class="notes-editor" rows="20" placeholder="Capture auth notes in Markdown..."></textarea>
+                <article id="auth-preview" class="notes-preview markdown-preview"></article>
+              </div>
+              <p id="auth-status" class="muted">Loading...</p>
+            </div>
+          </details>
+        </div>
+      </section>
+
       <section class="view view-manual-tips">
         <h2 class="page-title">Useful Manual Tips</h2>
         <section class="panel notes-panel">
@@ -730,11 +772,8 @@
           </div>
           <p id="file-viewer-description" class="muted">Open, inspect, edit, and export this artifact.</p>
           <div id="file-viewer-filters" class="modal-filters" hidden>
-            <select id="param-fuzz-baseline-filter">
-              <option value="">All baseline status codes</option>
-            </select>
-            <select id="param-fuzz-mutated-filter">
-              <option value="">All mutated status codes</option>
+            <select id="hop-by-hop-status-filter">
+              <option value="">All hop-by-hop status codes</option>
             </select>
           </div>
           <textarea id="file-viewer-editor" class="notes-editor" rows="22" hidden></textarea>

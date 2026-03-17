@@ -204,6 +204,9 @@ func (a *App) Run(ctx context.Context) error {
 	if err := a.normalizeLegacyListFiles(); err != nil {
 		return err
 	}
+	if err := a.generateRegexWildcardsFile(); err != nil {
+		return err
+	}
 
 	if err := a.runStep(StepValidateInputs, func() error {
 		return a.validateReconInputs()
@@ -541,6 +544,29 @@ func (a *App) normalizeLegacyListFiles() error {
 		}
 	}
 
+	return nil
+}
+
+func (a *App) generateRegexWildcardsFile() error {
+	dest := filepath.Join(filepath.Dir(a.cfg.Lists.Wildcards), "regex_wildcards")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+
+	roots := normalizeRootDomains(readSafeLines(a.cfg.Lists.Wildcards))
+	lines := make([]string, 0, len(roots))
+	for _, root := range roots {
+		lines = append(lines, fmt.Sprintf("(^|\\.)%s$", regexp.QuoteMeta(root)))
+	}
+
+	content := strings.Join(lines, "\n")
+	if len(lines) > 0 {
+		content += "\n"
+	}
+	if err := os.WriteFile(dest, []byte(content), 0o644); err != nil {
+		return err
+	}
+	a.logger.Printf("generated burp regex wildcards file with %d pattern(s): %s", len(lines), dest)
 	return nil
 }
 

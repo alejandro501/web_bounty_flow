@@ -1320,6 +1320,8 @@ func (s *Server) listPath(name string) (string, error) {
 		return s.cfg.Lists.IPs, nil
 	case "wildcards":
 		return s.cfg.Lists.Wildcards, nil
+	case "regex_wildcards":
+		return filepath.Join(filepath.Dir(s.cfg.Lists.Wildcards), "regex_wildcards"), nil
 	case "domains":
 		return s.cfg.Lists.Domains, nil
 	case "domains_http":

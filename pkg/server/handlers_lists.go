@@ -207,6 +207,10 @@ func notePath(name string) (string, error) {
 		return filepath.Join("_notes", "notes.md"), nil
 	case "manual_tips":
 		return filepath.Join("_notes", "useful_manual_tips.md"), nil
+	case "cookie":
+		return filepath.Join("_notes", "cookie.md"), nil
+	case "auth":
+		return filepath.Join("_notes", "auth.md"), nil
 	default:
 		return "", fmt.Errorf("unsupported note name %q", name)
 	}

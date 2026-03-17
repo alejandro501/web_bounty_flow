@@ -15,8 +15,7 @@ export function initScopeFilesFeature({
   fileViewerDescription,
   fileViewerContent,
   fileViewerFilters,
-  paramFuzzBaselineFilter,
-  paramFuzzMutatedFilter,
+  hopByHopStatusFilter,
   closeFileViewer,
   openFileViewerExport,
   fileViewerExportMenu,
@@ -177,7 +176,7 @@ export function initScopeFilesFeature({
   }
 
   function updateHopByHopFilterOptions(rows) {
-    if (!fileViewerFilters || !paramFuzzBaselineFilter || !paramFuzzMutatedFilter) {
+    if (!fileViewerFilters || !hopByHopStatusFilter) {
       return;
     }
     const enabled = isHopByHopDifferingStatusType(currentFileModalType) && Array.isArray(rows) && rows.length > 0;
@@ -185,17 +184,12 @@ export function initScopeFilesFeature({
     if (!enabled) {
       return;
     }
-    const baselineCurrent = paramFuzzBaselineFilter.value;
-    const mutatedCurrent = paramFuzzMutatedFilter.value;
-    const baselineCodes = [...new Set(rows.map((row) => String(row.baseline_status_code || "").trim()).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
-    const mutatedCodes = [...new Set(rows.map((row) => String(row.mutated_status_code || "").trim()).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
-    paramFuzzBaselineFilter.innerHTML = [`<option value="">All baseline status codes</option>`, ...baselineCodes.map((code) => `<option value="${escapeHTML(code)}">${escapeHTML(code)}</option>`)].join("");
-    paramFuzzMutatedFilter.innerHTML = [`<option value="">All mutated status codes</option>`, ...mutatedCodes.map((code) => `<option value="${escapeHTML(code)}">${escapeHTML(code)}</option>`)].join("");
-    if (baselineCodes.includes(baselineCurrent)) {
-      paramFuzzBaselineFilter.value = baselineCurrent;
-    }
-    if (mutatedCodes.includes(mutatedCurrent)) {
-      paramFuzzMutatedFilter.value = mutatedCurrent;
+    const current = hopByHopStatusFilter.value;
+    const statusCodes = [...new Set(rows.map((row) => String(row.mutated_status_code || row.status_code || "").trim()).filter(Boolean))]
+      .sort((a, b) => Number(a) - Number(b));
+    hopByHopStatusFilter.innerHTML = [`<option value="">All hop-by-hop status codes</option>`, ...statusCodes.map((code) => `<option value="${escapeHTML(code)}">${escapeHTML(code)}</option>`)].join("");
+    if (statusCodes.includes(current)) {
+      hopByHopStatusFilter.value = current;
     }
   }
 
@@ -204,11 +198,9 @@ export function initScopeFilesFeature({
   }
 
   function getFilteredHopByHopRows(rows) {
-    const baselineNeedle = normalizeFilterValue(paramFuzzBaselineFilter?.value);
-    const mutatedNeedle = normalizeFilterValue(paramFuzzMutatedFilter?.value);
+    const statusNeedle = normalizeFilterValue(hopByHopStatusFilter?.value);
     return (rows || []).filter((row) => (
-      (!baselineNeedle || normalizeFilterValue(row.baseline_status_code) === baselineNeedle) &&
-      (!mutatedNeedle || normalizeFilterValue(row.mutated_status_code) === mutatedNeedle)
+      !statusNeedle || normalizeFilterValue(row.mutated_status_code || row.status_code) === statusNeedle
     ));
   }
 
@@ -325,11 +317,8 @@ export function initScopeFilesFeature({
     currentFileModalColumns = [];
     currentFileModalRawText = "";
     applyFileViewerExportFormatOptions(false);
-    if (paramFuzzBaselineFilter) {
-      paramFuzzBaselineFilter.value = "";
-    }
-    if (paramFuzzMutatedFilter) {
-      paramFuzzMutatedFilter.value = "";
+    if (hopByHopStatusFilter) {
+      hopByHopStatusFilter.value = "";
     }
     if (fileViewerFilters) {
       fileViewerFilters.hidden = true;
@@ -662,7 +651,7 @@ export function initScopeFilesFeature({
     }
   });
 
-  [paramFuzzBaselineFilter, paramFuzzMutatedFilter].forEach((element) => {
+  [hopByHopStatusFilter].forEach((element) => {
     element?.addEventListener("input", () => renderFileViewerData(currentFileModalLines));
     element?.addEventListener("change", () => renderFileViewerData(currentFileModalLines));
   });
