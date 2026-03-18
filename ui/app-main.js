@@ -115,6 +115,7 @@ const manualDomainSelect = document.getElementById("manual-domain-select");
 const manualDomainStatusFilter = document.getElementById("manual-domain-status-filter");
 const manualDomainSearch = document.getElementById("manual-domain-search");
 const manualDomainUrl = document.getElementById("manual-domain-url");
+const manualXSSMode = document.getElementById("manual-xss-mode");
 const manualAuthHeader = document.getElementById("manual-auth-header");
 const manualRunXSS = document.getElementById("manual-run-xss");
 const manualXSSStatus = document.getElementById("manual-xss-status");
@@ -238,6 +239,7 @@ const manualDomainFeature = initManualDomainFeature({
   manualDomainStatusFilter,
   manualDomainSearch,
   manualDomainUrl,
+  manualXSSMode,
   manualAuthHeader,
   manualRunXSS,
   manualXSSStatus,

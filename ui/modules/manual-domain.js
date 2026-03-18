@@ -7,6 +7,7 @@ export function initManualDomainFeature({
   manualDomainStatusFilter,
   manualDomainSearch,
   manualDomainUrl,
+  manualXSSMode,
   manualAuthHeader,
   manualRunXSS,
   manualXSSStatus,
@@ -149,6 +150,9 @@ export function initManualDomainFeature({
     }
     if (manualAuthHeader) {
       manualAuthHeader.disabled = running;
+    }
+    if (manualXSSMode) {
+      manualXSSMode.disabled = running;
     }
     if (manualXSSRunner) {
       manualXSSRunner.classList.toggle("is-running", running);
@@ -321,15 +325,20 @@ export function initManualDomainFeature({
       }
       const target = String(manualDomainUrl?.value || "").trim() || `https://${selected}`;
       const authHeader = String(manualAuthHeader?.value || "").trim();
+      const mode = String(manualXSSMode?.value || "headless").trim().toLowerCase() === "browser"
+        ? "browser"
+        : "headless";
       applyManualXSSRunnerAvailability(true);
       if (manualXSSStatus) {
-        manualXSSStatus.textContent = "Starting manual XSS scan...";
+        manualXSSStatus.textContent = mode === "browser"
+          ? "Starting visible Playwright browser..."
+          : "Starting headless Playwright scan...";
       }
       try {
         const response = await fetch(`${backendUrl}/api/manual/xss/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ domain: selected, target, auth_header: authHeader }),
+          body: JSON.stringify({ domain: selected, target, auth_header: authHeader, mode }),
         });
         if (!response.ok) {
           throw new Error(await response.text());

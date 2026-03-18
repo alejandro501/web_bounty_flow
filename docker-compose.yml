@@ -11,8 +11,11 @@ services:
       - "5050:8080"
     volumes:
       - ./data:/app/data
+      - /tmp/.X11-unix:/tmp/.X11-unix
     environment:
       - BFLOW_ADDR=:8080
+      - DISPLAY=${DISPLAY:-:0}
+    shm_size: "1gb"
   frontend:
     container_name: web-bounty-flw-frontend
     image: web-bounty-flw-frontend

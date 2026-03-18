@@ -1,0 +1,23 @@
+{
+  "name": "1_vinted",
+  "version": "1.0.0",
+  "description": "Web Bounty Flow is a Go backend + static UI that runs a recon and security-testing pipeline from scope seeds to triageable findings. It automates discovery, enrichment, fuzzing, and lead generation while keeping artifacts in `data/` for manual follow-up. Use it as an operator console for repeatable bounty workflows, not as a “fire-and-forget” scanner.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alejandro501/web_bounty_flow.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/alejandro501/web_bounty_flow/issues"
+  },
+  "homepage": "https://github.com/alejandro501/web_bounty_flow#readme",
+  "dependencies": {
+    "playwright": "^1.58.2"
+  }
+}

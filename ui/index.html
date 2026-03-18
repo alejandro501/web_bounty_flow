@@ -115,6 +115,13 @@
                 <div class="manual-xss-runner">
                   <h3>XSS Playwright Runner</h3>
                   <label>
+                    Launch mode
+                    <select id="manual-xss-mode">
+                      <option value="headless">Headless</option>
+                      <option value="browser">Browser mode</option>
+                    </select>
+                  </label>
+                  <label>
                     Auth header (optional)
                     <input id="manual-auth-header" type="text" placeholder="Authorization: Bearer eyJ..." />
                   </label>

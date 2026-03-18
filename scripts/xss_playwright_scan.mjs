@@ -41,12 +41,29 @@ async function writeJSONL(filePath, rows) {
   await fs.writeFile(filePath, content ? `${content}\n` : "", "utf8");
 }
 
+async function safePageContent(page) {
+  try {
+    return await page.content();
+  } catch {
+    return "";
+  }
+}
+
+async function safeMarkerEval(page) {
+  try {
+    return await page.evaluate(() => window.__bflowXSS || null);
+  } catch {
+    return null;
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const target = String(args.target || "").trim();
   const outDir = String(args["out-dir"] || "").trim();
   const maxPages = Number.parseInt(args["max-pages"] || "30", 10);
   const maxClicks = Number.parseInt(args["max-clicks"] || "140", 10);
+  const mode = String(args.mode || "headless").trim().toLowerCase() === "browser" ? "browser" : "headless";
   if (!target || !outDir) {
     throw new Error("Usage: --target <url> --out-dir <path> [--auth-header 'Authorization: Bearer ...']");
   }
@@ -64,7 +81,7 @@ async function main() {
   let formActions = 0;
   let queryActions = 0;
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: mode !== "browser" });
   const contextOpts = {};
   const hdr = headerFromInput(args["auth-header"]);
   if (hdr) contextOpts.extraHTTPHeaders = { [hdr.name]: hdr.value };
@@ -114,7 +131,7 @@ async function main() {
             at: new Date().toISOString(),
           });
         }
-        const fired = await page.evaluate(() => window.__bflowXSS || null);
+        const fired = await safeMarkerEval(page);
         if (fired === marker) {
           domHits.push({
             type: "query-dom-exec",
@@ -147,7 +164,7 @@ async function main() {
           form.evaluate((f) => f.requestSubmit ? f.requestSubmit() : f.submit()),
         ]);
       } catch {}
-      const html = await page.content();
+      const html = await safePageContent(page);
       if (html.includes(marker)) {
         reflectedHits.push({
           type: "form-reflection",
@@ -156,7 +173,7 @@ async function main() {
           at: new Date().toISOString(),
         });
       }
-      const fired = await page.evaluate(() => window.__bflowXSS || null);
+      const fired = await safeMarkerEval(page);
       if (fired === marker) {
         domHits.push({
           type: "form-dom-exec",
@@ -209,8 +226,8 @@ async function main() {
       const parsed = new URL(u);
       if (parsed.search.includes(marker)) continue;
       await page.goto(u, { waitUntil: "domcontentloaded", timeout: 20000 });
-      const html = await page.content();
-      const fired = await page.evaluate(() => window.__bflowXSS || null);
+      const html = await safePageContent(page);
+      const fired = await safeMarkerEval(page);
       if (html.includes(marker) || fired === marker) {
         storedHits.push({
           type: fired === marker ? "stored-dom-exec" : "stored-reflection",
@@ -228,6 +245,7 @@ async function main() {
   await fs.writeFile(path.join(outDir, "visited_urls.txt"), `${[...visited].join("\n")}\n`, "utf8");
   console.log(JSON.stringify({
     target,
+    mode,
     visited_pages: visited.size,
     discovered_urls: discovered.size,
     query_actions: queryActions,

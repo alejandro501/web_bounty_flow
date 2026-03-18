@@ -32,6 +32,4 @@ secrets.*
 tmp/
 resources/
 
-# legacy hop-by-hop generated logs
-logs/hop_by_hop.log
-logs/hop_by_hop/
+node_modules/

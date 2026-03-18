@@ -322,6 +322,7 @@ type toolStatus struct {
 type manualXSSRunRequest struct {
 	Target     string `json:"target"`
 	AuthHeader string `json:"auth_header"`
+	Mode       string `json:"mode"`
 }
 
 type manualXSSStatusResponse struct {
@@ -590,6 +591,14 @@ func (s *Server) manualXSSRunHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "target must be a valid http(s) URL", http.StatusBadRequest)
 		return
 	}
+	mode := strings.ToLower(strings.TrimSpace(req.Mode))
+	if mode == "" {
+		mode = "headless"
+	}
+	if mode != "headless" && mode != "browser" {
+		http.Error(w, "mode must be headless or browser", http.StatusBadRequest)
+		return
+	}
 
 	s.xssMu.Lock()
 	if s.xssRunning {
@@ -601,14 +610,18 @@ func (s *Server) manualXSSRunHandler(w http.ResponseWriter, r *http.Request) {
 	s.xssStatus = "queued"
 	s.xssMu.Unlock()
 
-	go s.runManualPlaywrightXSS(target, strings.TrimSpace(req.AuthHeader))
+	go s.runManualPlaywrightXSS(target, strings.TrimSpace(req.AuthHeader), mode)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "started"})
 }
 
-func (s *Server) runManualPlaywrightXSS(target, authHeader string) {
-	s.setManualXSSStatus("running")
+func (s *Server) runManualPlaywrightXSS(target, authHeader, mode string) {
+	if mode == "browser" {
+		s.setManualXSSStatus("running (browser mode)")
+	} else {
+		s.setManualXSSStatus("running (headless)")
+	}
 	defer func() {
 		s.xssMu.Lock()
 		s.xssRunning = false
@@ -635,6 +648,7 @@ func (s *Server) runManualPlaywrightXSS(target, authHeader string) {
 	if authHeader != "" {
 		args = append(args, "--auth-header", authHeader)
 	}
+	args = append(args, "--mode", mode)
 
 	cmd := exec.CommandContext(ctx, nodeBin, args...)
 	output, err := cmd.CombinedOutput()

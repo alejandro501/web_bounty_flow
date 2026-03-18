@@ -36,6 +36,27 @@ ensure_resources() {
 
 ensure_resources
 
+ensure_playwright_runtime() {
+  if [ ! -f /app/package.json ]; then
+    return
+  fi
+
+  mkdir -p /home/app/.cache/ms-playwright
+  chown -R app:app /home/app
+
+  if [ ! -d /app/node_modules/playwright ]; then
+    echo "installing playwright npm package"
+    su-exec app sh -lc 'cd /app && HOME=/home/app npm install'
+  fi
+
+  if ! find /home/app/.cache/ms-playwright -path '*/chrome-headless-shell' -o -path '*/chrome' 2>/dev/null | grep -q .; then
+    echo "installing playwright chromium browser"
+    su-exec app sh -lc 'cd /app && HOME=/home/app npx playwright install chromium'
+  fi
+}
+
+ensure_playwright_runtime
+
 if [ "$#" -eq 0 ]; then
   set -- bflow-server --config /app/flow.yaml
 fi

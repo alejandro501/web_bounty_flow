@@ -35,6 +35,23 @@ open_browser() {
   fi
 }
 
+prepare_gui_access() {
+  if [[ -z "${DISPLAY:-}" ]]; then
+    return
+  fi
+
+  if ! command -v xhost >/dev/null 2>&1; then
+    return
+  fi
+
+  if [[ ! -S /tmp/.X11-unix/X0 && ! -S /tmp/.X11-unix/${DISPLAY#/} ]]; then
+    return
+  fi
+
+  echo "Configuring local X11 access for Docker..."
+  xhost +local:docker >/dev/null 2>&1 || true
+}
+
 if [[ ! -f "$ENV_FILE" ]]; then
   if [[ -f "$ENV_EXAMPLE" ]]; then
     cp "$ENV_EXAMPLE" "$ENV_FILE"
@@ -67,6 +84,8 @@ if [[ -z "$current_key" || "$current_key" == "$PLACEHOLDER" ]]; then
 else
   echo "BFLOW_CONFIG_KEY already set in $ENV_FILE"
 fi
+
+prepare_gui_access
 
 echo "Starting Docker services..."
 docker compose up --build -d
