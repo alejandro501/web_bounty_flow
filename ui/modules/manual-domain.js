@@ -5,6 +5,7 @@ export function initManualDomainFeature({
   fetchDomainsHTTP,
   manualDomainSelect,
   manualDomainStatusFilter,
+  manualDomainSearch,
   manualDomainUrl,
   manualAuthHeader,
   manualRunXSS,
@@ -83,6 +84,10 @@ export function initManualDomainFeature({
     return String(manualDomainStatusFilter?.value || "all").trim().toLowerCase();
   }
 
+  function manualDomainSearchNeedle() {
+    return String(manualDomainSearch?.value || "").trim().toLowerCase();
+  }
+
   function updateManualStatusFilterOptions(rows) {
     if (!manualDomainStatusFilter) {
       return;
@@ -110,8 +115,8 @@ export function initManualDomainFeature({
     const doneMap = state[domain] || {};
     const completed = manualChecklistItems.filter((item) => doneMap[item.id]).length;
     manualChecklistProgress.textContent = domain
-      ? `${completed} / ${manualChecklistItems.length} completed for ${domain}`
-      : "Select a domain to track checklist progress.";
+      ? `${completed}/${manualChecklistItems.length} done`
+      : "Pick a domain";
     manualChecklistList.innerHTML = manualChecklistItems.map((item) => {
       const checked = Boolean(doneMap[item.id]);
       return `
@@ -173,7 +178,7 @@ export function initManualDomainFeature({
     }
     const state = loadHybridChecklistState();
     const completed = hybridChecklistItems.filter((item) => state[item.id]).length;
-    hybridChecklistProgress.textContent = `${completed} / ${hybridChecklistItems.length} manual validation tasks completed`;
+    hybridChecklistProgress.textContent = `${completed}/${hybridChecklistItems.length} done`;
     hybridChecklistList.innerHTML = hybridChecklistItems.map((item) => {
       const checked = Boolean(state[item.id]);
       return `
@@ -191,9 +196,17 @@ export function initManualDomainFeature({
     }
     const previous = selectedManualDomain();
     const list = options.map((row) => ({ value: row.domain, status: row.status, statusCode: row.statusCode }));
-    const filteredList = selectedManualStatusFilter() === "all"
-      ? list
-      : list.filter((row) => row.status === selectedManualStatusFilter());
+    const statusFilter = selectedManualStatusFilter();
+    const domainNeedle = manualDomainSearchNeedle();
+    const filteredList = list.filter((row) => {
+      if (statusFilter !== "all" && row.status !== statusFilter) {
+        return false;
+      }
+      if (domainNeedle && !row.value.includes(domainNeedle)) {
+        return false;
+      }
+      return true;
+    });
     manualDomainSelect.innerHTML = [
       '<option value="">Choose a domain</option>',
       ...filteredList.map((row) => {
@@ -262,6 +275,12 @@ export function initManualDomainFeature({
     });
 
     manualDomainStatusFilter?.addEventListener("change", () => {
+      populateManualDomainSelect(manualDomainOptions);
+      renderManualChecklist();
+      applyManualXSSRunnerAvailability(false);
+    });
+
+    manualDomainSearch?.addEventListener("input", () => {
       populateManualDomainSelect(manualDomainOptions);
       renderManualChecklist();
       applyManualXSSRunnerAvailability(false);

@@ -644,6 +644,12 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 	}
 
 	discoveredDomains := make(map[string]struct{})
+	for _, root := range normalizedSeeds {
+		if root == "" {
+			continue
+		}
+		discoveredDomains[root] = struct{}{}
+	}
 	for _, line := range readSafeLines(a.cfg.Lists.Domains) {
 		host := normalizeDorkTarget(line)
 		if host == "" {
@@ -5102,10 +5108,24 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 
 	jsonlPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "live-webservers.jsonl")
 	domainsHTTPPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "domains_http")
-	probeSource := a.cfg.Lists.Domains
+	probeInputs := unique(readSafeLines(a.cfg.Lists.Domains))
 	resolvedPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "domains_resolved")
 	if fileExists(resolvedPath) && len(readSafeLines(resolvedPath)) > 0 {
-		probeSource = resolvedPath
+		probeInputs = unique(append(readSafeLines(resolvedPath), probeInputs...))
+	}
+	probeInputs = unique(append(probeInputs, normalizeRootDomains(readSafeLines(a.cfg.Lists.Wildcards))...))
+	if len(probeInputs) == 0 {
+		return "", nil
+	}
+	tmpProbeInput, err := os.CreateTemp("", "bflow-httpx-input-")
+	if err != nil {
+		return "", err
+	}
+	probeSource := tmpProbeInput.Name()
+	_ = tmpProbeInput.Close()
+	defer os.Remove(probeSource)
+	if err := os.WriteFile(probeSource, []byte(strings.Join(probeInputs, "\n")), 0o644); err != nil {
+		return "", err
 	}
 
 	stdout, err := a.runCommandCapture(
@@ -5291,7 +5311,10 @@ func (a *App) syncProbedDomainViews(httpTargets []string) error {
 		httpByHost[host] = struct{}{}
 	}
 
-	allDomains := unique(readSafeLines(a.cfg.Lists.Domains))
+	allDomains := unique(append(
+		readSafeLines(a.cfg.Lists.Domains),
+		normalizeRootDomains(readSafeLines(a.cfg.Lists.Wildcards))...,
+	))
 	var deadDomains []string
 	for _, domain := range allDomains {
 		host := extractHostCandidate(domain)

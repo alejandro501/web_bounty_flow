@@ -24,110 +24,125 @@
       </aside>
 
       <section class="view view-flow is-active">
-        <section class="panel panel-network">
-        <div class="network-bar">
-          <div class="network-controls">
-            <button id="run-flow" class="network-run-flow">Run Flow</button>
-            <button id="pause-flow" class="network-pause-flow" type="button">Pause</button>
-            <button id="stop-flow" class="network-stop-flow" type="button">Stop</button>
-            <button id="clear-results" class="network-clear-results" type="button">Clear Results</button>
-          </div>
-          <div class="network-tor">
-            <label class="tor-switch">
-              <input id="tor-route-toggle" type="checkbox" />
-              <span class="tor-switch__slider"></span>
-              <span class="tor-switch__label">Route Through Tor</span>
-            </label>
-            <span id="tor-network-indicator" class="tor-indicator muted">Tor off</span>
-            <label class="tor-switch">
-              <input id="proxy-route-toggle" type="checkbox" />
-              <span class="tor-switch__slider"></span>
-              <span class="tor-switch__label">Proxy</span>
-            </label>
-            <span id="proxy-network-indicator" class="tor-indicator muted">Proxy off</span>
-          </div>
-        </div>
-      </section>
-
-        <section class="panel panel-files">
-        <h2>Scope files</h2>
-        <div id="scope-cards" class="scope-cards"></div>
-        <p id="scope-cards-status" class="muted">Checking files...</p>
-      </section>
-
-        <section class="panel panel-logs">
-        <h2>Flow logs</h2>
-        <pre id="flow-log-output" class="log-view log-view--tall">Logs appear here when you start the flow.</pre>
-      </section>
-
-      <section class="panel panel-flow">
-        <h2>Flow control</h2>
-        <div class="flow-actions">
-          <button id="open-amass-enum" type="button" disabled>Amass Enum</button>
-          <button id="open-live-webservers" type="button" disabled>Live Web Servers</button>
-        </div>
-        <p id="flow-status" class="muted">idle</p>
-        <div class="subdomain-progress">
-          <div class="subdomain-progress__header">
-            <span>Subdomain Enumeration Progress</span>
-            <span id="subdomain-progress-text" class="muted">0 / 0</span>
-          </div>
-          <progress id="subdomain-progress-bar" value="0" max="100"></progress>
-        </div>
-        <div class="flow-steps">
-          <p class="muted">Flow order</p>
-          <ul id="flow-steps-list"></ul>
-        </div>
-      </section>
-
-        <section class="panel panel-manual-domain">
-        <h2>Manual Testing Tracker</h2>
-        <div class="manual-domain-layout">
-          <section class="manual-domain-left">
-            <label>
-              Target domain
-              <select id="manual-domain-select">
-                <option value="">Select domain...</option>
-              </select>
-            </label>
-            <label>
-              Status code filter
-              <select id="manual-domain-status-filter">
-                <option value="">All status codes</option>
-              </select>
-            </label>
-            <p class="muted">Open selected target:</p>
-            <a id="manual-domain-url" class="manual-domain-url" href="#" target="_blank" rel="noopener noreferrer">No domain selected</a>
-            <div class="manual-xss-runner">
-              <h3>XSS Playwright Runner</h3>
-              <label>
-                Auth header (optional)
-                <input id="manual-auth-header" type="text" placeholder="Authorization: Bearer eyJ..." />
-              </label>
-              <button id="manual-run-xss" type="button">Launch Playwright XSS</button>
-              <p id="manual-xss-status" class="muted">idle</p>
-            </div>
-          </section>
-          <section class="manual-domain-right">
-            <div class="manual-checklist-stack">
-              <div class="manual-checklist-block">
-                <div class="manual-checklist-header">
-                  <h3>Auth &amp; Session (Manual)</h3>
-                  <span id="manual-checklist-progress" class="muted">0 / 0 done</span>
-                </div>
-                <div id="manual-checklist-list" class="manual-checklist-list"></div>
+        <details class="panel panel-network panel-collapsible" open>
+          <summary class="panel-collapsible__summary">Network</summary>
+          <div class="panel-collapsible__body">
+            <div class="network-bar">
+              <div class="network-controls">
+                <button id="run-flow" class="network-run-flow">Run Flow</button>
+                <button id="pause-flow" class="network-pause-flow" type="button">Pause</button>
+                <button id="stop-flow" class="network-stop-flow" type="button">Stop</button>
+                <button id="clear-results" class="network-clear-results" type="button">Clear Results</button>
               </div>
-              <div class="manual-checklist-block">
-                <div class="manual-checklist-header">
-                  <h3>Manual + automated</h3>
-                  <span id="hybrid-checklist-progress" class="muted">0 / 0 done</span>
-                </div>
-                <div id="hybrid-checklist-list" class="manual-checklist-list"></div>
+              <div class="network-tor">
+                <label class="tor-switch">
+                  <input id="tor-route-toggle" type="checkbox" />
+                  <span class="tor-switch__slider"></span>
+                  <span class="tor-switch__label">Route Through Tor</span>
+                </label>
+                <span id="tor-network-indicator" class="tor-indicator muted">Tor off</span>
+                <label class="tor-switch">
+                  <input id="proxy-route-toggle" type="checkbox" />
+                  <span class="tor-switch__slider"></span>
+                  <span class="tor-switch__label">Proxy</span>
+                </label>
+                <span id="proxy-network-indicator" class="tor-indicator muted">Proxy off</span>
               </div>
             </div>
-          </section>
-        </div>
-      </section>
+          </div>
+        </details>
+
+        <details class="panel panel-files panel-collapsible" open>
+          <summary class="panel-collapsible__summary">Scope files</summary>
+          <div class="panel-collapsible__body">
+            <div id="scope-cards" class="scope-cards"></div>
+            <p id="scope-cards-status" class="muted">Checking files...</p>
+          </div>
+        </details>
+
+        <details class="panel panel-logs panel-collapsible" open>
+          <summary class="panel-collapsible__summary">Flow logs</summary>
+          <div class="panel-collapsible__body">
+            <pre id="flow-log-output" class="log-view log-view--tall">Logs appear here when you start the flow.</pre>
+          </div>
+        </details>
+
+        <details class="panel panel-flow panel-collapsible" open>
+          <summary class="panel-collapsible__summary">Flow control</summary>
+          <div class="panel-collapsible__body">
+            <div class="flow-actions">
+              <button id="open-amass-enum" type="button" disabled>Amass Enum</button>
+              <button id="open-live-webservers" type="button" disabled>Live Web Servers</button>
+            </div>
+            <p id="flow-status" class="muted">idle</p>
+            <div class="subdomain-progress">
+              <div class="subdomain-progress__header">
+                <span>Subdomain Enumeration Progress</span>
+                <span id="subdomain-progress-text" class="muted">0 / 0</span>
+              </div>
+              <progress id="subdomain-progress-bar" value="0" max="100"></progress>
+            </div>
+            <div class="flow-steps">
+              <p class="muted">Flow order</p>
+              <ul id="flow-steps-list"></ul>
+            </div>
+          </div>
+        </details>
+
+        <details class="panel panel-manual-domain panel-collapsible" open>
+          <summary class="panel-collapsible__summary">Manual Testing Tracker</summary>
+          <div class="panel-collapsible__body">
+            <div class="manual-domain-layout">
+              <section class="manual-domain-left">
+                <label>
+                  Status code filter
+                  <select id="manual-domain-status-filter">
+                    <option value="">All status codes</option>
+                  </select>
+                </label>
+                <label>
+                  Search domain
+                  <input id="manual-domain-search" type="text" placeholder="Filter domains..." />
+                </label>
+                <label>
+                  Target domain
+                  <select id="manual-domain-select">
+                    <option value="">Select domain...</option>
+                  </select>
+                </label>
+                <p class="muted">Open selected target:</p>
+                <a id="manual-domain-url" class="manual-domain-url" href="#" target="_blank" rel="noopener noreferrer">No domain selected</a>
+                <div class="manual-xss-runner">
+                  <h3>XSS Playwright Runner</h3>
+                  <label>
+                    Auth header (optional)
+                    <input id="manual-auth-header" type="text" placeholder="Authorization: Bearer eyJ..." />
+                  </label>
+                  <button id="manual-run-xss" type="button">Launch Playwright XSS</button>
+                  <p id="manual-xss-status" class="muted">idle</p>
+                </div>
+              </section>
+              <section class="manual-domain-right">
+                <div class="manual-checklist-stack">
+                  <div class="manual-checklist-block">
+                    <div class="manual-checklist-header">
+                      <h3>Auth &amp; Session (Manual)</h3>
+                      <span id="manual-checklist-progress" class="muted">0 / 0 done</span>
+                    </div>
+                    <div id="manual-checklist-list" class="manual-checklist-list"></div>
+                  </div>
+                  <div class="manual-checklist-block">
+                    <div class="manual-checklist-header">
+                      <h3>Manual + automated</h3>
+                      <span id="hybrid-checklist-progress" class="muted">0 / 0 done</span>
+                    </div>
+                    <div id="hybrid-checklist-list" class="manual-checklist-list"></div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </details>
       </section>
 
       <section class="view view-leads">

@@ -113,6 +113,7 @@ const lwsTableBody = document.getElementById("lws-table-body");
 const lwsCount = document.getElementById("lws-count");
 const manualDomainSelect = document.getElementById("manual-domain-select");
 const manualDomainStatusFilter = document.getElementById("manual-domain-status-filter");
+const manualDomainSearch = document.getElementById("manual-domain-search");
 const manualDomainUrl = document.getElementById("manual-domain-url");
 const manualAuthHeader = document.getElementById("manual-auth-header");
 const manualRunXSS = document.getElementById("manual-run-xss");
@@ -235,6 +236,7 @@ const manualDomainFeature = initManualDomainFeature({
   fetchDomainsHTTP: () => scopeFilesFeature.fetchListMeta("domains_http"),
   manualDomainSelect,
   manualDomainStatusFilter,
+  manualDomainSearch,
   manualDomainUrl,
   manualAuthHeader,
   manualRunXSS,
