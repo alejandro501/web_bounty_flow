@@ -132,21 +132,21 @@ export function initLeadsChaosFeature({
                     <span class="lead-roi">ROI ${escapeHTML(String(lead.roi || 0))}</span>
                     <span class="lead-severity ${severityPillClass(lead.severity)}">${escapeHTML((lead.severity || "low").toUpperCase())}</span>
                     <span class="lead-category">${escapeHTML(lead.category || "unknown")}${lead.family ? `/${escapeHTML(lead.family)}` : ""}</span>
-                    <span class="lead-item__actions">
-                      <label class="lead-done-toggle">
-                        <input type="checkbox" data-lead-action="done" data-lead-id="${escapeHTML(lead.id || "")}" ${lead.done ? "checked" : ""} />
-                        DONE
-                      </label>
-                      <button type="button" class="lead-options-button" data-lead-action="toggle-menu" data-lead-id="${escapeHTML(lead.id || "")}">Options</button>
-                      <button type="button" class="lead-replay-button" data-lead-action="replay" data-lead-id="${escapeHTML(lead.id || "")}">Replay</button>
-                    </span>
                   </div>
-                  <div class="lead-item__target">${
+                </summary>
+                <div class="lead-item__target">${
                   isLikelyURL(lead.target || "")
                     ? `<a href="${escapeHTML(lead.target || "")}" target="_blank" rel="noopener noreferrer"><code>${escapeHTML(lead.target || "")}</code></a>`
                     : `<code>${escapeHTML(lead.target || "")}</code>`
                 }</div>
-                </summary>
+                <div class="lead-item__actions">
+                  <label class="lead-done-toggle">
+                    <input type="checkbox" name="lead_done_${escapeHTML(lead.id || "")}" data-lead-action="done" data-lead-id="${escapeHTML(lead.id || "")}" ${lead.done ? "checked" : ""} />
+                    DONE
+                  </label>
+                  <button type="button" class="lead-options-button" data-lead-action="toggle-menu" data-lead-id="${escapeHTML(lead.id || "")}">Options</button>
+                  <button type="button" class="lead-replay-button" data-lead-action="replay" data-lead-id="${escapeHTML(lead.id || "")}">Replay</button>
+                </div>
                 <div class="lead-item__menu" data-lead-menu="${escapeHTML(lead.id || "")}" hidden>
                   <button type="button" data-lead-action="bucket" data-bucket="hits" data-lead-id="${escapeHTML(lead.id || "")}">Hits</button>
                   <button type="button" data-lead-action="bucket" data-bucket="investigation" data-lead-id="${escapeHTML(lead.id || "")}">Further Investigation</button>

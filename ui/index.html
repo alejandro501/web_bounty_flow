@@ -36,13 +36,13 @@
               </div>
               <div class="network-tor">
                 <label class="tor-switch">
-                  <input id="tor-route-toggle" type="checkbox" />
+                  <input id="tor-route-toggle" name="tor_route_toggle" type="checkbox" />
                   <span class="tor-switch__slider"></span>
                   <span class="tor-switch__label">Route Through Tor</span>
                 </label>
                 <span id="tor-network-indicator" class="tor-indicator muted">Tor off</span>
                 <label class="tor-switch">
-                  <input id="proxy-route-toggle" type="checkbox" />
+                  <input id="proxy-route-toggle" name="proxy_route_toggle" type="checkbox" />
                   <span class="tor-switch__slider"></span>
                   <span class="tor-switch__label">Proxy</span>
                 </label>
@@ -96,17 +96,17 @@
               <section class="manual-domain-left">
                 <label>
                   Status code filter
-                  <select id="manual-domain-status-filter">
+                  <select id="manual-domain-status-filter" name="manual_domain_status_filter">
                     <option value="">All status codes</option>
                   </select>
                 </label>
                 <label>
                   Search domain
-                  <input id="manual-domain-search" type="text" placeholder="Filter domains..." />
+                  <input id="manual-domain-search" name="manual_domain_search" type="text" placeholder="Filter domains..." />
                 </label>
                 <label>
                   Target domain
-                  <select id="manual-domain-select">
+                  <select id="manual-domain-select" name="manual_domain_select">
                     <option value="">Select domain...</option>
                   </select>
                 </label>
@@ -116,14 +116,14 @@
                   <h3>XSS Playwright Runner</h3>
                   <label>
                     Launch mode
-                    <select id="manual-xss-mode">
+                    <select id="manual-xss-mode" name="manual_xss_mode">
                       <option value="headless">Headless</option>
                       <option value="browser">Browser mode</option>
                     </select>
                   </label>
                   <label>
                     Auth header (optional)
-                    <input id="manual-auth-header" type="text" placeholder="Authorization: Bearer eyJ..." />
+                    <input id="manual-auth-header" name="manual_auth_header" type="text" placeholder="Authorization: Bearer eyJ..." />
                   </label>
                   <button id="manual-run-xss" type="button">Launch Playwright XSS</button>
                   <p id="manual-xss-status" class="muted">idle</p>
@@ -212,7 +212,7 @@
                 <div class="manual-recon" data-workspace="high-level-questions">
                   <section class="manual-recon__left">
                     <h4>Questions by Category</h4>
-                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <input class="manual-recon-search" name="manual_recon_search_high_level_questions" type="text" placeholder="Search questions..." />
                     <div class="manual-recon__categories"></div>
                   </section>
 
@@ -230,7 +230,7 @@
                       <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
 
                       <button class="manual-recon-add-answer" type="button">Add New Answer</button>
-                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <textarea class="manual-recon-answer-input" name="manual_recon_answer_high_level_questions" rows="6" placeholder="Enter your answer here..."></textarea>
                       <button class="manual-recon-save-answer" type="button">Save Answer</button>
                       <p class="manual-recon-answer-status muted">Not saved yet.</p>
                     </div>
@@ -243,7 +243,7 @@
                 <div class="manual-recon" data-workspace="mechanisms">
                   <section class="manual-recon__left">
                     <h4>Questions by Category</h4>
-                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <input class="manual-recon-search" name="manual_recon_search_mechanisms" type="text" placeholder="Search questions..." />
                     <div class="manual-recon__categories"></div>
                   </section>
                   <section class="manual-recon__right">
@@ -257,7 +257,7 @@
                       <h4>Your Answers</h4>
                       <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
                       <button class="manual-recon-add-answer" type="button">Add New Answer</button>
-                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <textarea class="manual-recon-answer-input" name="manual_recon_answer_mechanisms" rows="6" placeholder="Enter your answer here..."></textarea>
                       <button class="manual-recon-save-answer" type="button">Save Answer</button>
                       <p class="manual-recon-answer-status muted">Not saved yet.</p>
                     </div>
@@ -270,7 +270,7 @@
                 <div class="manual-recon" data-workspace="notable-objects">
                   <section class="manual-recon__left">
                     <h4>Questions by Category</h4>
-                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <input class="manual-recon-search" name="manual_recon_search_notable_objects" type="text" placeholder="Search questions..." />
                     <div class="manual-recon__categories"></div>
                   </section>
                   <section class="manual-recon__right">
@@ -284,7 +284,7 @@
                       <h4>Your Answers</h4>
                       <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
                       <button class="manual-recon-add-answer" type="button">Add New Answer</button>
-                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <textarea class="manual-recon-answer-input" name="manual_recon_answer_notable_objects" rows="6" placeholder="Enter your answer here..."></textarea>
                       <button class="manual-recon-save-answer" type="button">Save Answer</button>
                       <p class="manual-recon-answer-status muted">Not saved yet.</p>
                     </div>
@@ -297,7 +297,7 @@
                 <div class="manual-recon" data-workspace="security-controls">
                   <section class="manual-recon__left">
                     <h4>Questions by Category</h4>
-                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <input class="manual-recon-search" name="manual_recon_search_security_controls" type="text" placeholder="Search questions..." />
                     <div class="manual-recon__categories"></div>
                   </section>
                   <section class="manual-recon__right">
@@ -311,7 +311,7 @@
                       <h4>Your Answers</h4>
                       <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
                       <button class="manual-recon-add-answer" type="button">Add New Answer</button>
-                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <textarea class="manual-recon-answer-input" name="manual_recon_answer_security_controls" rows="6" placeholder="Enter your answer here..."></textarea>
                       <button class="manual-recon-save-answer" type="button">Save Answer</button>
                       <p class="manual-recon-answer-status muted">Not saved yet.</p>
                     </div>
@@ -324,7 +324,7 @@
                 <div class="manual-recon" data-workspace="threat-model">
                   <section class="manual-recon__left">
                     <h4>Questions by Category</h4>
-                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <input class="manual-recon-search" name="manual_recon_search_threat_model" type="text" placeholder="Search questions..." />
                     <div class="manual-recon__categories"></div>
                   </section>
                   <section class="manual-recon__right">
@@ -338,7 +338,7 @@
                       <h4>Your Answers</h4>
                       <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
                       <button class="manual-recon-add-answer" type="button">Add New Answer</button>
-                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <textarea class="manual-recon-answer-input" name="manual_recon_answer_threat_model" rows="6" placeholder="Enter your answer here..."></textarea>
                       <button class="manual-recon-save-answer" type="button">Save Answer</button>
                       <p class="manual-recon-answer-status muted">Not saved yet.</p>
                     </div>
@@ -351,7 +351,7 @@
                 <div class="manual-recon" data-workspace="spoofing">
                   <section class="manual-recon__left">
                     <h4>Questions by Category</h4>
-                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <input class="manual-recon-search" name="manual_recon_search_spoofing" type="text" placeholder="Search questions..." />
                     <div class="manual-recon__categories"></div>
                   </section>
                   <section class="manual-recon__right">
@@ -365,7 +365,7 @@
                       <h4>Your Answers</h4>
                       <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
                       <button class="manual-recon-add-answer" type="button">Add New Answer</button>
-                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <textarea class="manual-recon-answer-input" name="manual_recon_answer_spoofing" rows="6" placeholder="Enter your answer here..."></textarea>
                       <button class="manual-recon-save-answer" type="button">Save Answer</button>
                       <p class="manual-recon-answer-status muted">Not saved yet.</p>
                     </div>
@@ -378,7 +378,7 @@
                 <div class="manual-recon" data-workspace="tampering">
                   <section class="manual-recon__left">
                     <h4>Questions by Category</h4>
-                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <input class="manual-recon-search" name="manual_recon_search_tampering" type="text" placeholder="Search questions..." />
                     <div class="manual-recon__categories"></div>
                   </section>
                   <section class="manual-recon__right">
@@ -392,7 +392,7 @@
                       <h4>Your Answers</h4>
                       <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
                       <button class="manual-recon-add-answer" type="button">Add New Answer</button>
-                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <textarea class="manual-recon-answer-input" name="manual_recon_answer_tampering" rows="6" placeholder="Enter your answer here..."></textarea>
                       <button class="manual-recon-save-answer" type="button">Save Answer</button>
                       <p class="manual-recon-answer-status muted">Not saved yet.</p>
                     </div>
@@ -405,7 +405,7 @@
                 <div class="manual-recon" data-workspace="repudiation">
                   <section class="manual-recon__left">
                     <h4>Questions by Category</h4>
-                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <input class="manual-recon-search" name="manual_recon_search_repudiation" type="text" placeholder="Search questions..." />
                     <div class="manual-recon__categories"></div>
                   </section>
                   <section class="manual-recon__right">
@@ -419,7 +419,7 @@
                       <h4>Your Answers</h4>
                       <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
                       <button class="manual-recon-add-answer" type="button">Add New Answer</button>
-                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <textarea class="manual-recon-answer-input" name="manual_recon_answer_repudiation" rows="6" placeholder="Enter your answer here..."></textarea>
                       <button class="manual-recon-save-answer" type="button">Save Answer</button>
                       <p class="manual-recon-answer-status muted">Not saved yet.</p>
                     </div>
@@ -432,7 +432,7 @@
                 <div class="manual-recon" data-workspace="info-disclosure">
                   <section class="manual-recon__left">
                     <h4>Questions by Category</h4>
-                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <input class="manual-recon-search" name="manual_recon_search_info_disclosure" type="text" placeholder="Search questions..." />
                     <div class="manual-recon__categories"></div>
                   </section>
                   <section class="manual-recon__right">
@@ -446,7 +446,7 @@
                       <h4>Your Answers</h4>
                       <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
                       <button class="manual-recon-add-answer" type="button">Add New Answer</button>
-                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <textarea class="manual-recon-answer-input" name="manual_recon_answer_info_disclosure" rows="6" placeholder="Enter your answer here..."></textarea>
                       <button class="manual-recon-save-answer" type="button">Save Answer</button>
                       <p class="manual-recon-answer-status muted">Not saved yet.</p>
                     </div>
@@ -459,7 +459,7 @@
                 <div class="manual-recon" data-workspace="dos">
                   <section class="manual-recon__left">
                     <h4>Questions by Category</h4>
-                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <input class="manual-recon-search" name="manual_recon_search_dos" type="text" placeholder="Search questions..." />
                     <div class="manual-recon__categories"></div>
                   </section>
                   <section class="manual-recon__right">
@@ -473,7 +473,7 @@
                       <h4>Your Answers</h4>
                       <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
                       <button class="manual-recon-add-answer" type="button">Add New Answer</button>
-                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <textarea class="manual-recon-answer-input" name="manual_recon_answer_dos" rows="6" placeholder="Enter your answer here..."></textarea>
                       <button class="manual-recon-save-answer" type="button">Save Answer</button>
                       <p class="manual-recon-answer-status muted">Not saved yet.</p>
                     </div>
@@ -486,7 +486,7 @@
                 <div class="manual-recon" data-workspace="eop">
                   <section class="manual-recon__left">
                     <h4>Questions by Category</h4>
-                    <input class="manual-recon-search" type="text" placeholder="Search questions..." />
+                    <input class="manual-recon-search" name="manual_recon_search_eop" type="text" placeholder="Search questions..." />
                     <div class="manual-recon__categories"></div>
                   </section>
                   <section class="manual-recon__right">
@@ -500,7 +500,7 @@
                       <h4>Your Answers</h4>
                       <div class="manual-recon__answers-list">No answers yet. Add your first answer below.</div>
                       <button class="manual-recon-add-answer" type="button">Add New Answer</button>
-                      <textarea class="manual-recon-answer-input" rows="6" placeholder="Enter your answer here..."></textarea>
+                      <textarea class="manual-recon-answer-input" name="manual_recon_answer_eop" rows="6" placeholder="Enter your answer here..."></textarea>
                       <button class="manual-recon-save-answer" type="button">Save Answer</button>
                       <p class="manual-recon-answer-status muted">Not saved yet.</p>
                     </div>
@@ -538,7 +538,7 @@
               <div class="stride-answer">
                 <h3>Your Answer</h3>
                 <p class="muted">Capture your own notes and threat hypotheses by subsection.</p>
-                <textarea id="stride-answer-text" rows="10" placeholder="Write your analysis, assumptions, and evidence here..."></textarea>
+                <textarea id="stride-answer-text" name="stride_answer_text" rows="10" placeholder="Write your analysis, assumptions, and evidence here..."></textarea>
                 <p id="stride-answer-status" class="muted">Not saved yet.</p>
               </div>
             </aside>
@@ -554,7 +554,7 @@
             <button id="notes-save" type="button">Save</button>
           </div>
           <div class="notes-layout">
-            <textarea id="notes-editor" class="notes-editor" rows="28" placeholder="Write notes in Markdown..."></textarea>
+            <textarea id="notes-editor" name="notes_editor" class="notes-editor" rows="28" placeholder="Write notes in Markdown..."></textarea>
             <article id="notes-preview" class="notes-preview markdown-preview"></article>
           </div>
           <p id="notes-status" class="muted">Loading...</p>
@@ -593,7 +593,7 @@
                 <button id="auth-save" type="button">Save</button>
               </div>
               <div class="notes-layout">
-                <textarea id="auth-editor" class="notes-editor" rows="20" placeholder="Capture auth notes in Markdown..."></textarea>
+                <textarea id="auth-editor" name="auth_editor" class="notes-editor" rows="20" placeholder="Capture auth notes in Markdown..."></textarea>
                 <article id="auth-preview" class="notes-preview markdown-preview"></article>
               </div>
               <p id="auth-status" class="muted">Loading...</p>
@@ -610,7 +610,7 @@
             <button id="manual-tips-save" type="button">Save</button>
           </div>
           <div class="notes-layout">
-            <textarea id="manual-tips-editor" class="notes-editor" rows="28" placeholder="Capture useful manual testing tips in Markdown..."></textarea>
+            <textarea id="manual-tips-editor" name="manual_tips_editor" class="notes-editor" rows="28" placeholder="Capture useful manual testing tips in Markdown..."></textarea>
             <article id="manual-tips-preview" class="notes-preview markdown-preview"></article>
           </div>
           <p id="manual-tips-status" class="muted">Loading...</p>
@@ -627,18 +627,18 @@
                 <p class="muted">Replay and flow traffic proxy endpoint. Default: localhost:8080.</p>
               </div>
               <label class="toggle">
-                <input type="checkbox" id="proxy-config-enabled" />
+                <input type="checkbox" id="proxy-config-enabled" name="proxy_config_enabled" />
                 <span>Proxy enabled</span>
               </label>
             </div>
             <div class="config-form">
               <label>
                 Host
-                <input type="text" id="proxy-config-host" placeholder="localhost" />
+                <input type="text" id="proxy-config-host" name="proxy_config_host" placeholder="localhost" />
               </label>
               <label>
                 Port
-                <input type="number" id="proxy-config-port" min="1" max="65535" placeholder="8080" />
+                <input type="number" id="proxy-config-port" name="proxy_config_port" min="1" max="65535" placeholder="8080" />
               </label>
               <button id="proxy-config-save" type="button">Save proxy</button>
             </div>
@@ -650,7 +650,7 @@
                 <p class="muted">Add multiple keys for rotation and rate limits.</p>
               </div>
               <label class="toggle">
-                <input type="checkbox" id="github-auto-run" />
+                <input type="checkbox" id="github-auto-run" name="github_auto_run" />
                 <span>Auto-run GitHub dorking</span>
               </label>
             </div>
@@ -658,14 +658,14 @@
             <div class="config-form">
               <label>
                 Label
-                <input type="text" id="github-key-label" placeholder="primary" />
+                <input type="text" id="github-key-label" name="github_key_label" placeholder="primary" />
               </label>
               <label>
                 Token
-                <input type="password" id="github-key-value" placeholder="ghp_..." />
+                <input type="password" id="github-key-value" name="github_key_value" placeholder="ghp_..." />
               </label>
               <label class="inline">
-                <input type="checkbox" id="github-key-active" checked />
+                <input type="checkbox" id="github-key-active" name="github_key_active" checked />
                 Active
               </label>
               <button id="github-key-add" type="button">Add key</button>
@@ -707,13 +707,13 @@
             </div>
           </div>
           <div class="modal-filters">
-            <input id="lws-search-url" type="text" placeholder="Search URL..." />
-            <select id="lws-filter-status">
+            <input id="lws-search-url" name="lws_search_url" type="text" placeholder="Search URL..." />
+            <select id="lws-filter-status" name="lws_filter_status">
               <option value="">All status codes</option>
             </select>
-            <input id="lws-search-title" type="text" placeholder="Search title..." />
-            <input id="lws-search-webserver" type="text" placeholder="Search web server..." />
-            <input id="lws-search-tech" type="text" placeholder="Search technologies..." />
+            <input id="lws-search-title" name="lws_search_title" type="text" placeholder="Search title..." />
+            <input id="lws-search-webserver" name="lws_search_webserver" type="text" placeholder="Search web server..." />
+            <input id="lws-search-tech" name="lws_search_tech" type="text" placeholder="Search technologies..." />
           </div>
           <p id="lws-count" class="muted">No rows loaded.</p>
           <div class="modal-table-wrap">
@@ -752,9 +752,9 @@
             </div>
           </div>
           <div class="modal-filters">
-            <input id="amass-search-name" type="text" placeholder="Search host..." />
-            <input id="amass-search-domain" type="text" placeholder="Search root domain..." />
-            <input id="amass-search-ip" type="text" placeholder="Search IP..." />
+            <input id="amass-search-name" name="amass_search_name" type="text" placeholder="Search host..." />
+            <input id="amass-search-domain" name="amass_search_domain" type="text" placeholder="Search root domain..." />
+            <input id="amass-search-ip" name="amass_search_ip" type="text" placeholder="Search IP..." />
           </div>
           <p id="amass-count" class="muted">No rows loaded.</p>
           <div class="modal-table-wrap">
@@ -794,11 +794,11 @@
           </div>
           <p id="file-viewer-description" class="muted">Open, inspect, edit, and export this artifact.</p>
           <div id="file-viewer-filters" class="modal-filters" hidden>
-            <select id="hop-by-hop-status-filter">
+            <select id="hop-by-hop-status-filter" name="hop_by_hop_status_filter">
               <option value="">All hop-by-hop status codes</option>
             </select>
           </div>
-          <textarea id="file-viewer-editor" class="notes-editor" rows="22" hidden></textarea>
+          <textarea id="file-viewer-editor" name="file_viewer_editor" class="notes-editor" rows="22" hidden></textarea>
           <div id="file-viewer-content" class="log-view log-view--tall">Loading...</div>
         </div>
       </div>

@@ -100,12 +100,13 @@ export function initCookieAuthFeature({
       <div class="cookie-pair-row" data-cookie-index="${index}">
         <input
           type="text"
+          name="cookie_key"
           class="cookie-pair-row__key"
           data-cookie-field="key"
           value="${escapeHTML(pair.key || "")}"
           placeholder="cookie_name"
         />
-        <textarea class="cookie-pair-row__value" data-cookie-field="value" rows="2" placeholder="cookie value">${escapeHTML(pair.value || "")}</textarea>
+        <textarea name="cookie_value" class="cookie-pair-row__value" data-cookie-field="value" rows="2" placeholder="cookie value">${escapeHTML(pair.value || "")}</textarea>
         <button type="button" class="cookie-pair-row__remove" data-cookie-action="remove">Remove</button>
       </div>
     `).join("");

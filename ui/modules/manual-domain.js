@@ -122,7 +122,7 @@ export function initManualDomainFeature({
       const checked = Boolean(doneMap[item.id]);
       return `
         <label class="checklist-item${checked ? " is-done" : ""}">
-          <input type="checkbox" data-manual-check="${escapeHTML(item.id)}" ${checked ? "checked" : ""} ${domain ? "" : "disabled"} />
+          <input type="checkbox" name="manual_check_${escapeHTML(item.id)}" data-manual-check="${escapeHTML(item.id)}" ${checked ? "checked" : ""} ${domain ? "" : "disabled"} />
           <span>${escapeHTML(item.label)}</span>
         </label>
       `;
@@ -187,7 +187,7 @@ export function initManualDomainFeature({
       const checked = Boolean(state[item.id]);
       return `
         <label class="checklist-item${checked ? " is-done" : ""}">
-          <input type="checkbox" data-hybrid-check="${escapeHTML(item.id)}" ${checked ? "checked" : ""} />
+          <input type="checkbox" name="hybrid_check_${escapeHTML(item.id)}" data-hybrid-check="${escapeHTML(item.id)}" ${checked ? "checked" : ""} />
           <span>${escapeHTML(item.label)}</span>
         </label>
       `;

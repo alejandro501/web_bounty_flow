@@ -728,6 +728,8 @@ main {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.02);
   padding: 0.6rem;
+  display: grid;
+  gap: 0.55rem;
 }
 
 .lead-item > summary {
@@ -742,7 +744,6 @@ main {
 .lead-item__top {
   display: flex;
   flex-wrap: nowrap;
-  justify-content: space-between;
   align-items: center;
   gap: 0.45rem;
   margin-bottom: 0.35rem;
@@ -750,9 +751,9 @@ main {
 
 .lead-item__actions {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
-  margin-left: auto;
 }
 
 .lead-done-toggle {

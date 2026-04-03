@@ -59,10 +59,10 @@ export function initConfigNetworkFeature({
         const checked = key.active ? "checked" : "";
         return `
           <div class="config-row" data-key-id="${key.id}">
-            <input type="text" value="${escapeHTML(safeLabel)}" class="config-label" />
-            <input type="password" value="${escapeHTML(safeValue)}" class="config-value" />
+            <input type="text" name="github_key_label" value="${escapeHTML(safeLabel)}" class="config-label" />
+            <input type="password" name="github_key_value" value="${escapeHTML(safeValue)}" class="config-value" />
             <label class="inline">
-              <input type="checkbox" class="config-active" ${checked} />
+              <input type="checkbox" name="github_key_active" class="config-active" ${checked} />
               Active
             </label>
             <div class="config-actions">
@@ -122,7 +122,7 @@ export function initConfigNetworkFeature({
               <p class="muted">${escapeHTML(tool.notes)}</p>
             </div>
             <label class="inline">
-              <input type="checkbox" data-flow-provider-toggle="${tool.provider}" ${checked} />
+              <input type="checkbox" name="flow_provider_${tool.provider}" data-flow-provider-toggle="${tool.provider}" ${checked} />
               Enabled
             </label>
           </div>
