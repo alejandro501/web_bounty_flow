@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bounty Flow UI</title>
     <link rel="icon" type="image/svg+xml" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Ccircle cx="32" cy="32" r="22" fill="%23ff2747"/%3E%3C/svg%3E' />
-    <link rel="stylesheet" href="styles.css?v=20260307-1" />
+    <link rel="stylesheet" href="styles.css?v=20260403-1" />
   </head>
   <body data-backend-url="http://localhost:5050" data-active-view="flow">
     <main class="layout">
@@ -779,8 +779,15 @@
             <h3 id="file-viewer-title">Scope File</h3>
             <div class="modal-actions">
               <div class="export-menu-wrap">
+                <button id="open-file-viewer-aquatone" type="button" disabled>Aquatone</button>
+                <div id="file-viewer-aquatone-menu" class="export-menu" hidden>
+                  <button type="button" data-aquatone-action="view">Open Existing Gallery</button>
+                  <button type="button" data-aquatone-action="run">Take New Screenshots</button>
+                </div>
+              </div>
+              <div class="export-menu-wrap">
                 <button id="open-file-viewer-export" type="button">Export</button>
-              <div id="file-viewer-export-menu" class="export-menu" hidden>
+                <div id="file-viewer-export-menu" class="export-menu" hidden>
                   <button type="button" data-export-format="csv">CSV</button>
                   <button type="button" data-export-format="json">JSON</button>
                   <button type="button" data-export-format="txt">TXT</button>
@@ -793,6 +800,7 @@
             </div>
           </div>
           <p id="file-viewer-description" class="muted">Open, inspect, edit, and export this artifact.</p>
+          <p id="file-viewer-aquatone-status" class="muted" hidden>Aquatone idle.</p>
           <div id="file-viewer-filters" class="modal-filters" hidden>
             <select id="hop-by-hop-status-filter" name="hop_by_hop_status_filter">
               <option value="">All hop-by-hop status codes</option>
@@ -802,7 +810,22 @@
           <div id="file-viewer-content" class="log-view log-view--tall">Loading...</div>
         </div>
       </div>
+
+      <div id="aquatone-gallery-modal" class="modal-shell" hidden>
+        <div class="modal-panel modal-panel--aquatone">
+          <div class="modal-header">
+            <div>
+              <h3 id="aquatone-gallery-title">Aquatone Gallery</h3>
+              <p id="aquatone-gallery-subtitle" class="muted">Screenshots grouped by main domain.</p>
+            </div>
+            <div class="modal-actions">
+              <button id="close-aquatone-gallery" type="button">Close</button>
+            </div>
+          </div>
+          <div id="aquatone-gallery-content" class="aquatone-gallery">Loading...</div>
+        </div>
+      </div>
     </main>
-    <script type="module" src="app.js?v=20260315-2"></script>
+    <script type="module" src="app.js?v=20260403-1"></script>
   </body>
 </html>

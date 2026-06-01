@@ -1,14 +1,117 @@
 package server
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
+
+func readListPreview(path string, limit int) ([]string, error) {
+	if path == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		return []string{}, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	lines := make([]string, 0, limit)
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+		if len(lines) >= limit {
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return lines, nil
+}
+
+func countListLines(path string) (int, error) {
+	if path == "" {
+		return 0, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	defer f.Close()
+
+	count := 0
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		if strings.TrimSpace(scanner.Text()) != "" {
+			count++
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *Server) cachedListLineCount(path string) (int, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	if info.IsDir() {
+		return 0, nil
+	}
+
+	key := path
+	modTimeUnix := info.ModTime().UnixNano()
+	size := info.Size()
+
+	s.listMetaMu.Lock()
+	cached, ok := s.listMetaCache[key]
+	s.listMetaMu.Unlock()
+	if ok && cached.modTimeUnix == modTimeUnix && cached.size == size {
+		return cached.count, nil
+	}
+
+	count, err := countListLines(path)
+	if err != nil {
+		return 0, err
+	}
+
+	s.listMetaMu.Lock()
+	s.listMetaCache[key] = listMetaCacheEntry{
+		modTimeUnix: modTimeUnix,
+		size:        size,
+		count:       count,
+	}
+	s.listMetaMu.Unlock()
+
+	return count, nil
+}
 
 func (s *Server) uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -130,6 +233,52 @@ func (s *Server) listHandler(w http.ResponseWriter, r *http.Request) {
 		if info, statErr := os.Stat(dest); statErr == nil && !info.IsDir() {
 			present = true
 		}
+		if r.URL.Query().Get("meta") == "1" {
+			count, err := s.cachedListLineCount(dest)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"present": present,
+				"count":   count,
+				"entries": []string{},
+			})
+			return
+		}
+
+		limit := 0
+		if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+			parsedLimit, parseErr := strconv.Atoi(rawLimit)
+			if parseErr != nil || parsedLimit < 0 {
+				http.Error(w, "invalid limit", http.StatusBadRequest)
+				return
+			}
+			limit = parsedLimit
+		}
+		if limit > 0 {
+			entries, err := readListPreview(dest, limit)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			totalCount, err := s.cachedListLineCount(dest)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"present":     present,
+				"entries":     entries,
+				"count":       totalCount,
+				"truncated":   totalCount > len(entries),
+				"preview_max": limit,
+			})
+			return
+		}
+
 		lines := readListLines(dest)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{

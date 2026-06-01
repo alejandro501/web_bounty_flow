@@ -17,12 +17,22 @@ export function initScopeFilesFeature({
   fileViewerFilters,
   hopByHopStatusFilter,
   closeFileViewer,
+  openFileViewerAquatone,
+  fileViewerAquatoneMenu,
+  fileViewerAquatoneStatus,
   openFileViewerExport,
   fileViewerExportMenu,
   editFileViewer,
   saveFileViewer,
   fileViewerEditor,
+  aquatoneGalleryModal,
+  aquatoneGalleryTitle,
+  aquatoneGallerySubtitle,
+  aquatoneGalleryContent,
+  closeAquatoneGallery,
 }) {
+  const FILE_VIEWER_PREVIEW_LIMIT = 5000;
+  const AQUATONE_SUPPORTED_TYPES = new Set(["domains", "domains_http", "apidomains", "apidomains_http"]);
   const scopeCardNodes = new Map();
   let lastScopeSignature = "";
   let currentFileModalType = "";
@@ -33,9 +43,18 @@ export function initScopeFilesFeature({
   let fileViewerEditing = false;
   let fileViewerExportStructured = false;
   let currentFileModalRawText = "";
+  let aquatoneAutoOpenOnComplete = false;
+  let lastAquatoneStatusType = "";
 
-  async function fetchListMeta(type) {
-    const response = await fetch(`${backendUrl}/api/list?type=${encodeURIComponent(type)}`);
+  async function fetchListMeta(type, options = {}) {
+    const params = new URLSearchParams({ type: String(type || "") });
+    if (options.metaOnly) {
+      params.set("meta", "1");
+    }
+    if (Number.isInteger(options.limit) && options.limit > 0) {
+      params.set("limit", String(options.limit));
+    }
+    const response = await fetch(`${backendUrl}/api/list?${params.toString()}`);
     if (!response.ok) {
       throw new Error(await response.text());
     }
@@ -43,10 +62,16 @@ export function initScopeFilesFeature({
     const data = await response.json();
     if (Array.isArray(data.entries)) {
       const present = typeof data.present === "boolean" ? data.present : data.entries.length > 0;
-      return { present, entries: data.entries };
+      return {
+        present,
+        count: Number.isFinite(data.count) ? Number(data.count) : data.entries.length,
+        entries: data.entries,
+        truncated: Boolean(data.truncated),
+        previewMax: Number.isFinite(data.preview_max) ? Number(data.preview_max) : 0,
+      };
     }
 
-    return { present: false, entries: [] };
+    return { present: false, count: 0, entries: [], truncated: false, previewMax: 0 };
   }
 
   async function saveScopeFileContent(type, content) {
@@ -55,6 +80,38 @@ export function initScopeFilesFeature({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content }),
     });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  function supportsAquatone(type) {
+    return AQUATONE_SUPPORTED_TYPES.has(String(type || "").trim().toLowerCase());
+  }
+
+  async function fetchAquatoneStatus(type) {
+    const response = await fetch(`${backendUrl}/api/aquatone/status?type=${encodeURIComponent(type)}`);
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  async function runAquatone(type) {
+    const response = await fetch(`${backendUrl}/api/aquatone/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type }),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  async function fetchAquatoneGallery(type) {
+    const response = await fetch(`${backendUrl}/api/aquatone/gallery?type=${encodeURIComponent(type)}`);
     if (!response.ok) {
       throw new Error(await response.text());
     }
@@ -171,6 +228,141 @@ export function initScopeFilesFeature({
       });
   }
 
+  function setAquatoneStatusMessage(message = "", visible = false) {
+    if (!fileViewerAquatoneStatus) {
+      return;
+    }
+    fileViewerAquatoneStatus.textContent = message || "Aquatone idle.";
+    fileViewerAquatoneStatus.hidden = !visible;
+  }
+
+  function applyAquatoneMenuState(status = null, errorMessage = "") {
+    if (openFileViewerAquatone) {
+      openFileViewerAquatone.disabled = fileViewerEditing || !supportsAquatone(currentFileModalType);
+    }
+    if (!fileViewerAquatoneMenu) {
+      return;
+    }
+    const viewButton = fileViewerAquatoneMenu.querySelector("button[data-aquatone-action='view']");
+    const runButton = fileViewerAquatoneMenu.querySelector("button[data-aquatone-action='run']");
+    if (viewButton) {
+      viewButton.disabled = !status?.available || Boolean(status?.running);
+    }
+    if (runButton) {
+      runButton.disabled = Boolean(status?.running) || !supportsAquatone(currentFileModalType);
+    }
+    if (errorMessage) {
+      setAquatoneStatusMessage(`Aquatone error: ${errorMessage}`, true);
+      return;
+    }
+    if (!supportsAquatone(currentFileModalType)) {
+      setAquatoneStatusMessage("", false);
+      return;
+    }
+    if (!status) {
+      setAquatoneStatusMessage("Aquatone ready.", true);
+      return;
+    }
+    if (status.running) {
+      setAquatoneStatusMessage(`Aquatone running for ${currentFileModalLabel || currentFileModalType}...`, true);
+      return;
+    }
+    if (status.available) {
+      const countText = Number(status.screenshot_count || 0).toLocaleString();
+      const groupText = Number(status.group_count || 0).toLocaleString();
+      setAquatoneStatusMessage(`Aquatone gallery ready: ${countText} screenshots across ${groupText} groups.`, true);
+      return;
+    }
+    setAquatoneStatusMessage("No Aquatone screenshots available for this file yet.", true);
+  }
+
+  function renderAquatoneGallery(type, data) {
+    if (!aquatoneGalleryContent) {
+      return;
+    }
+    const groups = Array.isArray(data?.groups) ? data.groups : [];
+    if (!groups.length) {
+      aquatoneGalleryContent.innerHTML = '<p class="muted">No screenshots available yet.</p>';
+      return;
+    }
+    aquatoneGalleryContent.innerHTML = groups.map((group, index) => `
+      <details class="aquatone-group" ${index === 0 ? "open" : ""}>
+        <summary>
+          <span>${escapeHTML(group.root_domain || "(unknown)")}</span>
+          <span class="lead-domain-meta">${escapeHTML(String(group.count || 0))} screenshots</span>
+        </summary>
+        <div class="aquatone-grid">
+          ${(group.pages || []).map((page) => `
+            <article class="aquatone-card">
+              <div class="aquatone-card__url">
+                <a href="${escapeHTML(page.url || "#")}" target="_blank" rel="noopener noreferrer">${escapeHTML(page.url || page.hostname || "")}</a>
+              </div>
+              <div class="aquatone-card__meta">
+                <span>${escapeHTML(page.status || "")}</span>
+                ${page.title ? `<span>${escapeHTML(page.title)}</span>` : ""}
+              </div>
+              <a class="aquatone-card__shot" href="${escapeHTML(page.url || "#")}" target="_blank" rel="noopener noreferrer">
+                <img src="${backendUrl}/api/aquatone/asset?type=${encodeURIComponent(type)}&path=${encodeURIComponent(page.screenshot_path || "")}" alt="${escapeHTML(page.url || page.hostname || "Aquatone screenshot")}" loading="lazy" />
+              </a>
+            </article>
+          `).join("")}
+        </div>
+      </details>
+    `).join("");
+  }
+
+  async function openAquatoneGallery(type, label) {
+    if (!aquatoneGalleryModal || !aquatoneGalleryContent) {
+      return;
+    }
+    aquatoneGalleryModal.hidden = false;
+    if (aquatoneGalleryTitle) {
+      aquatoneGalleryTitle.textContent = `${label || type || "Scope File"} Aquatone`;
+    }
+    if (aquatoneGallerySubtitle) {
+      aquatoneGallerySubtitle.textContent = "Loading screenshots...";
+    }
+    aquatoneGalleryContent.innerHTML = '<p class="muted">Loading screenshots...</p>';
+    try {
+      const data = await fetchAquatoneGallery(type);
+      if (aquatoneGallerySubtitle) {
+        const generated = data?.generated_at ? new Date(data.generated_at).toLocaleString() : "unknown time";
+        const limitNote = data?.preview_limited ? ` Showing first ${Number(data.preview_max_items || 0).toLocaleString()} screenshots.` : "";
+        aquatoneGallerySubtitle.textContent = `Grouped by main domain. Generated ${generated}.${limitNote}`;
+      }
+      renderAquatoneGallery(type, data);
+    } catch (error) {
+      aquatoneGalleryContent.innerHTML = `<p class="muted">Aquatone gallery error: ${escapeHTML(error.message)}</p>`;
+      if (aquatoneGallerySubtitle) {
+        aquatoneGallerySubtitle.textContent = "Aquatone screenshots are not available yet.";
+      }
+    }
+  }
+
+  async function refreshAquatoneStatus(type = currentFileModalType) {
+    const normalizedType = String(type || "").trim().toLowerCase();
+    lastAquatoneStatusType = normalizedType;
+    if (!supportsAquatone(normalizedType)) {
+      applyAquatoneMenuState(null);
+      return null;
+    }
+    try {
+      const status = await fetchAquatoneStatus(normalizedType);
+      if (lastAquatoneStatusType !== normalizedType) {
+        return status;
+      }
+      applyAquatoneMenuState(status);
+      if (aquatoneAutoOpenOnComplete && !status.running && status.available && normalizedType === currentFileModalType) {
+        aquatoneAutoOpenOnComplete = false;
+        void openAquatoneGallery(normalizedType, currentFileModalLabel);
+      }
+      return status;
+    } catch (error) {
+      applyAquatoneMenuState(null, error.message);
+      return null;
+    }
+  }
+
   function isHopByHopDifferingStatusType(type) {
     return String(type || "").trim() === "smuggling_stack_findings";
   }
@@ -259,8 +451,14 @@ export function initScopeFilesFeature({
     if (openFileViewerExport) {
       openFileViewerExport.disabled = fileViewerEditing;
     }
+    if (openFileViewerAquatone) {
+      openFileViewerAquatone.disabled = fileViewerEditing || !supportsAquatone(currentFileModalType);
+    }
     if (fileViewerEditing && fileViewerExportMenu) {
       fileViewerExportMenu.hidden = true;
+    }
+    if (fileViewerEditing && fileViewerAquatoneMenu) {
+      fileViewerAquatoneMenu.hidden = true;
     }
     if (fileViewerFilters) {
       fileViewerFilters.hidden = fileViewerEditing || !isHopByHopDifferingStatusType(currentFileModalType) || currentFileModalRows.length === 0;
@@ -316,6 +514,7 @@ export function initScopeFilesFeature({
     currentFileModalRows = [];
     currentFileModalColumns = [];
     currentFileModalRawText = "";
+    aquatoneAutoOpenOnComplete = false;
     applyFileViewerExportFormatOptions(false);
     if (hopByHopStatusFilter) {
       hopByHopStatusFilter.value = "";
@@ -323,18 +522,32 @@ export function initScopeFilesFeature({
     if (fileViewerFilters) {
       fileViewerFilters.hidden = true;
     }
+    if (fileViewerAquatoneMenu) {
+      fileViewerAquatoneMenu.hidden = true;
+    }
     setFileViewerEditing(false);
     fileViewerTitle.textContent = label;
     if (fileViewerDescription) {
       fileViewerDescription.textContent = describeListFile(type, label);
     }
+    applyAquatoneMenuState(null);
     fileViewerContent.classList.remove("log-view--table");
     fileViewerContent.textContent = "Loading...";
     fileViewerModal.hidden = false;
+    void refreshAquatoneStatus(type);
     try {
-      const data = await fetchListMeta(type);
+      const data = await fetchListMeta(type, { limit: FILE_VIEWER_PREVIEW_LIMIT });
       currentFileModalLines = Array.isArray(data.entries) ? data.entries : [];
       currentFileModalRawText = currentFileModalLines.join("\n");
+      if (fileViewerDescription) {
+        const baseDescription = describeListFile(type, label);
+        const previewNote = data.truncated
+          ? ` Previewing first ${data.entries.length.toLocaleString()} of ${Number(data.count || data.entries.length).toLocaleString()} lines.`
+          : data.count > 0
+            ? ` ${Number(data.count).toLocaleString()} lines.`
+            : "";
+        fileViewerDescription.textContent = `${baseDescription}${previewNote}`;
+      }
       renderFileViewerData(currentFileModalLines);
     } catch (error) {
       applyFileViewerExportFormatOptions(false);
@@ -379,7 +592,7 @@ export function initScopeFilesFeature({
 
   function updateScopeCards(states) {
     const signature = listFiles
-      .map(({ type }) => `${type}:${states[type]?.present ? "1" : "0"}:${states[type]?.entries?.length || 0}`)
+      .map(({ type }) => `${type}:${states[type]?.present ? "1" : "0"}:${Number.isFinite(states[type]?.count) ? states[type].count : (states[type]?.entries?.length || 0)}`)
       .join("|");
     if (signature === lastScopeSignature) {
       return false;
@@ -391,7 +604,7 @@ export function initScopeFilesFeature({
       if (!node || !node.status) {
         return;
       }
-      const count = Array.isArray(states[type]?.entries) ? states[type].entries.length : 0;
+      const count = Number.isFinite(states[type]?.count) ? states[type].count : (Array.isArray(states[type]?.entries) ? states[type].entries.length : 0);
       const present = Boolean(states[type]?.present);
       if (node.open) {
         const baseLabel = node.open.dataset.baseLabel || node.open.dataset.label || type;
@@ -541,7 +754,7 @@ export function initScopeFilesFeature({
 
     await Promise.all(chunks.map(async (chunk) => {
       await Promise.all(chunk.map(async ({ type }) => {
-        states[type] = await fetchListMeta(type);
+        states[type] = await fetchListMeta(type, { metaOnly: true });
       }));
     }));
 
@@ -557,6 +770,12 @@ export function initScopeFilesFeature({
       fileViewerModal.hidden = true;
     }
     setFileViewerEditing(false);
+    if (fileViewerExportMenu) {
+      fileViewerExportMenu.hidden = true;
+    }
+    if (fileViewerAquatoneMenu) {
+      fileViewerAquatoneMenu.hidden = true;
+    }
   });
 
   editFileViewer?.addEventListener("click", () => {
@@ -604,7 +823,23 @@ export function initScopeFilesFeature({
     if (!fileViewerExportMenu || fileViewerEditing) {
       return;
     }
+    if (fileViewerAquatoneMenu) {
+      fileViewerAquatoneMenu.hidden = true;
+    }
     fileViewerExportMenu.hidden = !fileViewerExportMenu.hidden;
+  });
+
+  openFileViewerAquatone?.addEventListener("click", async () => {
+    if (!fileViewerAquatoneMenu || fileViewerEditing || !supportsAquatone(currentFileModalType)) {
+      return;
+    }
+    if (fileViewerExportMenu) {
+      fileViewerExportMenu.hidden = true;
+    }
+    if (fileViewerAquatoneMenu.hidden) {
+      await refreshAquatoneStatus(currentFileModalType);
+    }
+    fileViewerAquatoneMenu.hidden = !fileViewerAquatoneMenu.hidden;
   });
 
   fileViewerExportMenu?.addEventListener("click", async (event) => {
@@ -620,6 +855,30 @@ export function initScopeFilesFeature({
     await exportCurrentFileViewerContent(format || "txt");
   });
 
+  fileViewerAquatoneMenu?.addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-aquatone-action]");
+    if (!button || button.disabled) {
+      return;
+    }
+    const action = (button.dataset.aquatoneAction || "").trim().toLowerCase();
+    fileViewerAquatoneMenu.hidden = true;
+    if (action === "view") {
+      await openAquatoneGallery(currentFileModalType, currentFileModalLabel);
+      return;
+    }
+    if (action === "run") {
+      try {
+        aquatoneAutoOpenOnComplete = true;
+        setAquatoneStatusMessage(`Starting Aquatone for ${currentFileModalLabel || currentFileModalType}...`, true);
+        await runAquatone(currentFileModalType);
+        await refreshAquatoneStatus(currentFileModalType);
+      } catch (error) {
+        aquatoneAutoOpenOnComplete = false;
+        applyAquatoneMenuState(null, error.message);
+      }
+    }
+  });
+
   fileViewerModal?.addEventListener("click", (event) => {
     if (event.target === fileViewerModal) {
       fileViewerModal.hidden = true;
@@ -627,26 +886,53 @@ export function initScopeFilesFeature({
       if (fileViewerExportMenu) {
         fileViewerExportMenu.hidden = true;
       }
+      if (fileViewerAquatoneMenu) {
+        fileViewerAquatoneMenu.hidden = true;
+      }
+    }
+  });
+
+  closeAquatoneGallery?.addEventListener("click", () => {
+    if (aquatoneGalleryModal) {
+      aquatoneGalleryModal.hidden = true;
+    }
+  });
+
+  aquatoneGalleryModal?.addEventListener("click", (event) => {
+    if (event.target === aquatoneGalleryModal) {
+      aquatoneGalleryModal.hidden = true;
     }
   });
 
   document.addEventListener("click", (event) => {
-    if (!openFileViewerExport || !fileViewerExportMenu || fileViewerExportMenu.hidden) {
-      return;
-    }
-    const clickedButton = openFileViewerExport.contains(event.target);
-    const clickedMenu = fileViewerExportMenu.contains(event.target);
-    if (!clickedButton && !clickedMenu) {
+    const clickedExportButton = openFileViewerExport?.contains(event.target);
+    const clickedExportMenu = fileViewerExportMenu?.contains(event.target);
+    if (fileViewerExportMenu && !fileViewerExportMenu.hidden && !clickedExportButton && !clickedExportMenu) {
       fileViewerExportMenu.hidden = true;
+    }
+    const clickedAquatoneButton = openFileViewerAquatone?.contains(event.target);
+    const clickedAquatoneMenu = fileViewerAquatoneMenu?.contains(event.target);
+    if (fileViewerAquatoneMenu && !fileViewerAquatoneMenu.hidden && !clickedAquatoneButton && !clickedAquatoneMenu) {
+      fileViewerAquatoneMenu.hidden = true;
     }
   });
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && fileViewerModal && !fileViewerModal.hidden) {
+    if (event.key !== "Escape") {
+      return;
+    }
+    if (aquatoneGalleryModal && !aquatoneGalleryModal.hidden) {
+      aquatoneGalleryModal.hidden = true;
+      return;
+    }
+    if (fileViewerModal && !fileViewerModal.hidden) {
       fileViewerModal.hidden = true;
       setFileViewerEditing(false);
       if (fileViewerExportMenu) {
         fileViewerExportMenu.hidden = true;
+      }
+      if (fileViewerAquatoneMenu) {
+        fileViewerAquatoneMenu.hidden = true;
       }
     }
   });
@@ -655,6 +941,12 @@ export function initScopeFilesFeature({
     element?.addEventListener("input", () => renderFileViewerData(currentFileModalLines));
     element?.addEventListener("change", () => renderFileViewerData(currentFileModalLines));
   });
+
+  window.setInterval(() => {
+    if (fileViewerModal && !fileViewerModal.hidden && supportsAquatone(currentFileModalType)) {
+      void refreshAquatoneStatus(currentFileModalType);
+    }
+  }, 5000);
 
   return {
     fetchListMeta,

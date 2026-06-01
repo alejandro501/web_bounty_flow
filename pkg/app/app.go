@@ -868,7 +868,8 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 			runForSeed: func(ctx context.Context, seed string) ([]string, error) {
 				key := strings.TrimSpace(os.Getenv("BFLOW_CHAOS_API_KEY"))
 				if key == "" {
-					key = "5b1e13ba-b805-4202-bc9a-1779affb3676"
+					a.logger.Printf("%s: skipped for %s (BFLOW_CHAOS_API_KEY not configured)", StepChaos, seed)
+					return nil, nil
 				}
 				url := fmt.Sprintf("https://dns.projectdiscovery.io/dns/%s/subdomains", seed)
 				req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -4995,38 +4996,25 @@ func (a *App) generateDorkLinksIfNeeded(ctx context.Context) error {
 		}
 	}
 
-	moveCmd := strings.Join([]string{
-		fmt.Sprintf("mkdir -p %s %s %s %s", shellQuote(filepath.Join(a.cfg.Paths.DorkingDir, "shodan")), shellQuote(filepath.Join(a.cfg.Paths.DorkingDir, "github")), shellQuote(filepath.Join(a.cfg.Paths.DorkingDir, "google")), shellQuote(filepath.Join(a.cfg.Paths.DorkingDir, "wayback"))),
-		fmt.Sprintf("find %s -maxdepth 1 -type f -name '*shodan*' -exec mv {} %s/ \\;", shellQuote(a.cfg.Paths.DorkingDir), shellQuote(filepath.Join(a.cfg.Paths.DorkingDir, "shodan"))),
-		fmt.Sprintf("find %s -maxdepth 1 -type f -name '*github*' -exec mv {} %s/ \\;", shellQuote(a.cfg.Paths.DorkingDir), shellQuote(filepath.Join(a.cfg.Paths.DorkingDir, "github"))),
-		fmt.Sprintf("find %s -maxdepth 1 -type f -name '*google*' -exec mv {} %s/ \\;", shellQuote(a.cfg.Paths.DorkingDir), shellQuote(filepath.Join(a.cfg.Paths.DorkingDir, "google"))),
-		fmt.Sprintf("find %s -maxdepth 1 -type f -name '*wayback*' -exec mv {} %s/ \\;", shellQuote(a.cfg.Paths.DorkingDir), shellQuote(filepath.Join(a.cfg.Paths.DorkingDir, "wayback"))),
-	}, " && ")
-	if err := a.runShell(ctx, moveCmd); err != nil {
+	if err := organizeDorkOutput(a.cfg.Paths.DorkingDir); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (a *App) hasExistingDorkLinks() bool {
-	entries, err := os.ReadDir(a.cfg.Paths.DorkingDir)
+	return hasDorkLinksUnder(a.cfg.Paths.DorkingDir)
+}
+
+func hasDorkLinksUnder(dir string) bool {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return false
 	}
 	for _, entry := range entries {
 		if entry.IsDir() {
-			sub, subErr := os.ReadDir(filepath.Join(a.cfg.Paths.DorkingDir, entry.Name()))
-			if subErr != nil {
-				continue
-			}
-			for _, f := range sub {
-				if f.IsDir() {
-					continue
-				}
-				name := strings.ToLower(strings.TrimSpace(f.Name()))
-				if strings.Contains(name, "dork") && strings.HasSuffix(name, ".txt") {
-					return true
-				}
+			if hasDorkLinksUnder(filepath.Join(dir, entry.Name())) {
+				return true
 			}
 			continue
 		}
@@ -5036,6 +5024,95 @@ func (a *App) hasExistingDorkLinks() bool {
 		}
 	}
 	return false
+}
+
+func organizeDorkOutput(root string) error {
+	providers := []string{"shodan", "github", "google", "wayback"}
+	for _, provider := range providers {
+		if err := os.MkdirAll(filepath.Join(root, provider), 0o755); err != nil {
+			return err
+		}
+	}
+
+	// generate_dork_links may create a nested "dorking" directory. Normalize it
+	// back into the configured dorking output root used by the rest of the app.
+	nestedRoot := filepath.Join(root, "dorking")
+	for _, provider := range providers {
+		if err := moveDorkProviderFiles(filepath.Join(nestedRoot, provider), filepath.Join(root, provider), ""); err != nil {
+			return err
+		}
+	}
+	if err := moveFlatDorkFiles(nestedRoot, root, providers); err != nil {
+		return err
+	}
+	for _, provider := range providers {
+		_ = os.Remove(filepath.Join(nestedRoot, provider))
+	}
+	_ = os.Remove(nestedRoot)
+
+	return moveFlatDorkFiles(root, root, providers)
+}
+
+func moveFlatDorkFiles(srcDir, root string, providers []string) error {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(entry.Name()))
+		if !strings.HasSuffix(name, ".txt") {
+			continue
+		}
+		for _, provider := range providers {
+			if strings.Contains(name, provider) {
+				if err := moveDorkFile(filepath.Join(srcDir, entry.Name()), filepath.Join(root, provider, entry.Name())); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
+	return nil
+}
+
+func moveDorkProviderFiles(srcDir, dstDir, provider string) error {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if provider != "" && !strings.Contains(strings.ToLower(entry.Name()), provider) {
+			continue
+		}
+		if err := moveDorkFile(filepath.Join(srcDir, entry.Name()), filepath.Join(dstDir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func moveDorkFile(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if _, err := os.Stat(dst); err == nil {
+		return os.Remove(src)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.Rename(src, dst)
 }
 
 func (a *App) resolveDorkWordlist() string {

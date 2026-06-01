@@ -84,11 +84,20 @@ const fileViewerContent = document.getElementById("file-viewer-content");
 const fileViewerFilters = document.getElementById("file-viewer-filters");
 const hopByHopStatusFilter = document.getElementById("hop-by-hop-status-filter");
 const closeFileViewer = document.getElementById("close-file-viewer");
+const openFileViewerAquatone = document.getElementById("open-file-viewer-aquatone");
+const fileViewerAquatoneMenu = document.getElementById("file-viewer-aquatone-menu");
+const fileViewerAquatoneStatus = document.getElementById("file-viewer-aquatone-status");
 const openFileViewerExport = document.getElementById("open-file-viewer-export");
 const fileViewerExportMenu = document.getElementById("file-viewer-export-menu");
 const editFileViewer = document.getElementById("edit-file-viewer");
 const saveFileViewer = document.getElementById("save-file-viewer");
 const fileViewerEditor = document.getElementById("file-viewer-editor");
+const aquatoneGalleryModal = document.getElementById("aquatone-gallery-modal");
+const aquatoneGalleryTitle = document.getElementById("aquatone-gallery-title");
+const aquatoneGallerySubtitle = document.getElementById("aquatone-gallery-subtitle");
+const aquatoneGalleryContent = document.getElementById("aquatone-gallery-content");
+const closeAquatoneGallery = document.getElementById("close-aquatone-gallery");
+let activeViewName = document.body.dataset.activeView || "flow";
 const openAmassEnum = document.getElementById("open-amass-enum");
 const amassEnumModal = document.getElementById("amass-enum-modal");
 const closeAmassEnum = document.getElementById("close-amass-enum");
@@ -199,11 +208,19 @@ const scopeFilesFeature = initScopeFilesFeature({
   fileViewerFilters,
   hopByHopStatusFilter,
   closeFileViewer,
+  openFileViewerAquatone,
+  fileViewerAquatoneMenu,
+  fileViewerAquatoneStatus,
   openFileViewerExport,
   fileViewerExportMenu,
   editFileViewer,
   saveFileViewer,
   fileViewerEditor,
+  aquatoneGalleryModal,
+  aquatoneGalleryTitle,
+  aquatoneGallerySubtitle,
+  aquatoneGalleryContent,
+  closeAquatoneGallery,
 });
 
 const configNetworkFeature = initConfigNetworkFeature({
@@ -382,6 +399,7 @@ menuItems.forEach((item) => {
     menuItems.forEach((btn) => btn.classList.remove("is-active"));
     item.classList.add("is-active");
     const view = item.dataset.view;
+    activeViewName = view || "flow";
     views.forEach((section) => section.classList.remove("is-active"));
     const active = document.querySelector(`.view-${view}`);
     if (active) {
@@ -401,6 +419,31 @@ menuItems.forEach((item) => {
     cookieAuthFeature.activateView(view);
   });
 });
+
+function runSafely(task, label) {
+  return Promise.resolve()
+    .then(task)
+    .catch((error) => {
+      console.error(`[ui] ${label} failed`, error);
+    });
+}
+
+function schedulePoll(task, intervalMs, options = {}) {
+  let inFlight = false;
+  const shouldRun = typeof options.shouldRun === "function" ? options.shouldRun : () => true;
+  const tick = () => {
+    if (inFlight || document.hidden || !shouldRun()) {
+      return;
+    }
+    inFlight = true;
+    runSafely(task, options.label || "poll")
+      .finally(() => {
+        inFlight = false;
+      });
+  };
+  tick();
+  return window.setInterval(tick, intervalMs);
+}
 
 function normalizeTableCellValue(value) {
   if (value === null || value === undefined) {
@@ -481,42 +524,44 @@ function normalizeFilterValue(v) {
   return (v || "").toString().toLowerCase().trim();
 }
 
-configNetworkFeature.loadConfig();
-configNetworkFeature.loadFlowConfig();
-configNetworkFeature.loadNetworkSettings();
-setInterval(() => {
-  configNetworkFeature.loadNetworkSettings();
-}, 8000);
+void runSafely(() => configNetworkFeature.loadConfig(), "load config");
+void runSafely(() => configNetworkFeature.loadFlowConfig(), "load flow config");
+schedulePoll(() => configNetworkFeature.loadNetworkSettings(), 8000, {
+  label: "load network settings",
+  shouldRun: () => activeViewName === "flow" || activeViewName === "config",
+});
 flowRuntimeFeature.startPolling();
 
 scopeFilesFeature.initializeScopeCards();
-scopeFilesFeature.refreshScopeCards();
-setInterval(() => {
-  scopeFilesFeature.refreshScopeCards();
-}, 4000);
+schedulePoll(() => scopeFilesFeature.refreshScopeCards(), 12000, {
+  label: "refresh scope cards",
+  shouldRun: () => activeViewName === "flow",
+});
 manualDomainFeature.initializeManualDomainChecklist();
-setInterval(() => {
-  manualDomainFeature.refreshManualDomainOptions();
-}, 10000);
-setInterval(() => {
-  manualDomainFeature.refreshManualXSSStatus();
-}, 5000);
-discoveryTablesFeature.refreshAmassEnum({ renderOnlyIfOpen: false });
-setInterval(() => {
-  discoveryTablesFeature.refreshAmassEnum({ renderOnlyIfOpen: true });
-}, 5000);
-discoveryTablesFeature.refreshLiveWebservers({ renderOnlyIfOpen: false });
-setInterval(() => {
-  discoveryTablesFeature.refreshLiveWebservers({ renderOnlyIfOpen: true });
-}, 5000);
-leadsChaosFeature.refreshLeads({ force: true });
-setInterval(() => {
-  leadsChaosFeature.refreshLeads({ force: false });
-}, 7000);
-leadsChaosFeature.refreshChaos({ force: true });
-setInterval(() => {
-  leadsChaosFeature.refreshChaos({ force: false });
-}, 120000);
+schedulePoll(() => manualDomainFeature.refreshManualDomainOptions(), 15000, {
+  label: "refresh manual domain options",
+  shouldRun: () => activeViewName === "flow",
+});
+schedulePoll(() => manualDomainFeature.refreshManualXSSStatus(), 8000, {
+  label: "refresh manual xss status",
+  shouldRun: () => activeViewName === "flow",
+});
+schedulePoll(() => discoveryTablesFeature.refreshAmassEnum({ renderOnlyIfOpen: false }), 15000, {
+  label: "refresh amass enum",
+  shouldRun: () => activeViewName === "flow",
+});
+schedulePoll(() => discoveryTablesFeature.refreshLiveWebservers({ renderOnlyIfOpen: false }), 15000, {
+  label: "refresh live webservers",
+  shouldRun: () => activeViewName === "flow",
+});
+schedulePoll(() => leadsChaosFeature.refreshLeads({ force: activeViewName === "leads" }), 10000, {
+  label: "refresh leads",
+  shouldRun: () => activeViewName === "leads",
+});
+schedulePoll(() => leadsChaosFeature.refreshChaos({ force: activeViewName === "chaos" }), 120000, {
+  label: "refresh chaos",
+  shouldRun: () => activeViewName === "chaos",
+});
 
 initStrideFeature({
   strideTabs,
@@ -532,7 +577,7 @@ initStrideFeature({
   manualWorkspaceRoots,
   escapeHTML,
 });
-notesFeature.loadCanvas("notes");
-notesFeature.loadCanvas("manual_tips");
-manualDomainFeature.refreshManualDomainOptions();
-manualDomainFeature.refreshManualXSSStatus();
+void runSafely(() => notesFeature.loadCanvas("notes"), "load notes canvas");
+void runSafely(() => notesFeature.loadCanvas("manual_tips"), "load manual tips canvas");
+void runSafely(() => manualDomainFeature.refreshManualDomainOptions(), "initial manual domain options");
+void runSafely(() => manualDomainFeature.refreshManualXSSStatus(), "initial manual xss status");

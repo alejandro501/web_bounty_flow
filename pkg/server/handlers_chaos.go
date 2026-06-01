@@ -16,7 +16,6 @@ import (
 	"time"
 )
 
-const defaultChaosAPIKey = "5b1e13ba-b805-4202-bc9a-1779affb3676"
 const chaosMaxMainDomains = 12
 const chaosParallelism = 2
 const chaosAssocCacheTTL = 10 * time.Minute
@@ -92,7 +91,16 @@ func (s *Server) chaosHandler(w http.ResponseWriter, r *http.Request) {
 
 	key := strings.TrimSpace(os.Getenv("BFLOW_CHAOS_API_KEY"))
 	if key == "" {
-		key = defaultChaosAPIKey
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(chaosResponse{
+			Present:      false,
+			Source:       "projectdiscovery-chaos",
+			TotalDomains: 0,
+			Groups: []chaosGroup{{
+				Error: "BFLOW_CHAOS_API_KEY is not configured",
+			}},
+		})
+		return
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}

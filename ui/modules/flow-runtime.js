@@ -20,6 +20,12 @@ export function initFlowRuntimeFeature({
   let lastStatusText = "";
   let lastStepsSignature = "";
   let lastLogsSignature = "";
+  const pollLocks = {
+    status: false,
+    subdomain: false,
+    steps: false,
+    logs: false,
+  };
 
   async function postFlowAction(path) {
     const response = await fetch(`${backendUrl}${path}`, {
@@ -276,14 +282,28 @@ export function initFlowRuntimeFeature({
     refreshLogs,
     refreshSubdomainProgress,
     startPolling() {
-      void refreshStatus();
-      setInterval(refreshStatus, 5000);
-      void refreshSubdomainProgress();
-      setInterval(refreshSubdomainProgress, 4000);
-      void refreshSteps();
-      setInterval(refreshSteps, 3000);
-      void refreshLogs();
-      setInterval(refreshLogs, 3000);
+      const schedule = (key, fn, intervalMs) => {
+        const tick = () => {
+          if (document.hidden || pollLocks[key]) {
+            return;
+          }
+          pollLocks[key] = true;
+          Promise.resolve()
+            .then(fn)
+            .catch((error) => {
+              console.error(`[flow-runtime] ${key} poll failed`, error);
+            })
+            .finally(() => {
+              pollLocks[key] = false;
+            });
+        };
+        tick();
+        setInterval(tick, intervalMs);
+      };
+      schedule("status", refreshStatus, 5000);
+      schedule("subdomain", refreshSubdomainProgress, 4000);
+      schedule("steps", refreshSteps, 3000);
+      schedule("logs", refreshLogs, 3000);
     },
   };
 }
