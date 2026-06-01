@@ -1,6 +1,5 @@
 services:
   backend:
-    container_name: web-bounty-flw-backend
     image: web-bounty-flw-backend
     build:
       context: .
@@ -17,7 +16,6 @@ services:
       - DISPLAY=${DISPLAY:-:0}
     shm_size: "1gb"
   frontend:
-    container_name: web-bounty-flw-frontend
     image: web-bounty-flw-frontend
     build:
       context: ./ui
