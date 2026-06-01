@@ -894,6 +894,9 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 	reconDir := filepath.Join(baseDir, "recon")
 	amassDir := filepath.Join(reconDir, "amass")
 	rawDir := filepath.Join(reconDir, "raw")
+	dnsxValidatedPath := filepath.Join(rawDir, app.StepDNSX, "validated_hosts.txt")
+	legacyDNSXValidatedPath := filepath.Join(reconDir, "dnsx_validated_hosts.txt")
+	resolvedDomainsPath := filepath.Join(baseDir, "domains_resolved")
 
 	hasAnyScope := len(readListLines(s.cfg.Lists.Organizations)) > 0 ||
 		len(readListLines(s.cfg.Lists.Wildcards)) > 0 ||
@@ -901,6 +904,7 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 		len(readListLines(s.cfg.Lists.APIDomains)) > 0 ||
 		len(readListLines(s.cfg.Lists.IPs)) > 0
 
+	changed := false
 	doneIfPending := func(id string, cond bool) {
 		if !cond {
 			return
@@ -908,6 +912,18 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 		s.stepMu.Lock()
 		if s.stepState[id] == app.StepPending {
 			s.stepState[id] = app.StepDone
+			changed = true
+		}
+		s.stepMu.Unlock()
+	}
+	pendingIfStaleDone := func(id string, cond bool) {
+		if !cond {
+			return
+		}
+		s.stepMu.Lock()
+		if s.stepState[id] == app.StepDone {
+			s.stepState[id] = app.StepPending
+			changed = true
 		}
 		s.stepMu.Unlock()
 	}
@@ -949,11 +965,11 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 			fileExists(filepath.Join(rawDir, "subfinder")) &&
 			fileExists(filepath.Join(rawDir, "chaos")),
 	)
-	doneIfPending("dnsx-validate",
-		fileExists(filepath.Join(rawDir, "dnsx-validate", "validated_hosts.txt")) ||
-			fileExists(filepath.Join(reconDir, "dnsx_validated_hosts.txt")),
-	)
-	doneIfPending("consolidate", fileHasNonEmpty(s.cfg.Lists.Domains))
+	dnsxValidated := fileExists(dnsxValidatedPath) || fileExists(legacyDNSXValidatedPath)
+	consolidated := fileExists(resolvedDomainsPath)
+	doneIfPending("dnsx-validate", dnsxValidated)
+	doneIfPending("consolidate", consolidated)
+	pendingIfStaleDone("consolidate", !consolidated)
 	doneIfPending("httpx",
 		fileHasNonEmpty(filepath.Join(baseDir, "live-webservers.jsonl")) ||
 			fileHasNonEmpty(filepath.Join(baseDir, "domains_http")),
@@ -1049,6 +1065,9 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 	)
 	doneIfPending("fuzz-docs", fileExists(filepath.Join(baseDir, "fuzzing", "documentation", "doc_hits.txt")))
 	doneIfPending("fuzz-dirs", fileExists(filepath.Join(baseDir, "fuzzing", "ffuf", "dir_hits.txt")))
+	if changed {
+		s.persistStepState()
+	}
 }
 
 func (s *Server) initConfigStore() {
