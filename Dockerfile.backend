@@ -1,16 +1,17 @@
+# syntax=docker/dockerfile:1.7
 FROM golang:1.25-alpine AS build
 WORKDIR /src
 
 RUN apk add --no-cache git
 
 COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-RUN CGO_ENABLED=0 go build -o /bin/bflow-server ./cmd/server
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 RUN mkdir -p /toolbin
-RUN GOBIN=/toolbin go install github.com/alejandro501/generate_dork_links@latest && \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    GOBIN=/toolbin go install github.com/alejandro501/generate_dork_links@latest && \
     GOBIN=/toolbin go install github.com/alejandro501/sort_http@latest && \
     GOBIN=/toolbin go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest && \
     GOBIN=/toolbin go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest && \
@@ -24,6 +25,15 @@ RUN GOBIN=/toolbin go install github.com/alejandro501/generate_dork_links@latest
     GOBIN=/toolbin go install github.com/assetnote/h2csmuggler/cmd/h2csmuggler@latest && \
     GOBIN=/toolbin go install github.com/tomnomnom/anew@latest && \
     GOBIN=/toolbin go install github.com/tomnomnom/waybackurls@latest
+RUN wget -q -O /tmp/aquatone.zip https://github.com/michenriksen/aquatone/releases/download/v1.7.0/aquatone_linux_amd64_1.7.0.zip && \
+    unzip -p /tmp/aquatone.zip aquatone > /toolbin/aquatone && \
+    chmod +x /toolbin/aquatone && \
+    rm -f /tmp/aquatone.zip
+
+COPY . .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -o /bin/bflow-server ./cmd/server
 
 FROM alpine:3.18
 ARG APP_UID=1000
@@ -39,7 +49,12 @@ COPY scripts ./scripts
 COPY package.json package-lock.json ./
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
-RUN apk add --no-cache git curl unzip nmap python3 py3-pip su-exec bash nodejs npm
+RUN apk add --no-cache git curl unzip nmap python3 py3-pip su-exec bash nodejs npm chromium
+RUN printf '%s\n' \
+    '#!/bin/sh' \
+    'exec /usr/bin/chromium --headless --no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage --disable-gpu "$@"' \
+    > /usr/local/bin/chromium-aquatone && \
+    chmod +x /usr/local/bin/chromium-aquatone
 RUN pip3 install --no-cache-dir sublist3r
 RUN git clone --depth 1 https://github.com/offensive-security/exploitdb.git /opt/exploitdb && \
     ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit

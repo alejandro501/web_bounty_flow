@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -17,12 +18,15 @@ import (
 )
 
 const aquatoneGalleryPreviewLimit = 400
+const aquatoneScreenshotRetryLimit = 3
 
 type aquatoneJobState struct {
-	Running   bool   `json:"running"`
-	Status    string `json:"status"`
-	LastRun   string `json:"last_run,omitempty"`
-	LastError string `json:"last_error,omitempty"`
+	Running   bool               `json:"running"`
+	Status    string             `json:"status"`
+	LastRun   string             `json:"last_run,omitempty"`
+	LastError string             `json:"last_error,omitempty"`
+	LogPath   string             `json:"log_path,omitempty"`
+	Cancel    context.CancelFunc `json:"-"`
 }
 
 type aquatoneRunRequest struct {
@@ -44,6 +48,8 @@ type aquatoneSessionPage struct {
 	Hostname       string   `json:"hostname"`
 	Status         string   `json:"status"`
 	PageTitle      string   `json:"pageTitle"`
+	HeadersPath    string   `json:"headersPath"`
+	BodyPath       string   `json:"bodyPath"`
 	ScreenshotPath string   `json:"screenshotPath"`
 	HasScreenshot  bool     `json:"hasScreenshot"`
 	Addrs          []string `json:"addrs"`
@@ -77,6 +83,10 @@ func normalizeAquatoneType(raw string) string {
 
 func aquatoneOutputDir(baseDir, listType string) string {
 	return filepath.Join(baseDir, "aquatone", listType)
+}
+
+func aquatoneFailedRunDir(baseDir, listType string) string {
+	return filepath.Join(baseDir, "aquatone", listType+"_failed")
 }
 
 func (s *Server) aquatoneRunHandler(w http.ResponseWriter, r *http.Request) {
@@ -135,8 +145,12 @@ func (s *Server) aquatoneRunHandler(w http.ResponseWriter, r *http.Request) {
 
 	go s.runAquatoneForList(listType, listPath)
 
+	baseDir := filepath.Dir(s.cfg.Lists.Domains)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":     "started",
+		"output_dir": aquatoneOutputDir(baseDir, listType),
+	})
 }
 
 func (s *Server) aquatoneStatusHandler(w http.ResponseWriter, r *http.Request) {
@@ -161,6 +175,8 @@ func (s *Server) aquatoneStatusHandler(w http.ResponseWriter, r *http.Request) {
 		"status":           "idle",
 		"last_run":         "",
 		"last_error":       "",
+		"output_dir":       outputDir,
+		"failed_log":       filepath.Join(aquatoneFailedRunDir(baseDir, listType), "aquatone.log"),
 		"available":        gallery.TotalScreenshots > 0,
 		"group_count":      len(gallery.Groups),
 		"screenshot_count": gallery.TotalScreenshots,
@@ -169,11 +185,45 @@ func (s *Server) aquatoneStatusHandler(w http.ResponseWriter, r *http.Request) {
 		resp["status"] = job.Status
 		resp["last_run"] = job.LastRun
 		resp["last_error"] = job.LastError
+		resp["can_stop"] = job.Running && job.Cancel != nil
 	}
 	s.aquatoneMu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) aquatoneStopHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req aquatoneRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	listType := normalizeAquatoneType(req.Type)
+	if !aquatoneSupportedTypes[listType] {
+		http.Error(w, "aquatone is not supported for this file type", http.StatusBadRequest)
+		return
+	}
+
+	s.aquatoneMu.Lock()
+	job := s.aquatoneJobs[listType]
+	if job == nil || !job.Running || job.Cancel == nil {
+		s.aquatoneMu.Unlock()
+		http.Error(w, "no aquatone run in progress", http.StatusConflict)
+		return
+	}
+	cancel := job.Cancel
+	job.Status = "stopping"
+	s.aquatoneMu.Unlock()
+
+	cancel()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "stopping"})
 }
 
 func (s *Server) aquatoneGalleryHandler(w http.ResponseWriter, r *http.Request) {
@@ -205,6 +255,51 @@ func (s *Server) aquatoneGalleryHandler(w http.ResponseWriter, r *http.Request) 
 		"preview_max_items": aquatoneGalleryPreviewLimit,
 		"groups":            gallery.Groups,
 	})
+}
+
+func (s *Server) aquatoneLogHandler(w http.ResponseWriter, r *http.Request) {
+	listType := normalizeAquatoneType(r.URL.Query().Get("type"))
+	if !aquatoneSupportedTypes[listType] {
+		http.Error(w, "aquatone is not supported for this file type", http.StatusBadRequest)
+		return
+	}
+
+	baseDir := filepath.Dir(s.cfg.Lists.Domains)
+	s.aquatoneMu.Lock()
+	job := s.aquatoneJobs[listType]
+	logPath := ""
+	if job != nil {
+		logPath = strings.TrimSpace(job.LogPath)
+	}
+	s.aquatoneMu.Unlock()
+
+	candidates := []string{}
+	if logPath != "" {
+		candidates = append(candidates, logPath)
+	}
+	candidates = append(candidates,
+		filepath.Join(aquatoneOutputDir(baseDir, listType), "aquatone.log"),
+		filepath.Join(aquatoneFailedRunDir(baseDir, listType), "aquatone.log"),
+	)
+
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		data, err := readFileTail(candidate, 200_000)
+		if err == nil {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_, _ = w.Write(data)
+			return
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte{})
 }
 
 func (s *Server) aquatoneAssetHandler(w http.ResponseWriter, r *http.Request) {
@@ -263,23 +358,70 @@ func (s *Server) runAquatoneForList(listType, listPath string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Minute)
 	defer cancel()
+	s.setAquatoneJobState(listType, func(job *aquatoneJobState) {
+		job.Cancel = cancel
+	})
 
-	cmd := exec.CommandContext(ctx, "aquatone",
+	logPath := filepath.Join(tmpDir, "aquatone.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		s.finishAquatoneJob(listType, fmt.Sprintf("error: failed creating aquatone log: %v", err), err)
+		return
+	}
+	defer logFile.Close()
+	s.setAquatoneJobState(listType, func(job *aquatoneJobState) {
+		job.LogPath = logPath
+	})
+
+	args := []string{
 		"-out", tmpDir,
 		"-silent",
 		"-ports", "xlarge",
 		"-resolution", "1600,1200",
-	)
+	}
+	if chromePath := aquatoneChromePath(); chromePath != "" {
+		args = append(args, "-chrome-path", chromePath)
+	}
+	cmd := exec.CommandContext(ctx, "aquatone", args...)
 	cmd.Stdin = inputFile
-	output, err := cmd.CombinedOutput()
-	logPath := filepath.Join(tmpDir, "aquatone.log")
-	_ = os.WriteFile(logPath, output, 0o644)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	err = cmd.Run()
 	if err != nil {
+		failedDir := aquatoneFailedRunDir(baseDir, listType)
+		_ = os.RemoveAll(failedDir)
+		_ = os.Rename(tmpDir, failedDir)
+		s.setAquatoneJobState(listType, func(job *aquatoneJobState) {
+			job.LogPath = filepath.Join(failedDir, "aquatone.log")
+		})
 		if ctx.Err() == context.DeadlineExceeded {
 			s.finishAquatoneJob(listType, "error: aquatone run timed out", ctx.Err())
 			return
 		}
+		if ctx.Err() == context.Canceled {
+			s.finishAquatoneJob(listType, "stopped", nil)
+			return
+		}
 		s.finishAquatoneJob(listType, fmt.Sprintf("error: aquatone failed (%v)", err), err)
+		return
+	}
+
+	if err := s.retryMissingAquatoneScreenshots(ctx, listType, tmpDir, args, logFile); err != nil {
+		failedDir := aquatoneFailedRunDir(baseDir, listType)
+		_ = os.RemoveAll(failedDir)
+		_ = os.Rename(tmpDir, failedDir)
+		s.setAquatoneJobState(listType, func(job *aquatoneJobState) {
+			job.LogPath = filepath.Join(failedDir, "aquatone.log")
+		})
+		if ctx.Err() == context.DeadlineExceeded {
+			s.finishAquatoneJob(listType, "error: aquatone run timed out", ctx.Err())
+			return
+		}
+		if ctx.Err() == context.Canceled {
+			s.finishAquatoneJob(listType, "stopped", nil)
+			return
+		}
+		s.finishAquatoneJob(listType, fmt.Sprintf("error: aquatone retry failed (%v)", err), err)
 		return
 	}
 
@@ -289,8 +431,254 @@ func (s *Server) runAquatoneForList(listType, listPath string) {
 		s.finishAquatoneJob(listType, fmt.Sprintf("error: failed to publish aquatone output: %v", err), err)
 		return
 	}
+	s.setAquatoneJobState(listType, func(job *aquatoneJobState) {
+		job.LogPath = filepath.Join(finalDir, "aquatone.log")
+	})
 
 	s.finishAquatoneJob(listType, "done", nil)
+}
+
+func (s *Server) retryMissingAquatoneScreenshots(ctx context.Context, listType, outputDir string, baseArgs []string, logFile *os.File) error {
+	mergedAny := false
+	for attempt := 1; attempt <= aquatoneScreenshotRetryLimit; attempt++ {
+		missingURLs, err := aquatoneMissingScreenshotURLs(outputDir)
+		if err != nil {
+			return err
+		}
+		if len(missingURLs) == 0 {
+			if attempt == 1 {
+				_, _ = logFile.WriteString("\n[bflow] Aquatone captured screenshots for all discovered pages.\n")
+			} else {
+				_, _ = logFile.WriteString("\n[bflow] Aquatone retry captured all remaining screenshots.\n")
+			}
+			return nil
+		}
+
+		s.setAquatoneJobState(listType, func(job *aquatoneJobState) {
+			job.Status = fmt.Sprintf("retrying missing screenshots (%d/%d)", attempt, aquatoneScreenshotRetryLimit)
+		})
+		_, _ = logFile.WriteString(fmt.Sprintf("\n[bflow] Aquatone retry %d/%d for %d missing screenshots.\n", attempt, aquatoneScreenshotRetryLimit, len(missingURLs)))
+
+		retryDir, err := os.MkdirTemp(filepath.Dir(outputDir), fmt.Sprintf("%s-retry-%d-", filepath.Base(outputDir), attempt))
+		if err != nil {
+			return err
+		}
+
+		retryArgs := replaceAquatoneOutArg(baseArgs, retryDir)
+		cmd := exec.CommandContext(ctx, "aquatone", retryArgs...)
+		cmd.Stdin = strings.NewReader(strings.Join(missingURLs, "\n") + "\n")
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		runErr := cmd.Run()
+		if ctx.Err() != nil {
+			_ = os.RemoveAll(retryDir)
+			return ctx.Err()
+		}
+		if runErr != nil {
+			_, _ = logFile.WriteString(fmt.Sprintf("[bflow] Aquatone retry %d failed: %v\n", attempt, runErr))
+			_ = os.RemoveAll(retryDir)
+			continue
+		}
+
+		merged, err := mergeAquatoneRetryOutput(outputDir, retryDir)
+		_ = os.RemoveAll(retryDir)
+		if err != nil {
+			return err
+		}
+		_, _ = logFile.WriteString(fmt.Sprintf("[bflow] Aquatone retry %d recovered %d screenshots.\n", attempt, merged))
+		if merged > 0 {
+			mergedAny = true
+		}
+	}
+
+	missingURLs, err := aquatoneMissingScreenshotURLs(outputDir)
+	if err != nil {
+		return err
+	}
+	if len(missingURLs) > 0 {
+		_, _ = logFile.WriteString(fmt.Sprintf("\n[bflow] Aquatone left %d screenshots missing after %d retries.\n", len(missingURLs), aquatoneScreenshotRetryLimit))
+	}
+
+	if mergedAny {
+		_, _ = logFile.WriteString("\n[bflow] Regenerating Aquatone report after retries.\n")
+		cmd := exec.CommandContext(ctx, "aquatone", "-session", filepath.Join(outputDir, "aquatone_session.json"), "-out", outputDir)
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		return cmd.Run()
+	}
+	return nil
+}
+
+func replaceAquatoneOutArg(args []string, outputDir string) []string {
+	replaced := append([]string(nil), args...)
+	for i := 0; i < len(replaced)-1; i++ {
+		if replaced[i] == "-out" {
+			replaced[i+1] = outputDir
+			return replaced
+		}
+	}
+	return append(replaced, "-out", outputDir)
+}
+
+func aquatoneMissingScreenshotURLs(outputDir string) ([]string, error) {
+	session, err := readAquatoneSession(filepath.Join(outputDir, "aquatone_session.json"))
+	if err != nil {
+		return nil, err
+	}
+	missing := make([]string, 0)
+	for _, page := range session.Pages {
+		if strings.TrimSpace(page.URL) == "" {
+			continue
+		}
+		if !page.HasScreenshot || strings.TrimSpace(page.ScreenshotPath) == "" {
+			missing = append(missing, page.URL)
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(outputDir, filepath.Clean(page.ScreenshotPath))); err != nil {
+			missing = append(missing, page.URL)
+		}
+	}
+	sort.Strings(missing)
+	return missing, nil
+}
+
+func mergeAquatoneRetryOutput(outputDir, retryDir string) (int, error) {
+	mainSessionPath := filepath.Join(outputDir, "aquatone_session.json")
+	mainSession, err := readAquatoneSession(mainSessionPath)
+	if err != nil {
+		return 0, err
+	}
+	retrySession, err := readAquatoneSession(filepath.Join(retryDir, "aquatone_session.json"))
+	if err != nil {
+		return 0, err
+	}
+
+	mainKeysByURL := map[string]string{}
+	for key, page := range mainSession.Pages {
+		mainKeysByURL[page.URL] = key
+	}
+
+	merged := 0
+	for retryKey, retryPage := range retrySession.Pages {
+		if !retryPage.HasScreenshot || strings.TrimSpace(retryPage.ScreenshotPath) == "" {
+			continue
+		}
+		if err := copyAquatonePageArtifacts(outputDir, retryDir, retryPage); err != nil {
+			return merged, err
+		}
+		if mainKey, ok := mainKeysByURL[retryPage.URL]; ok {
+			mainSession.Pages[mainKey] = retryPage
+		} else {
+			mainSession.Pages[retryKey] = retryPage
+		}
+		merged++
+	}
+
+	raw, err := json.MarshalIndent(mainSession, "", "  ")
+	if err != nil {
+		return merged, err
+	}
+	return merged, os.WriteFile(mainSessionPath, append(raw, '\n'), 0o644)
+}
+
+func copyAquatonePageArtifacts(outputDir, retryDir string, page aquatoneSessionPage) error {
+	for _, relPath := range []string{page.HeadersPath, page.BodyPath, page.ScreenshotPath} {
+		relPath = strings.TrimSpace(relPath)
+		if relPath == "" {
+			continue
+		}
+		if err := copyAquatoneArtifact(outputDir, retryDir, relPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyAquatoneArtifact(outputDir, retryDir, relPath string) error {
+	cleanRel := filepath.Clean(relPath)
+	if cleanRel == "." || strings.HasPrefix(cleanRel, "..") || filepath.IsAbs(cleanRel) {
+		return fmt.Errorf("invalid aquatone artifact path: %s", relPath)
+	}
+	src := filepath.Join(retryDir, cleanRel)
+	dst := filepath.Join(outputDir, cleanRel)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func readAquatoneSession(path string) (aquatoneSession, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return aquatoneSession{}, err
+	}
+	var session aquatoneSession
+	if err := json.Unmarshal(raw, &session); err != nil {
+		return aquatoneSession{}, err
+	}
+	if session.Pages == nil {
+		session.Pages = map[string]aquatoneSessionPage{}
+	}
+	return session, nil
+}
+
+func readFileTail(path string, maxBytes int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	offset := int64(0)
+	if maxBytes > 0 && info.Size() > maxBytes {
+		offset = info.Size() - maxBytes
+	}
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+	if offset > 0 {
+		return append([]byte("[showing last log lines]\n"), data...), nil
+	}
+	return data, nil
+}
+
+func aquatoneChromePath() string {
+	for _, path := range []string{
+		os.Getenv("AQUATONE_CHROME_PATH"),
+		"/usr/local/bin/chromium-aquatone",
+		"/usr/bin/chromium-browser",
+		"/usr/bin/chromium",
+		"/usr/bin/google-chrome",
+		"/usr/bin/google-chrome-stable",
+	} {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path
+		}
+	}
+	return ""
 }
 
 func (s *Server) setAquatoneJobState(listType string, update func(job *aquatoneJobState)) {
@@ -314,6 +702,7 @@ func (s *Server) finishAquatoneJob(listType, status string, err error) {
 		} else {
 			job.LastError = ""
 		}
+		job.Cancel = nil
 	})
 }
 

@@ -123,8 +123,10 @@ func New(cfg *config.Config) *Server {
 	s.mux.HandleFunc("/api/manual/xss/run", s.corsMiddleware(s.manualXSSRunHandler))
 	s.mux.HandleFunc("/api/manual/xss/status", s.corsMiddleware(s.manualXSSStatusHandler))
 	s.mux.HandleFunc("/api/aquatone/run", s.corsMiddleware(s.aquatoneRunHandler))
+	s.mux.HandleFunc("/api/aquatone/stop", s.corsMiddleware(s.aquatoneStopHandler))
 	s.mux.HandleFunc("/api/aquatone/status", s.corsMiddleware(s.aquatoneStatusHandler))
 	s.mux.HandleFunc("/api/aquatone/gallery", s.corsMiddleware(s.aquatoneGalleryHandler))
+	s.mux.HandleFunc("/api/aquatone/log", s.corsMiddleware(s.aquatoneLogHandler))
 	s.mux.HandleFunc("/api/aquatone/asset", s.corsMiddleware(s.aquatoneAssetHandler))
 	s.mux.HandleFunc("/", s.corsMiddleware(s.rootHandler))
 

@@ -1421,6 +1421,52 @@ form {
   display: none;
 }
 
+.panel-aquatone-workspace {
+  min-height: calc(100vh - 4rem);
+}
+
+.aquatone-dashboard__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.aquatone-dashboard__header h2 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.aquatone-dashboard__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.aquatone-dashboard__actions button {
+  min-height: 42px;
+  padding: 0.65rem 0.9rem;
+}
+
+.aquatone-dashboard__actions .button-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
+.aquatone-dashboard__actions .button-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.aquatone-log-view {
+  min-height: 160px;
+  max-height: 260px;
+  margin: 0 0 1rem;
+  border-radius: 8px;
+  background: rgba(7, 8, 14, 0.72);
+}
+
 label {
   display: flex;
   flex-direction: column;
@@ -1799,6 +1845,11 @@ button:active {
   display: grid;
   gap: 0.9rem;
   padding-right: 0.25rem;
+}
+
+.aquatone-gallery--page {
+  max-height: none;
+  min-height: 52vh;
 }
 
 .aquatone-group {
