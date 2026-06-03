@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bounty Flow UI</title>
     <link rel="icon" type="image/svg+xml" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Ccircle cx="32" cy="32" r="22" fill="%23ff2747"/%3E%3C/svg%3E' />
-    <link rel="stylesheet" href="styles.css?v=20260602-4" />
+    <link rel="stylesheet" href="styles.css?v=20260602-6" />
   </head>
   <body data-backend-url="http://localhost:5050" data-active-view="flow">
     <main class="layout">
@@ -158,18 +158,10 @@
           <div class="aquatone-dashboard__header">
             <div>
               <h2>Aquatone</h2>
-              <p id="aquatone-dashboard-status" class="muted">Checking HTTP Domains screenshots...</p>
-            </div>
-            <div class="aquatone-dashboard__actions">
-              <button id="aquatone-run-http" type="button">Take HTTP Domain Screenshots</button>
-              <button id="aquatone-stop-http" class="button-secondary" type="button" hidden>Stop Process</button>
-              <button id="aquatone-refresh" type="button">Refresh</button>
+              <p id="aquatone-dashboard-status" class="muted">Checking Aquatone screenshots...</p>
             </div>
           </div>
-          <div id="aquatone-dashboard-gallery" class="aquatone-gallery aquatone-gallery--page">
-            <p class="muted">HTTP Domain screenshots will appear here after Aquatone runs.</p>
-          </div>
-          <pre id="aquatone-dashboard-log" class="log-view aquatone-log-view">Aquatone logs will appear here when screenshots are running.</pre>
+          <div id="aquatone-dashboard-sections" class="aquatone-dashboard-sections"></div>
         </section>
       </section>
 
@@ -847,6 +839,6 @@
         </div>
       </div>
     </main>
-    <script type="module" src="app.js?v=20260602-4"></script>
+    <script type="module" src="app.js?v=20260602-6"></script>
   </body>
 </html>

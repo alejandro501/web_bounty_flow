@@ -94,6 +94,7 @@ func New(cfg *config.Config) *Server {
 	s.initConfigStore()
 	appLogger := log.New(io.MultiWriter(os.Stdout, s), "[bflow] ", log.LstdFlags)
 	s.app = app.New(cfg, appLogger, s, s.updateStep, s.configStore)
+	s.app.SetHTTPDomainsReadyHook(s.startAquatoneForHTTPDomains)
 	s.applyNetworkSettingsToApp()
 
 	s.mux.HandleFunc("/api/upload", s.corsMiddleware(s.uploadHandler))

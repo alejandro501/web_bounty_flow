@@ -1450,6 +1450,33 @@ form {
   padding: 0.65rem 0.9rem;
 }
 
+.aquatone-dashboard-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.aquatone-dashboard-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  overflow: hidden;
+}
+
+.aquatone-dashboard-section > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.aquatone-dashboard-section__body {
+  padding: 0 1rem 1rem;
+}
+
 .aquatone-dashboard__actions .button-secondary {
   background: rgba(255, 255, 255, 0.08);
   box-shadow: none;

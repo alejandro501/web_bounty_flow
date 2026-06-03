@@ -147,11 +147,17 @@ type App struct {
 	logWriter    io.Writer
 	stepUpdate   func(id string, status StepStatus)
 	configStore  *configstore.Store
+	httpReady    func(context.Context, string)
 	torEnabled   bool
 	proxyEnabled bool
 	proxyHost    string
 	proxyPort    int
 	resumeDone   map[string]bool
+}
+
+// SetHTTPDomainsReadyHook registers a callback fired after live HTTP domains are written.
+func (a *App) SetHTTPDomainsReadyHook(hook func(context.Context, string)) {
+	a.httpReady = hook
 }
 
 // EgressProbe describes best-effort outbound IP detection.
@@ -1105,7 +1111,10 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 	}
 
 	if err := a.runStep(StepHTTPX, func() error {
-		_, err := a.buildHTTPDomains(ctx)
+		path, err := a.buildHTTPDomains(ctx)
+		if err == nil && a.httpReady != nil && len(readSafeLines(path)) > 0 {
+			a.httpReady(ctx, path)
+		}
 		return err
 	}); err != nil {
 		return err

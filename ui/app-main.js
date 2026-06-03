@@ -5,7 +5,7 @@ import { initCookieAuthFeature } from "./modules/cookie-auth.js?v=20260317-2";
 import { initLeadsChaosFeature } from "./modules/leads-chaos.js";
 import { initManualDomainFeature } from "./modules/manual-domain.js";
 import { initNotesFeature } from "./modules/notes.js?v=20260317-2";
-import { initScopeFilesFeature } from "./modules/scope-files.js?v=20260602-4";
+import { initScopeFilesFeature } from "./modules/scope-files.js?v=20260602-6";
 import { initStrideFeature } from "./modules/stride.js";
 import { initFlowRuntimeFeature } from "./modules/flow-runtime.js";
 import { FLOW_SEGMENTS, FLOW_SUBDOMAIN_TOOLS } from "./content/flow-data.js";
@@ -98,11 +98,7 @@ const aquatoneGallerySubtitle = document.getElementById("aquatone-gallery-subtit
 const aquatoneGalleryContent = document.getElementById("aquatone-gallery-content");
 const closeAquatoneGallery = document.getElementById("close-aquatone-gallery");
 const aquatoneDashboardStatus = document.getElementById("aquatone-dashboard-status");
-const aquatoneDashboardGallery = document.getElementById("aquatone-dashboard-gallery");
-const aquatoneDashboardLog = document.getElementById("aquatone-dashboard-log");
-const aquatoneRunHttp = document.getElementById("aquatone-run-http");
-const aquatoneStopHttp = document.getElementById("aquatone-stop-http");
-const aquatoneRefresh = document.getElementById("aquatone-refresh");
+const aquatoneDashboardSections = document.getElementById("aquatone-dashboard-sections");
 let activeViewName = document.body.dataset.activeView || "flow";
 const openAmassEnum = document.getElementById("open-amass-enum");
 const amassEnumModal = document.getElementById("amass-enum-modal");
@@ -228,11 +224,7 @@ const scopeFilesFeature = initScopeFilesFeature({
   aquatoneGalleryContent,
   closeAquatoneGallery,
   aquatoneDashboardStatus,
-  aquatoneDashboardGallery,
-  aquatoneDashboardLog,
-  aquatoneRunHttp,
-  aquatoneStopHttp,
-  aquatoneRefresh,
+  aquatoneDashboardSections,
 });
 
 const configNetworkFeature = initConfigNetworkFeature({

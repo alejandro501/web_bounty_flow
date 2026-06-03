@@ -20,6 +20,11 @@ import (
 const aquatoneGalleryPreviewLimit = 400
 const aquatoneScreenshotRetryLimit = 3
 
+var (
+	errAquatoneAlreadyRunning = errors.New("aquatone run already in progress")
+	errAquatoneNotInstalled   = errors.New("aquatone is not installed")
+)
+
 type aquatoneJobState struct {
 	Running   bool               `json:"running"`
 	Status    string             `json:"status"`
@@ -75,6 +80,10 @@ var aquatoneSupportedTypes = map[string]bool{
 	"domains_http":    true,
 	"apidomains":      true,
 	"apidomains_http": true,
+	"robots_urls":     true,
+	"wayback_urls":    true,
+	"katana_urls":     true,
+	"all_urls":        true,
 }
 
 func normalizeAquatoneType(raw string) string {
@@ -87,6 +96,65 @@ func aquatoneOutputDir(baseDir, listType string) string {
 
 func aquatoneFailedRunDir(baseDir, listType string) string {
 	return filepath.Join(baseDir, "aquatone", listType+"_failed")
+}
+
+func (s *Server) startAquatoneJob(listType string) (string, error) {
+	if !aquatoneSupportedTypes[listType] {
+		return "", errors.New("aquatone is not supported for this file type")
+	}
+	if _, err := exec.LookPath("aquatone"); err != nil {
+		return "", errAquatoneNotInstalled
+	}
+	listPath, err := s.listPath(listType)
+	if err != nil {
+		return "", err
+	}
+	if info, statErr := os.Stat(listPath); statErr != nil {
+		return "", os.ErrNotExist
+	} else if info.IsDir() {
+		return "", errors.New("scope file not found")
+	}
+	if count, countErr := s.cachedListLineCount(listPath); countErr != nil {
+		return "", countErr
+	} else if count == 0 {
+		return "", errors.New("scope file has no entries")
+	}
+
+	s.aquatoneMu.Lock()
+	job := s.aquatoneJobs[listType]
+	if job == nil {
+		job = &aquatoneJobState{}
+		s.aquatoneJobs[listType] = job
+	}
+	if job.Running {
+		s.aquatoneMu.Unlock()
+		return "", errAquatoneAlreadyRunning
+	}
+	job.Running = true
+	job.Status = "queued"
+	job.LastError = ""
+	s.aquatoneMu.Unlock()
+
+	go s.runAquatoneForList(listType, listPath)
+
+	baseDir := filepath.Dir(s.cfg.Lists.Domains)
+	return aquatoneOutputDir(baseDir, listType), nil
+}
+
+func (s *Server) startAquatoneForHTTPDomains(ctx context.Context, path string) {
+	if ctx.Err() != nil {
+		return
+	}
+	outputDir, err := s.startAquatoneJob("domains_http")
+	if err != nil {
+		if errors.Is(err, errAquatoneAlreadyRunning) {
+			s.logger.Printf("aquatone auto-start skipped for HTTP Domains: already running")
+			return
+		}
+		s.logger.Printf("aquatone auto-start skipped for HTTP Domains: %v", err)
+		return
+	}
+	s.logger.Printf("aquatone auto-started for HTTP Domains from %s; output: %s", path, outputDir)
 }
 
 func (s *Server) aquatoneRunHandler(w http.ResponseWriter, r *http.Request) {
@@ -106,50 +174,23 @@ func (s *Server) aquatoneRunHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "aquatone is not supported for this file type", http.StatusBadRequest)
 		return
 	}
-	if _, err := exec.LookPath("aquatone"); err != nil {
-		http.Error(w, "aquatone is not installed", http.StatusServiceUnavailable)
-		return
-	}
-	listPath, err := s.listPath(listType)
+	outputDir, err := s.startAquatoneJob(listType)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		status := http.StatusBadRequest
+		if errors.Is(err, errAquatoneNotInstalled) {
+			status = http.StatusServiceUnavailable
+		} else if errors.Is(err, errAquatoneAlreadyRunning) {
+			status = http.StatusConflict
+		} else if errors.Is(err, os.ErrNotExist) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
-	if info, statErr := os.Stat(listPath); statErr != nil || info.IsDir() {
-		http.Error(w, "scope file not found", http.StatusNotFound)
-		return
-	}
-	if count, countErr := s.cachedListLineCount(listPath); countErr != nil {
-		http.Error(w, countErr.Error(), http.StatusInternalServerError)
-		return
-	} else if count == 0 {
-		http.Error(w, "scope file has no entries", http.StatusBadRequest)
-		return
-	}
-
-	s.aquatoneMu.Lock()
-	job := s.aquatoneJobs[listType]
-	if job == nil {
-		job = &aquatoneJobState{}
-		s.aquatoneJobs[listType] = job
-	}
-	if job.Running {
-		s.aquatoneMu.Unlock()
-		http.Error(w, "aquatone run already in progress", http.StatusConflict)
-		return
-	}
-	job.Running = true
-	job.Status = "queued"
-	job.LastError = ""
-	s.aquatoneMu.Unlock()
-
-	go s.runAquatoneForList(listType, listPath)
-
-	baseDir := filepath.Dir(s.cfg.Lists.Domains)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":     "started",
-		"output_dir": aquatoneOutputDir(baseDir, listType),
+		"output_dir": outputDir,
 	})
 }
 

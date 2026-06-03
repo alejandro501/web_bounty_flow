@@ -31,16 +31,11 @@ export function initScopeFilesFeature({
   aquatoneGalleryContent,
   closeAquatoneGallery,
   aquatoneDashboardStatus,
-  aquatoneDashboardGallery,
-  aquatoneDashboardLog,
-  aquatoneRunHttp,
-  aquatoneStopHttp,
-  aquatoneRefresh,
+  aquatoneDashboardSections,
 }) {
   const FILE_VIEWER_PREVIEW_LIMIT = 5000;
-  const AQUATONE_PRIMARY_TYPE = "domains_http";
-  const AQUATONE_PRIMARY_LABEL = "HTTP Domains";
-  const AQUATONE_SUPPORTED_TYPES = new Set(["domains", "domains_http", "apidomains", "apidomains_http"]);
+  const AQUATONE_DASHBOARD_TYPES = ["domains_http", "domains", "apidomains_http", "apidomains", "robots_urls", "wayback_urls", "katana_urls", "all_urls"];
+  const AQUATONE_SUPPORTED_TYPES = new Set(AQUATONE_DASHBOARD_TYPES);
   const scopeCardNodes = new Map();
   let lastScopeSignature = "";
   let currentFileModalType = "";
@@ -264,6 +259,21 @@ export function initScopeFilesFeature({
     fileViewerAquatoneStatus.hidden = !visible;
   }
 
+  function updateFileViewerAquatoneVisibility() {
+    const supported = supportsAquatone(currentFileModalType);
+    if (openFileViewerAquatone) {
+      openFileViewerAquatone.hidden = !supported;
+      openFileViewerAquatone.disabled = fileViewerEditing || !supported;
+    }
+    if (!supported) {
+      if (fileViewerAquatoneMenu) {
+        fileViewerAquatoneMenu.hidden = true;
+      }
+      setAquatoneStatusMessage("", false);
+    }
+    return supported;
+  }
+
   function setAquatoneDashboardStatus(message = "") {
     if (!aquatoneDashboardStatus) {
       return;
@@ -271,33 +281,45 @@ export function initScopeFilesFeature({
     aquatoneDashboardStatus.textContent = message || "Aquatone idle.";
   }
 
-  function setAquatoneDashboardLog(message = "", options = {}) {
-    if (!aquatoneDashboardLog) {
+  function aquatoneLabelForType(type) {
+    const item = listFiles.find((entry) => entry.type === type);
+    return item?.label || type;
+  }
+
+  function aquatoneSectionForType(type) {
+    return aquatoneDashboardSections?.querySelector(`.aquatone-dashboard-section[data-aquatone-type="${CSS.escape(type)}"]`) || null;
+  }
+
+  function setAquatoneSectionLog(section, message = "", options = {}) {
+    const logElement = section?.querySelector("[data-aquatone-log]");
+    if (!logElement) {
       return;
     }
     const text = String(message || "").trimEnd();
-    aquatoneDashboardLog.textContent = text || "Aquatone logs will appear here when screenshots are running.";
+    logElement.textContent = text || "Aquatone logs will appear here when screenshots are running.";
     if (options.scrollToEnd) {
-      aquatoneDashboardLog.scrollTop = aquatoneDashboardLog.scrollHeight;
+      logElement.scrollTop = logElement.scrollHeight;
     }
   }
 
-  function updateAquatoneDashboardActions(status = null) {
+  function updateAquatoneSectionActions(section, status = null) {
     const running = Boolean(status?.running);
     const available = Boolean(status?.available);
-    if (aquatoneRunHttp) {
-      aquatoneRunHttp.disabled = running;
+    const runButton = section?.querySelector("button[data-aquatone-dashboard-action='run']");
+    const stopButton = section?.querySelector("button[data-aquatone-dashboard-action='stop']");
+    if (runButton) {
+      runButton.disabled = running;
       if (running) {
-        aquatoneRunHttp.textContent = "Screenshots In Progress";
+        runButton.textContent = "Screenshots In Progress";
       } else if (available) {
-        aquatoneRunHttp.textContent = "Take Fresh Screenshots";
+        runButton.textContent = "Take Fresh Screenshots";
       } else {
-        aquatoneRunHttp.textContent = "Take HTTP Domain Screenshots";
+        runButton.textContent = "Take Screenshots";
       }
     }
-    if (aquatoneStopHttp) {
-      aquatoneStopHttp.hidden = !running;
-      aquatoneStopHttp.disabled = !running;
+    if (stopButton) {
+      stopButton.hidden = !running;
+      stopButton.disabled = !running;
     }
   }
 
@@ -330,9 +352,7 @@ export function initScopeFilesFeature({
   }
 
   function applyAquatoneMenuState(status = null, errorMessage = "") {
-    if (openFileViewerAquatone) {
-      openFileViewerAquatone.disabled = fileViewerEditing || !supportsAquatone(currentFileModalType);
-    }
+    const supported = updateFileViewerAquatoneVisibility();
     if (!fileViewerAquatoneMenu) {
       return;
     }
@@ -348,7 +368,7 @@ export function initScopeFilesFeature({
       setAquatoneStatusMessage(`Aquatone error: ${errorMessage}`, true);
       return;
     }
-    if (!supportsAquatone(currentFileModalType)) {
+    if (!supported) {
       setAquatoneStatusMessage("", false);
       return;
     }
@@ -442,90 +462,151 @@ export function initScopeFilesFeature({
     }
   }
 
+  function ensureAquatoneDashboardSections() {
+    if (!aquatoneDashboardSections || aquatoneDashboardSections.dataset.rendered === "1") {
+      return;
+    }
+    aquatoneDashboardSections.innerHTML = AQUATONE_DASHBOARD_TYPES.map((type, index) => {
+      const label = aquatoneLabelForType(type);
+      return `
+        <details class="aquatone-dashboard-section" data-aquatone-type="${escapeHTML(type)}" ${index === 0 ? "open" : ""}>
+          <summary>
+            <span>${escapeHTML(label)}</span>
+            <span class="lead-domain-meta" data-aquatone-status>Checking...</span>
+          </summary>
+          <div class="aquatone-dashboard-section__body">
+            <div class="aquatone-dashboard__actions">
+              <button type="button" data-aquatone-dashboard-action="run">Take Screenshots</button>
+              <button type="button" class="button-secondary" data-aquatone-dashboard-action="stop" hidden>Stop Process</button>
+              <button type="button" class="button-secondary" data-aquatone-dashboard-action="refresh">Refresh</button>
+            </div>
+            <div class="aquatone-gallery aquatone-gallery--page" data-aquatone-gallery>
+              <p class="muted">${escapeHTML(label)} screenshots will appear here after Aquatone runs.</p>
+            </div>
+            <pre class="log-view aquatone-log-view" data-aquatone-log>Aquatone logs will appear here when screenshots are running.</pre>
+          </div>
+        </details>
+      `;
+    }).join("");
+    aquatoneDashboardSections.dataset.rendered = "1";
+  }
+
   async function refreshAquatoneDashboard() {
-    if (!aquatoneDashboardStatus) {
+    if (!aquatoneDashboardSections) {
       return null;
     }
+    ensureAquatoneDashboardSections();
+    const statuses = await Promise.all(AQUATONE_DASHBOARD_TYPES.map((type) => refreshAquatoneDashboardSection(type)));
+    const runningCount = statuses.filter((status) => status?.running).length;
+    const availableCount = statuses.filter((status) => status?.available).length;
+    if (runningCount > 0) {
+      setAquatoneDashboardStatus(`${runningCount} Aquatone screenshot run${runningCount === 1 ? "" : "s"} in progress.`);
+    } else {
+      setAquatoneDashboardStatus(`${availableCount} / ${AQUATONE_DASHBOARD_TYPES.length} Aquatone galleries available.`);
+    }
+    return statuses;
+  }
+
+  async function refreshAquatoneDashboardSection(type) {
+    const section = aquatoneSectionForType(type);
+    if (!section) {
+      return null;
+    }
+    const label = aquatoneLabelForType(type);
+    const statusElement = section.querySelector("[data-aquatone-status]");
+    const galleryElement = section.querySelector("[data-aquatone-gallery]");
     try {
-      const status = await fetchAquatoneStatus(AQUATONE_PRIMARY_TYPE);
-      setAquatoneDashboardStatus(aquatoneStatusText(status, AQUATONE_PRIMARY_LABEL));
-      updateAquatoneDashboardActions(status);
-      await refreshAquatoneDashboardLog(status);
-      if (status.available && aquatoneDashboardGallery) {
-        const data = await fetchAquatoneGallery(AQUATONE_PRIMARY_TYPE);
-        renderAquatoneGallery(AQUATONE_PRIMARY_TYPE, data, aquatoneDashboardGallery);
-      } else if (aquatoneDashboardGallery && !status.running) {
-        aquatoneDashboardGallery.innerHTML = '<p class="muted">HTTP Domain screenshots will appear here after Aquatone runs.</p>';
+      const status = await fetchAquatoneStatus(type);
+      if (statusElement) {
+        statusElement.textContent = aquatoneStatusText(status, label);
+      }
+      updateAquatoneSectionActions(section, status);
+      await refreshAquatoneSectionLog(type, status);
+      if (status.available && galleryElement) {
+        const data = await fetchAquatoneGallery(type);
+        renderAquatoneGallery(type, data, galleryElement);
+      } else if (galleryElement && !status.running) {
+        galleryElement.innerHTML = `<p class="muted">${escapeHTML(label)} screenshots will appear here after Aquatone runs.</p>`;
       }
       return status;
     } catch (error) {
-      setAquatoneDashboardStatus(`Aquatone error: ${error.message}`);
-      if (aquatoneRunHttp) {
-        aquatoneRunHttp.disabled = false;
+      if (statusElement) {
+        statusElement.textContent = `Aquatone error: ${error.message}`;
       }
-      updateAquatoneDashboardActions(null);
-      setAquatoneDashboardLog(`Aquatone log unavailable: ${error.message}`);
+      updateAquatoneSectionActions(section, null);
+      setAquatoneSectionLog(section, `Aquatone log unavailable: ${error.message}`);
       return null;
     }
   }
 
-  async function refreshAquatoneDashboardLog(status = null) {
-    if (!aquatoneDashboardLog) {
+  async function refreshAquatoneSectionLog(type, status = null) {
+    const section = aquatoneSectionForType(type);
+    if (!section) {
       return;
     }
     try {
-      const logText = await fetchAquatoneLog(AQUATONE_PRIMARY_TYPE);
+      const logText = await fetchAquatoneLog(type);
       if (logText.trim()) {
-        setAquatoneDashboardLog(logText, { scrollToEnd: Boolean(status?.running) });
+        setAquatoneSectionLog(section, logText, { scrollToEnd: Boolean(status?.running) });
         return;
       }
       if (status?.running) {
-        setAquatoneDashboardLog("Aquatone is running. Waiting for log output...");
+        setAquatoneSectionLog(section, "Aquatone is running. Waiting for log output...");
         return;
       }
       if (status?.last_error) {
-        setAquatoneDashboardLog(`Aquatone failed: ${status.last_error}`);
+        setAquatoneSectionLog(section, `Aquatone failed: ${status.last_error}`);
         return;
       }
-      setAquatoneDashboardLog("");
+      setAquatoneSectionLog(section, "");
     } catch (error) {
-      setAquatoneDashboardLog(`Aquatone log unavailable: ${error.message}`);
+      setAquatoneSectionLog(section, `Aquatone log unavailable: ${error.message}`);
     }
   }
 
-  async function runHTTPDomainAquatone() {
-    if (aquatoneRunHttp) {
-      aquatoneRunHttp.disabled = true;
-      aquatoneRunHttp.textContent = "Screenshots In Progress";
+  async function runDashboardAquatone(type) {
+    const section = aquatoneSectionForType(type);
+    const label = aquatoneLabelForType(type);
+    updateAquatoneSectionActions(section, { running: true });
+    const statusElement = section?.querySelector("[data-aquatone-status]");
+    if (statusElement) {
+      statusElement.textContent = `Starting Aquatone for ${label}...`;
     }
-    if (aquatoneStopHttp) {
-      aquatoneStopHttp.hidden = false;
-      aquatoneStopHttp.disabled = false;
-    }
-    setAquatoneDashboardStatus(`Starting Aquatone for ${AQUATONE_PRIMARY_LABEL}...`);
-    setAquatoneDashboardLog("Starting Aquatone...");
+    setAquatoneSectionLog(section, "Starting Aquatone...");
     try {
-      const startStatus = await runAquatone(AQUATONE_PRIMARY_TYPE);
-      setAquatoneDashboardStatus(`Aquatone queued for ${AQUATONE_PRIMARY_LABEL}.${formatAquatoneOutputNote(startStatus)}`);
-      await refreshAquatoneDashboard();
+      const startStatus = await runAquatone(type);
+      if (statusElement) {
+        statusElement.textContent = `Aquatone queued for ${label}.${formatAquatoneOutputNote(startStatus)}`;
+      }
+      await refreshAquatoneDashboardSection(type);
     } catch (error) {
-      setAquatoneDashboardStatus(`Aquatone error: ${error.message}`);
-      updateAquatoneDashboardActions(null);
+      if (statusElement) {
+        statusElement.textContent = `Aquatone error: ${error.message}`;
+      }
+      updateAquatoneSectionActions(section, null);
     }
   }
 
-  async function stopHTTPDomainAquatone() {
-    if (aquatoneStopHttp) {
-      aquatoneStopHttp.disabled = true;
+  async function stopDashboardAquatone(type) {
+    const section = aquatoneSectionForType(type);
+    const label = aquatoneLabelForType(type);
+    const stopButton = section?.querySelector("button[data-aquatone-dashboard-action='stop']");
+    const statusElement = section?.querySelector("[data-aquatone-status]");
+    if (stopButton) {
+      stopButton.disabled = true;
     }
-    setAquatoneDashboardStatus(`Stopping Aquatone for ${AQUATONE_PRIMARY_LABEL}...`);
+    if (statusElement) {
+      statusElement.textContent = `Stopping Aquatone for ${label}...`;
+    }
     try {
-      await stopAquatone(AQUATONE_PRIMARY_TYPE);
-      await refreshAquatoneDashboard();
+      await stopAquatone(type);
+      await refreshAquatoneDashboardSection(type);
     } catch (error) {
-      setAquatoneDashboardStatus(`Aquatone stop error: ${error.message}`);
-      if (aquatoneStopHttp) {
-        aquatoneStopHttp.disabled = false;
+      if (statusElement) {
+        statusElement.textContent = `Aquatone stop error: ${error.message}`;
+      }
+      if (stopButton) {
+        stopButton.disabled = false;
       }
     }
   }
@@ -618,9 +699,7 @@ export function initScopeFilesFeature({
     if (openFileViewerExport) {
       openFileViewerExport.disabled = fileViewerEditing;
     }
-    if (openFileViewerAquatone) {
-      openFileViewerAquatone.disabled = fileViewerEditing || !supportsAquatone(currentFileModalType);
-    }
+    updateFileViewerAquatoneVisibility();
     if (fileViewerEditing && fileViewerExportMenu) {
       fileViewerExportMenu.hidden = true;
     }
@@ -692,6 +771,7 @@ export function initScopeFilesFeature({
     if (fileViewerAquatoneMenu) {
       fileViewerAquatoneMenu.hidden = true;
     }
+    updateFileViewerAquatoneVisibility();
     setFileViewerEditing(false);
     fileViewerTitle.textContent = label;
     if (fileViewerDescription) {
@@ -701,7 +781,9 @@ export function initScopeFilesFeature({
     fileViewerContent.classList.remove("log-view--table");
     fileViewerContent.textContent = "Loading...";
     fileViewerModal.hidden = false;
-    void refreshAquatoneStatus(type);
+    if (supportsAquatone(type)) {
+      void refreshAquatoneStatus(type);
+    }
     try {
       const data = await fetchListMeta(type, { limit: FILE_VIEWER_PREVIEW_LIMIT });
       currentFileModalLines = Array.isArray(data.entries) ? data.entries : [];
@@ -1069,16 +1151,28 @@ export function initScopeFilesFeature({
     }
   });
 
-  aquatoneRunHttp?.addEventListener("click", () => {
-    void runHTTPDomainAquatone();
-  });
-
-  aquatoneStopHttp?.addEventListener("click", () => {
-    void stopHTTPDomainAquatone();
-  });
-
-  aquatoneRefresh?.addEventListener("click", () => {
-    void refreshAquatoneDashboard();
+  aquatoneDashboardSections?.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-aquatone-dashboard-action]");
+    if (!button || button.disabled) {
+      return;
+    }
+    const section = button.closest(".aquatone-dashboard-section");
+    const type = section?.dataset.aquatoneType || "";
+    if (!supportsAquatone(type)) {
+      return;
+    }
+    const action = button.dataset.aquatoneDashboardAction;
+    if (action === "run") {
+      void runDashboardAquatone(type);
+      return;
+    }
+    if (action === "stop") {
+      void stopDashboardAquatone(type);
+      return;
+    }
+    if (action === "refresh") {
+      void refreshAquatoneDashboardSection(type);
+    }
   });
 
   aquatoneGalleryModal?.addEventListener("click", (event) => {
