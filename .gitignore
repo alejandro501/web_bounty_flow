@@ -32,5 +32,6 @@ secrets.*
 .cache/
 tmp/
 resources/
+.playwright-mcp/
 
 node_modules/

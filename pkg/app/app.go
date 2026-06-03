@@ -581,12 +581,17 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	outOfScope := a.outOfScopeMatcher()
 
 	seenSeeds := make(map[string]struct{})
 	var normalizedSeeds []string
 	for _, seed := range seeds {
 		normalized := normalizeSubdomainSeed(seed)
 		if normalized == "" {
+			continue
+		}
+		if outOfScope.matches(normalized) {
+			a.logger.Printf("subdomain discovery: skipping out-of-scope wildcard seed %s", normalized)
 			continue
 		}
 		if _, ok := seenSeeds[normalized]; ok {
@@ -645,6 +650,9 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 			if host == "" {
 				continue
 			}
+			if outOfScope.matches(host) {
+				continue
+			}
 			toolResults[step][host] = struct{}{}
 		}
 	}
@@ -661,12 +669,18 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		if host == "" {
 			continue
 		}
+		if outOfScope.matches(host) {
+			continue
+		}
 		discoveredDomains[host] = struct{}{}
 	}
 	discoveredAPIDomains := make(map[string]struct{})
 	for _, line := range readSafeLines(a.cfg.Lists.APIDomains) {
 		host := normalizeDorkTarget(line)
 		if host == "" {
+			continue
+		}
+		if outOfScope.matches(host) {
 			continue
 		}
 		discoveredAPIDomains[host] = struct{}{}
@@ -681,6 +695,9 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 		for _, rawHost := range hosts {
 			host := normalizeDorkTarget(rawHost)
 			if host == "" {
+				continue
+			}
+			if outOfScope.matches(host) {
 				continue
 			}
 			if _, ok := discoveredDomains[host]; !ok {
@@ -990,6 +1007,10 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 					return r.runForSeed(ctx, seed)
 				})
 				if err != nil {
+					if isCTLSkipError(err) {
+						a.logger.Printf("%s: skipped seed=%s (%v)", r.step, seed, err)
+						return
+					}
 					markFailed(r.step, fmt.Errorf("%s failed for %s: %w", r.step, seed, err))
 					a.logger.Printf("%s: error seed=%s: %v", r.step, seed, err)
 					return
@@ -1035,6 +1056,9 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 	}
 	mergedHosts := make([]string, 0, len(mergedSet))
 	for host := range mergedSet {
+		if outOfScope.matches(host) {
+			continue
+		}
 		mergedHosts = append(mergedHosts, host)
 	}
 	sort.Strings(mergedHosts)
@@ -1054,7 +1078,7 @@ func (a *App) runSubdomainDiscovery(ctx context.Context) error {
 			if validateErr != nil {
 				return validateErr
 			}
-			validatedHosts = hosts
+			validatedHosts = filterOutOfScopeHosts(hosts, outOfScope)
 			if len(ips) > 0 {
 				if ipErr := a.mergeDiscoveredIPs(ips); ipErr != nil {
 					a.logger.Printf("%s: failed to update ips list: %v", StepDNSX, ipErr)
@@ -3089,17 +3113,12 @@ func (a *App) writeParamFuzzSummary(path string, metrics map[string]struct {
 
 func (a *App) collectParamFuzzEndpoints(path string) []string {
 	inScopeHosts := collectHostsFromLists(a.cfg.Lists.Domains, a.cfg.Lists.APIDomains)
-	outScopeHosts := collectHostsFromLists(a.cfg.Lists.OutOfScope)
+	outOfScope := a.outOfScopeMatcher()
 	inScope := make([]string, 0, len(inScopeHosts))
-	outScope := make([]string, 0, len(outScopeHosts))
 	for host := range inScopeHosts {
 		inScope = append(inScope, host)
 	}
-	for host := range outScopeHosts {
-		outScope = append(outScope, host)
-	}
 	sort.Strings(inScope)
-	sort.Strings(outScope)
 
 	seen := make(map[string]struct{})
 	var out []string
@@ -3119,7 +3138,7 @@ func (a *App) collectParamFuzzEndpoints(path string) []string {
 		if len(inScope) > 0 && !hostMatchesAny(host, inScope) {
 			continue
 		}
-		if hostMatchesAny(host, outScope) {
+		if outOfScope.matches(host) {
 			continue
 		}
 		clean := strings.TrimRight(u, "/")
@@ -3145,6 +3164,145 @@ func collectHostsFromLists(paths ...string) map[string]struct{} {
 				out[host] = struct{}{}
 			}
 		}
+	}
+	return out
+}
+
+type hostScopeMatcher struct {
+	patterns []hostScopePattern
+}
+
+type hostScopePattern struct {
+	raw    string
+	exact  string
+	suffix string
+	regex  *regexp.Regexp
+}
+
+func (a *App) outOfScopeMatcher() hostScopeMatcher {
+	if a == nil || a.cfg == nil {
+		return hostScopeMatcher{}
+	}
+	return newHostScopeMatcher(readSafeLines(a.cfg.Lists.OutOfScope))
+}
+
+func newHostScopeMatcher(lines []string) hostScopeMatcher {
+	patterns := make([]hostScopePattern, 0, len(lines))
+	for _, line := range lines {
+		normalized := normalizeHostScopePattern(line)
+		if normalized == "" {
+			continue
+		}
+		pattern := hostScopePattern{raw: normalized}
+		if strings.Contains(normalized, "*") {
+			trimmed := strings.TrimPrefix(normalized, "*.")
+			trimmed = strings.TrimPrefix(trimmed, "*")
+			if trimmed != "" && !strings.Contains(trimmed, "*") {
+				pattern.suffix = strings.Trim(trimmed, ".")
+			} else {
+				expr := "^" + regexp.QuoteMeta(normalized) + "$"
+				expr = strings.ReplaceAll(expr, "\\*", ".*")
+				pattern.regex = regexp.MustCompile(expr)
+			}
+		} else {
+			pattern.exact = normalized
+			pattern.suffix = normalized
+		}
+		patterns = append(patterns, pattern)
+	}
+	return hostScopeMatcher{patterns: patterns}
+}
+
+func normalizeHostScopePattern(raw string) string {
+	value := strings.TrimSpace(strings.ToLower(raw))
+	if value == "" {
+		return ""
+	}
+
+	if strings.Contains(value, "://") {
+		parsed, err := url.Parse(value)
+		if err == nil {
+			value = parsed.Host
+		}
+	}
+
+	value = strings.SplitN(value, "/", 2)[0]
+	value = strings.TrimSpace(strings.Trim(value, "."))
+	if value == "" {
+		return ""
+	}
+
+	wildcardPrefix := ""
+	switch {
+	case strings.HasPrefix(value, "*."):
+		wildcardPrefix = "*."
+		value = strings.TrimPrefix(value, "*.")
+	case strings.HasPrefix(value, "*"):
+		wildcardPrefix = "*"
+		value = strings.TrimPrefix(value, "*")
+	}
+
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		value = host
+	} else if strings.Count(value, ":") == 1 {
+		parts := strings.SplitN(value, ":", 2)
+		if _, convErr := strconv.Atoi(parts[1]); convErr == nil {
+			value = parts[0]
+		}
+	}
+
+	value = strings.TrimSpace(strings.Trim(value, "."))
+	if value == "" {
+		return ""
+	}
+	return wildcardPrefix + value
+}
+
+func (m hostScopeMatcher) matchesTarget(raw string) bool {
+	host := extractHostCandidate(raw)
+	if host == "" {
+		return false
+	}
+	return m.matches(host)
+}
+
+func (m hostScopeMatcher) matches(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(strings.Trim(host, ".")))
+	if host == "" {
+		return false
+	}
+	for _, pattern := range m.patterns {
+		if pattern.exact != "" && host == pattern.exact {
+			return true
+		}
+		if pattern.suffix != "" && (host == pattern.suffix || strings.HasSuffix(host, "."+pattern.suffix)) {
+			return true
+		}
+		if pattern.regex != nil && pattern.regex.MatchString(host) {
+			return true
+		}
+	}
+	return false
+}
+
+func filterOutOfScopeHosts(hosts []string, matcher hostScopeMatcher) []string {
+	out := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		if matcher.matchesTarget(host) {
+			continue
+		}
+		out = append(out, host)
+	}
+	return out
+}
+
+func filterOutOfScopeTargets(targets []string, matcher hostScopeMatcher) []string {
+	out := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if matcher.matchesTarget(target) {
+			continue
+		}
+		out = append(out, target)
 	}
 	return out
 }
@@ -4930,6 +5088,7 @@ func (a *App) runKatana(ctx context.Context, source string) error {
 func (a *App) consolidateURLCorpus() error {
 	reconDir := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "recon")
 	allURLs := filepath.Join(reconDir, "all_urls.txt")
+	outOfScope := a.outOfScopeMatcher()
 	if err := os.MkdirAll(reconDir, 0o755); err != nil {
 		return err
 	}
@@ -4947,6 +5106,9 @@ func (a *App) consolidateURLCorpus() error {
 		for _, line := range readSafeLines(p) {
 			u := normalizeFFUFHitURL(strings.TrimSpace(line))
 			if u == "" {
+				continue
+			}
+			if outOfScope.matchesTarget(u) {
 				continue
 			}
 			set[u] = struct{}{}
@@ -5192,6 +5354,7 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 		return "", nil
 	}
 
+	outOfScope := a.outOfScopeMatcher()
 	jsonlPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "live-webservers.jsonl")
 	domainsHTTPPath := filepath.Join(filepath.Dir(a.cfg.Lists.Domains), "domains_http")
 	probeInputs := unique(readSafeLines(a.cfg.Lists.Domains))
@@ -5200,6 +5363,7 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 		probeInputs = unique(append(readSafeLines(resolvedPath), probeInputs...))
 	}
 	probeInputs = unique(append(probeInputs, normalizeRootDomains(readSafeLines(a.cfg.Lists.Wildcards))...))
+	probeInputs = filterOutOfScopeHosts(probeInputs, outOfScope)
 	if len(probeInputs) == 0 {
 		return "", nil
 	}
@@ -5241,7 +5405,7 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 			return "", fmt.Errorf("http probing failed: httpx=%v; httprobe=%v", err, fallbackErr)
 		}
 
-		urls := readSafeLines(tmpOutputPath)
+		urls := filterOutOfScopeTargets(readSafeLines(tmpOutputPath), outOfScope)
 		if err := os.WriteFile(domainsHTTPPath, []byte(strings.Join(urls, "\n")), 0o644); err != nil {
 			return "", err
 		}
@@ -5268,6 +5432,9 @@ func (a *App) buildHTTPDomains(ctx context.Context) (string, error) {
 	for _, row := range rows {
 		u := normalizeLiveTarget(row.URL)
 		if u == "" {
+			continue
+		}
+		if outOfScope.matchesTarget(u) {
 			continue
 		}
 		urlSet[u] = struct{}{}
@@ -5359,10 +5526,14 @@ func toJSONLines(raw []byte) []string {
 
 func (a *App) generateAPIDomainsFromDomains() error {
 	lines := readSafeLines(a.cfg.Lists.Domains)
+	outOfScope := a.outOfScopeMatcher()
 	apiSet := make(map[string]struct{})
 	for _, line := range lines {
 		host := extractHostCandidate(line)
 		if host == "" {
+			continue
+		}
+		if outOfScope.matches(host) {
 			continue
 		}
 		if isAPIRelatedHost(host) {
@@ -5386,9 +5557,10 @@ func (a *App) syncProbedDomainViews(httpTargets []string) error {
 	domainsDeadPath := filepath.Join(baseDir, "domains_dead")
 	apiHTTPPath := filepath.Join(baseDir, "apidomains_http")
 	apiDeadPath := filepath.Join(baseDir, "apidomains_dead")
+	outOfScope := a.outOfScopeMatcher()
 
 	httpByHost := make(map[string]struct{})
-	httpURLs := unique(httpTargets)
+	httpURLs := filterOutOfScopeTargets(unique(httpTargets), outOfScope)
 	for _, target := range httpURLs {
 		host := extractHostCandidate(target)
 		if host == "" {
@@ -5407,6 +5579,9 @@ func (a *App) syncProbedDomainViews(httpTargets []string) error {
 		if host == "" {
 			continue
 		}
+		if outOfScope.matches(host) {
+			continue
+		}
 		if _, ok := httpByHost[host]; ok {
 			continue
 		}
@@ -5420,6 +5595,9 @@ func (a *App) syncProbedDomainViews(httpTargets []string) error {
 		if host == "" {
 			continue
 		}
+		if outOfScope.matches(host) {
+			continue
+		}
 		apiHostSet[host] = struct{}{}
 	}
 
@@ -5427,6 +5605,9 @@ func (a *App) syncProbedDomainViews(httpTargets []string) error {
 	for _, target := range httpURLs {
 		host := extractHostCandidate(target)
 		if host == "" {
+			continue
+		}
+		if outOfScope.matches(host) {
 			continue
 		}
 		if _, ok := apiHostSet[host]; ok {
@@ -5438,6 +5619,9 @@ func (a *App) syncProbedDomainViews(httpTargets []string) error {
 	for _, api := range apiDomains {
 		host := extractHostCandidate(api)
 		if host == "" {
+			continue
+		}
+		if outOfScope.matches(host) {
 			continue
 		}
 		if _, ok := httpByHost[host]; ok {
@@ -5799,6 +5983,9 @@ func (a *App) runForSeedWithRetry(
 		}
 
 		wait := backoff * time.Duration(1<<(attempt-1))
+		if retryAfter := retryAfterDelay(err); retryAfter > wait {
+			wait = retryAfter
+		}
 		a.logger.Printf("%s: retry seed=%s attempt=%d/%d after error: %v", step, seed, attempt+1, attempts, err)
 		timer := time.NewTimer(wait)
 		select {
@@ -5867,18 +6054,63 @@ func (a *App) fetchCTLHosts(ctx context.Context, seed string) ([]string, error) 
 	return hosts, err
 }
 
+type retryAfterError interface {
+	RetryAfter() time.Duration
+}
+
+type ctlHTTPError struct {
+	status     int
+	retryAfter time.Duration
+}
+
+func (e ctlHTTPError) Error() string {
+	if e.retryAfter > 0 {
+		return fmt.Sprintf("crt.sh returned status %d; retry after %s", e.status, e.retryAfter.Round(time.Second))
+	}
+	return fmt.Sprintf("crt.sh returned status %d", e.status)
+}
+
+func (e ctlHTTPError) RetryAfter() time.Duration {
+	return e.retryAfter
+}
+
+func (e ctlHTTPError) skipSeed() bool {
+	return e.status == http.StatusTooManyRequests ||
+		e.status == http.StatusBadGateway ||
+		e.status == http.StatusServiceUnavailable ||
+		e.status == http.StatusGatewayTimeout
+}
+
+func retryAfterDelay(err error) time.Duration {
+	var typed retryAfterError
+	if errors.As(err, &typed) {
+		return typed.RetryAfter()
+	}
+	return 0
+}
+
+func isCTLSkipError(err error) bool {
+	var typed ctlHTTPError
+	return errors.As(err, &typed) && typed.skipSeed()
+}
+
 func (a *App) fetchCTLHostsRaw(ctx context.Context, seed string) ([]string, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://crt.sh/?q=%%25.%s&output=json", seed), nil)
 	if err != nil {
 		return nil, nil, err
 	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "web-bounty-flow/1.0")
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return nil, nil, fmt.Errorf("crt.sh returned status %d", resp.StatusCode)
+		return nil, nil, ctlHTTPError{
+			status:     resp.StatusCode,
+			retryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
+		}
 	}
 
 	rawBody, err := io.ReadAll(resp.Body)
@@ -5890,6 +6122,23 @@ func (a *App) fetchCTLHostsRaw(ctx context.Context, seed string) ([]string, []by
 		return nil, nil, err
 	}
 	return hosts, rawBody, nil
+}
+
+func parseRetryAfter(raw string) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if at, err := http.ParseTime(raw); err == nil {
+		delay := time.Until(at)
+		if delay > 0 {
+			return delay
+		}
+	}
+	return 0
 }
 
 func parseCTLHostsFromBody(body []byte, seed string) ([]string, error) {

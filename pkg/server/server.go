@@ -901,12 +901,6 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 	legacyDNSXValidatedPath := filepath.Join(reconDir, "dnsx_validated_hosts.txt")
 	resolvedDomainsPath := filepath.Join(baseDir, "domains_resolved")
 
-	hasAnyScope := len(readListLines(s.cfg.Lists.Organizations)) > 0 ||
-		len(readListLines(s.cfg.Lists.Wildcards)) > 0 ||
-		len(readListLines(s.cfg.Lists.Domains)) > 0 ||
-		len(readListLines(s.cfg.Lists.APIDomains)) > 0 ||
-		len(readListLines(s.cfg.Lists.IPs)) > 0
-
 	changed := false
 	doneIfPending := func(id string, cond bool) {
 		if !cond {
@@ -931,8 +925,6 @@ func (s *Server) inferCompletedStepsFromArtifacts() {
 		s.stepMu.Unlock()
 	}
 
-	doneIfPending("load-config", true)
-	doneIfPending("validate-inputs", hasAnyScope)
 	doneIfPending("subdomain-enumeration", fileHasNonEmpty(s.cfg.Lists.Domains))
 	doneIfPending("amass", dirHasNonEmptyExt(amassDir, ".txt"))
 	doneIfPending("sublist3r",
