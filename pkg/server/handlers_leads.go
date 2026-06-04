@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,13 @@ type leadReplayPayload struct {
 	ID     string `json:"id"`
 	URL    string `json:"url,omitempty"`
 	Method string `json:"method,omitempty"`
+}
+
+type leadRequestSpec struct {
+	Method  string
+	URL     string
+	Headers map[string]string
+	Body    string
 }
 
 func (s *Server) leadStateHandler(w http.ResponseWriter, r *http.Request) {
@@ -107,37 +115,42 @@ func (s *Server) leadReplayHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "lead not found", http.StatusNotFound)
 		return
 	}
-	targetURL := strings.TrimSpace(payload.URL)
-	if targetURL == "" {
-		targetURL = strings.TrimSpace(firstNonEmptyString(
-			asRawString(selected.Evidence["mutated_url"]),
-			asRawString(selected.Evidence["endpoint"]),
-			selected.Target,
-		))
+	spec := leadRequestSpecFromLead(*selected)
+	if override := strings.TrimSpace(payload.URL); override != "" {
+		spec.URL = override
 	}
-	if targetURL == "" {
+	if override := strings.ToUpper(strings.TrimSpace(payload.Method)); override != "" {
+		spec.Method = override
+	}
+	if spec.URL == "" {
 		http.Error(w, "lead has no replayable url", http.StatusBadRequest)
 		return
 	}
-	parsedURL, err := url.Parse(targetURL)
+	parsedURL, err := url.Parse(spec.URL)
 	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
 		http.Error(w, "invalid replay url", http.StatusBadRequest)
 		return
 	}
-	method := strings.ToUpper(strings.TrimSpace(payload.Method))
-	if method == "" {
-		method = strings.ToUpper(strings.TrimSpace(firstNonEmptyString(asRawString(selected.Evidence["method"]), "GET")))
-	}
+	method := strings.ToUpper(strings.TrimSpace(spec.Method))
 	if method == "" {
 		method = http.MethodGet
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, parsedURL.String(), nil)
+	var body io.Reader
+	if spec.Body != "" {
+		body = strings.NewReader(spec.Body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, parsedURL.String(), body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	for key, value := range spec.Headers {
+		if strings.TrimSpace(key) != "" && strings.TrimSpace(value) != "" {
+			req.Header.Set(key, value)
+		}
 	}
 
 	proxyEnabled, proxyURL := s.currentProxyURL()
@@ -162,6 +175,7 @@ func (s *Server) leadReplayHandler(w http.ResponseWriter, r *http.Request) {
 		"id":                selected.ID,
 		"url":               parsedURL.String(),
 		"method":            method,
+		"curl":              curlFromLeadRequestSpec(spec),
 		"status_code":       resp.StatusCode,
 		"content_type":      strings.TrimSpace(resp.Header.Get("Content-Type")),
 		"duration_ms":       time.Since(started).Milliseconds(),
@@ -327,6 +341,116 @@ func normalizeLeadBucket(raw string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func buildLeadCurl(category, source string, row map[string]any) string {
+	return curlFromLeadRequestSpec(leadRequestSpecFromRow(category, source, row))
+}
+
+func leadRequestSpecFromLead(lead leadItem) leadRequestSpec {
+	return leadRequestSpecFromRow(lead.Category, lead.Source, lead.Evidence)
+}
+
+func leadRequestSpecFromRow(category, source string, row map[string]any) leadRequestSpec {
+	targetURL := strings.TrimSpace(firstNonEmptyString(
+		asRawString(row["mutated_url"]),
+		asRawString(row["endpoint"]),
+		asRawString(row["url"]),
+	))
+	method := strings.ToUpper(strings.TrimSpace(firstNonEmptyString(asRawString(row["method"]), http.MethodGet)))
+	param := strings.TrimSpace(asRawString(row["param"]))
+	payload := asRawString(row["payload"])
+	vector := strings.ToLower(strings.TrimSpace(firstNonEmptyString(asRawString(row["vector"]), asRawString(row["mode"]))))
+	family := strings.ToLower(strings.TrimSpace(asRawString(row["family"])))
+	headers := map[string]string{}
+	body := ""
+
+	switch vector {
+	case "x-www-form-urlencoded":
+		method = http.MethodPost
+		headers["Content-Type"] = "application/x-www-form-urlencoded"
+		if param != "" {
+			body = url.Values{param: []string{"BFLOWFUZZ123"}}.Encode()
+		}
+	case "json", "json-body":
+		method = http.MethodPost
+		headers["Content-Type"] = "application/json"
+		value := firstNonEmptyString(payload, "BFLOWFUZZ123")
+		if param != "" {
+			raw, _ := json.Marshal(map[string]string{param: value})
+			body = string(raw)
+		} else {
+			body = "{}"
+		}
+	case "xml-body":
+		method = http.MethodPost
+		headers["Content-Type"] = "application/xml"
+		body = payload
+		if family == "soap" {
+			headers["SOAPAction"] = "urn:bflow:probe"
+		}
+	case "request-header":
+		method = http.MethodGet
+		if param != "" {
+			headers[param] = "BFLOWFUZZ123"
+		}
+	case "cookie":
+		method = http.MethodGet
+		if param != "" {
+			headers["Cookie"] = param + "=BFLOWFUZZ123"
+		}
+	}
+
+	if strings.Contains(source, "cors/") {
+		if origin := strings.TrimSpace(firstNonEmptyString(asRawString(row["origin"]), asRawString(row["request_origin"]))); origin != "" {
+			headers["Origin"] = origin
+		}
+	}
+	if strings.EqualFold(category, "clickjacking") {
+		method = http.MethodGet
+	}
+
+	return leadRequestSpec{
+		Method:  firstNonEmptyString(method, http.MethodGet),
+		URL:     targetURL,
+		Headers: headers,
+		Body:    body,
+	}
+}
+
+func curlFromLeadRequestSpec(spec leadRequestSpec) string {
+	if strings.TrimSpace(spec.URL) == "" {
+		return ""
+	}
+	var out bytes.Buffer
+	method := strings.ToUpper(strings.TrimSpace(firstNonEmptyString(spec.Method, http.MethodGet)))
+	out.WriteString("curl -i -sS")
+	out.WriteString(" -X ")
+	out.WriteString(shellSingleQuote(method))
+	keys := make([]string, 0, len(spec.Headers))
+	for key := range spec.Headers {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := strings.TrimSpace(spec.Headers[key])
+		if strings.TrimSpace(key) == "" || value == "" {
+			continue
+		}
+		out.WriteString(" -H ")
+		out.WriteString(shellSingleQuote(key + ": " + value))
+	}
+	if spec.Body != "" {
+		out.WriteString(" --data-raw ")
+		out.WriteString(shellSingleQuote(spec.Body))
+	}
+	out.WriteString(" ")
+	out.WriteString(shellSingleQuote(strings.TrimSpace(spec.URL)))
+	return out.String()
+}
+
+func shellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func (s *Server) loadLeadStates() {

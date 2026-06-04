@@ -30,6 +30,11 @@ export function initScopeFilesFeature({
   aquatoneGallerySubtitle,
   aquatoneGalleryContent,
   closeAquatoneGallery,
+  aquatoneImageModal,
+  aquatoneImageTitle,
+  aquatoneImageSubtitle,
+  aquatoneImagePreview,
+  closeAquatoneImage,
   aquatoneDashboardStatus,
   aquatoneDashboardSections,
 }) {
@@ -391,20 +396,23 @@ export function initScopeFilesFeature({
           <span class="lead-domain-meta">${escapeHTML(String(group.count || 0))} screenshots</span>
         </summary>
         <div class="aquatone-grid">
-          ${(group.pages || []).map((page) => `
-            <article class="aquatone-card">
-              <div class="aquatone-card__url">
-                <a href="${escapeHTML(page.url || "#")}" target="_blank" rel="noopener noreferrer">${escapeHTML(page.url || page.hostname || "")}</a>
-              </div>
-              <div class="aquatone-card__meta">
-                <span>${escapeHTML(page.status || "")}</span>
-                ${page.title ? `<span>${escapeHTML(page.title)}</span>` : ""}
-              </div>
-              <a class="aquatone-card__shot" href="${escapeHTML(page.url || "#")}" target="_blank" rel="noopener noreferrer">
-                <img src="${backendUrl}/api/aquatone/asset?type=${encodeURIComponent(type)}&path=${encodeURIComponent(page.screenshot_path || "")}" alt="${escapeHTML(page.url || page.hostname || "Aquatone screenshot")}" loading="lazy" />
-              </a>
-            </article>
-          `).join("")}
+          ${(group.pages || []).map((page) => {
+            const screenshotUrl = `${backendUrl}/api/aquatone/asset?type=${encodeURIComponent(type)}&path=${encodeURIComponent(page.screenshot_path || "")}`;
+            return `
+              <article class="aquatone-card">
+                <div class="aquatone-card__url">
+                  <a href="${escapeHTML(page.url || "#")}" target="_blank" rel="noopener noreferrer">${escapeHTML(page.url || page.hostname || "")}</a>
+                </div>
+                <div class="aquatone-card__meta">
+                  <span>${escapeHTML(page.status || "")}</span>
+                  ${page.title ? `<span>${escapeHTML(page.title)}</span>` : ""}
+                </div>
+                <a class="aquatone-card__shot" href="${escapeHTML(screenshotUrl)}" data-aquatone-image-url="${escapeHTML(screenshotUrl)}" data-aquatone-image-title="${escapeHTML(page.url || page.hostname || "Aquatone page")}" target="_blank" rel="noopener noreferrer" aria-label="Open larger screenshot for ${escapeHTML(page.url || page.hostname || "Aquatone page")}">
+                  <img src="${escapeHTML(screenshotUrl)}" alt="${escapeHTML(page.url || page.hostname || "Aquatone screenshot")}" loading="lazy" />
+                </a>
+              </article>
+            `;
+          }).join("")}
         </div>
       </details>
     `).join("");
@@ -435,6 +443,32 @@ export function initScopeFilesFeature({
       if (aquatoneGallerySubtitle) {
         aquatoneGallerySubtitle.textContent = "Aquatone screenshots are not available yet.";
       }
+    }
+  }
+
+  function openAquatoneImagePreview(src, title) {
+    if (!aquatoneImageModal || !aquatoneImagePreview) {
+      window.open(src, "_blank", "noopener,noreferrer");
+      return;
+    }
+    aquatoneImagePreview.src = src;
+    aquatoneImagePreview.alt = title ? `Aquatone screenshot preview for ${title}` : "Aquatone screenshot preview";
+    if (aquatoneImageTitle) {
+      aquatoneImageTitle.textContent = "Screenshot";
+    }
+    if (aquatoneImageSubtitle) {
+      aquatoneImageSubtitle.textContent = title || "";
+    }
+    aquatoneImageModal.hidden = false;
+  }
+
+  function closeAquatoneImagePreview() {
+    if (!aquatoneImageModal) {
+      return;
+    }
+    aquatoneImageModal.hidden = true;
+    if (aquatoneImagePreview) {
+      aquatoneImagePreview.removeAttribute("src");
     }
   }
 
@@ -1151,6 +1185,10 @@ export function initScopeFilesFeature({
     }
   });
 
+  closeAquatoneImage?.addEventListener("click", () => {
+    closeAquatoneImagePreview();
+  });
+
   aquatoneDashboardSections?.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-aquatone-dashboard-action]");
     if (!button || button.disabled) {
@@ -1181,6 +1219,21 @@ export function initScopeFilesFeature({
     }
   });
 
+  aquatoneImageModal?.addEventListener("click", (event) => {
+    if (event.target === aquatoneImageModal) {
+      closeAquatoneImagePreview();
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    const imageLink = event.target.closest("a[data-aquatone-image-url]");
+    if (!imageLink) {
+      return;
+    }
+    event.preventDefault();
+    openAquatoneImagePreview(imageLink.dataset.aquatoneImageUrl || imageLink.href, imageLink.dataset.aquatoneImageTitle || "");
+  });
+
   document.addEventListener("click", (event) => {
     const clickedExportButton = openFileViewerExport?.contains(event.target);
     const clickedExportMenu = fileViewerExportMenu?.contains(event.target);
@@ -1196,6 +1249,10 @@ export function initScopeFilesFeature({
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") {
+      return;
+    }
+    if (aquatoneImageModal && !aquatoneImageModal.hidden) {
+      closeAquatoneImagePreview();
       return;
     }
     if (aquatoneGalleryModal && !aquatoneGalleryModal.hidden) {

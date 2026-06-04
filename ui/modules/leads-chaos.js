@@ -105,10 +105,55 @@ export function initLeadsChaosFeature({
     return `<code>${escapeHTML(normalized)}</code>`;
   }
 
+  function leadDetailStateKey(detail) {
+    if (!detail) {
+      return "";
+    }
+    if (detail.dataset.leadId) {
+      return `lead:${detail.dataset.leadId}`;
+    }
+    const section = detail.dataset.leadSection || "active";
+    const wildcard = detail.dataset.leadWildcard || "";
+    if (detail.dataset.leadDomain) {
+      return `domain:${section}:${wildcard}:${detail.dataset.leadDomain}`;
+    }
+    if (detail.dataset.leadRoot) {
+      return `root:${section}:${wildcard}:${detail.dataset.leadRoot}`;
+    }
+    return "";
+  }
+
+  function currentOpenLeadDetailKeys() {
+    if (!leadsWildcards) {
+      return new Set();
+    }
+    return new Set(
+      [...leadsWildcards.querySelectorAll("details[open]")]
+        .map((detail) => leadDetailStateKey(detail))
+        .filter(Boolean),
+    );
+  }
+
+  function restoreOpenLeadDetails(openKeys) {
+    if (!leadsWildcards || !openKeys?.size) {
+      return;
+    }
+    for (const detail of leadsWildcards.querySelectorAll("details")) {
+      if (openKeys.has(leadDetailStateKey(detail))) {
+        detail.open = true;
+      }
+    }
+  }
+
+  function leadCountValue(data, primaryKey, fallbackKey = "") {
+    return Number(data?.[primaryKey] ?? data?.[fallbackKey] ?? 0);
+  }
+
   function renderLeadListBlocks(wildcards, sectionClass = "") {
     if (!Array.isArray(wildcards) || !wildcards.length) {
       return '<p class="muted">No leads in this section.</p>';
     }
+    const sectionKey = sectionClass || "active";
     return wildcards.map((wc) => {
       const wildcardName = String(wc.wildcard || "(unmapped)").trim().toLowerCase();
       const domains = Array.isArray(wc.domains) ? wc.domains : [];
@@ -140,13 +185,14 @@ export function initLeadsChaosFeature({
                     : `<code>${escapeHTML(lead.target || "")}</code>`
                 }</div>
                 <div class="lead-item__actions">
-                  <label class="lead-done-toggle">
-                    <input type="checkbox" name="lead_done_${escapeHTML(lead.id || "")}" data-lead-action="done" data-lead-id="${escapeHTML(lead.id || "")}" ${lead.done ? "checked" : ""} />
-                    DONE
-                  </label>
-                  <button type="button" class="lead-options-button" data-lead-action="toggle-menu" data-lead-id="${escapeHTML(lead.id || "")}">Options</button>
-                  <button type="button" class="lead-replay-button" data-lead-action="replay" data-lead-id="${escapeHTML(lead.id || "")}">Replay</button>
-                </div>
+	                  <label class="lead-done-toggle">
+	                    <input type="checkbox" name="lead_done_${escapeHTML(lead.id || "")}" data-lead-action="done" data-lead-id="${escapeHTML(lead.id || "")}" ${lead.done ? "checked" : ""} />
+	                    DONE
+	                  </label>
+	                  <button type="button" class="lead-options-button" data-lead-action="toggle-menu" data-lead-id="${escapeHTML(lead.id || "")}">Options</button>
+	                  <button type="button" class="lead-replay-button" data-lead-action="replay" data-lead-id="${escapeHTML(lead.id || "")}">Replay</button>
+	                  <button type="button" class="lead-replay-button" data-lead-action="copy-curl" data-lead-id="${escapeHTML(lead.id || "")}" data-curl="${escapeHTML(lead.curl || "")}">Copy cURL</button>
+	                </div>
                 <div class="lead-item__menu" data-lead-menu="${escapeHTML(lead.id || "")}" hidden>
                   <button type="button" data-lead-action="bucket" data-bucket="hits" data-lead-id="${escapeHTML(lead.id || "")}">Hits</button>
                   <button type="button" data-lead-action="bucket" data-bucket="investigation" data-lead-id="${escapeHTML(lead.id || "")}">Further Investigation</button>
@@ -169,7 +215,7 @@ export function initLeadsChaosFeature({
               </details>
             `).join("");
             return `
-              <details class="lead-domain ${sectionClass}">
+              <details class="lead-domain ${sectionClass}" data-lead-section="${escapeHTML(sectionKey)}" data-lead-wildcard="${escapeHTML(wildcardName)}" data-lead-domain="${escapeHTML(domain.domain || "")}">
                 <summary>
                   <span><code>${escapeHTML(domain.domain || "")}</code></span>
                   <span class="lead-domain-meta">${escapeHTML(String(leads.length))} leads</span>
@@ -179,7 +225,7 @@ export function initLeadsChaosFeature({
             `;
           }).join("");
           return `
-            <details class="lead-root-block">
+            <details class="lead-root-block" data-lead-section="${escapeHTML(sectionKey)}" data-lead-wildcard="${escapeHTML(wildcardName)}" data-lead-root="${escapeHTML(rootDomain)}">
               <summary>
                 <span>${escapeHTML(rootDomain)}</span>
                 <span class="lead-domain-meta">${escapeHTML(String(rootDomains.length))} domains</span>
@@ -210,12 +256,17 @@ export function initLeadsChaosFeature({
     const investigationWildcards = Array.isArray(data?.investigation_wildcards) ? data.investigation_wildcards : [];
     const archiveWildcards = Array.isArray(data?.archive_wildcards) ? data.archive_wildcards : [];
     const updated = data?.updated_at ? `Updated ${new Date(data.updated_at).toLocaleTimeString()}` : "No lead data yet";
+    const openDetails = currentOpenLeadDetailKeys();
+    const totalLeads = leadCountValue(data, "total_leads", "lead_count");
+    const hitsCount = leadCountValue(data, "hits_count", "hit_count");
+    const investigationCount = leadCountValue(data, "investigation_count");
+    const archiveCount = leadCountValue(data, "archive_count");
     leadsStatus.textContent = updated;
     leadsSummary.innerHTML = `
-      <div class="lead-summary-card"><strong>${escapeHTML(String(data?.lead_count || 0))}</strong><span>Total Leads</span></div>
-      <div class="lead-summary-card"><strong>${escapeHTML(String(data?.hit_count || 0))}</strong><span>Hits</span></div>
-      <div class="lead-summary-card"><strong>${escapeHTML(String(data?.investigation_count || 0))}</strong><span>Further Investigation</span></div>
-      <div class="lead-summary-card"><strong>${escapeHTML(String(data?.archive_count || 0))}</strong><span>Archived</span></div>
+      <div class="lead-summary-card"><strong>${escapeHTML(String(totalLeads))}</strong><span>Total Leads</span></div>
+      <div class="lead-summary-card"><strong>${escapeHTML(String(hitsCount))}</strong><span>Hits</span></div>
+      <div class="lead-summary-card"><strong>${escapeHTML(String(investigationCount))}</strong><span>Further Investigation</span></div>
+      <div class="lead-summary-card"><strong>${escapeHTML(String(archiveCount))}</strong><span>Archived</span></div>
     `;
     leadsWildcards.innerHTML = `
       <section class="lead-section">
@@ -235,6 +286,7 @@ export function initLeadsChaosFeature({
         ${renderLeadListBlocks(archiveWildcards, "lead-card--archive")}
       </section>
     `;
+    restoreOpenLeadDetails(openDetails);
   }
 
   function renderChaos(data) {
@@ -298,10 +350,10 @@ export function initLeadsChaosFeature({
       const data = await fetchLeads();
       const signature = JSON.stringify({
         updated_at: data?.updated_at || "",
-        lead_count: data?.lead_count || 0,
-        hit_count: data?.hit_count || 0,
-        investigation_count: data?.investigation_count || 0,
-        archive_count: data?.archive_count || 0,
+        total_leads: leadCountValue(data, "total_leads", "lead_count"),
+        hits_count: leadCountValue(data, "hits_count", "hit_count"),
+        investigation_count: leadCountValue(data, "investigation_count"),
+        archive_count: leadCountValue(data, "archive_count"),
       });
       if (!options.force && signature === lastLeadsSignature) {
         return;
@@ -358,6 +410,25 @@ export function initLeadsChaosFeature({
     return response.json();
   }
 
+  async function copyTextToClipboard(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand("copy");
+    } finally {
+      textarea.remove();
+    }
+  }
+
   leadsWildcards?.addEventListener("click", async (event) => {
     const button = event.target.closest("button[data-lead-action]");
     if (!button) {
@@ -374,6 +445,20 @@ export function initLeadsChaosFeature({
       const menu = leadsWildcards.querySelector(`[data-lead-menu="${CSS.escape(leadId)}"]`);
       if (menu) {
         menu.hidden = !menu.hidden;
+      }
+      return;
+    }
+    if (action === "copy-curl") {
+      const curl = String(button.dataset.curl || "").trim();
+      if (!curl) {
+        leadsStatus.textContent = "No cURL available for this lead.";
+        return;
+      }
+      try {
+        await copyTextToClipboard(curl);
+        leadsStatus.textContent = "Copied cURL to clipboard.";
+      } catch (error) {
+        leadsStatus.textContent = `Copy failed: ${error.message}`;
       }
       return;
     }

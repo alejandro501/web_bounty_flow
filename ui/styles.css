@@ -1699,6 +1699,13 @@ button:active {
   flex-direction: column;
 }
 
+.modal-panel--image-preview {
+  width: min(96vw, 1600px);
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -1947,6 +1954,22 @@ button:active {
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
+}
+
+.aquatone-image-preview {
+  margin-top: 0.9rem;
+  overflow: auto;
+  display: grid;
+  place-items: start center;
+}
+
+.aquatone-image-preview img {
+  width: auto;
+  max-width: 100%;
+  max-height: 82vh;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #fff;
 }
 
 .log-view--table {

@@ -285,6 +285,7 @@ type leadItem struct {
 	Reasons      []string       `json:"reasons,omitempty"`
 	ManualAction string         `json:"manual_action,omitempty"`
 	Evidence     map[string]any `json:"evidence,omitempty"`
+	Curl         string         `json:"curl,omitempty"`
 	Source       string         `json:"source"`
 	Timestamp    string         `json:"timestamp,omitempty"`
 	Done         bool           `json:"done"`
@@ -2077,6 +2078,7 @@ func buildLeadItem(category, source string, row map[string]any, roots []string) 
 		Reasons:      reasons,
 		ManualAction: manualAction,
 		Evidence:     leadEvidence(row),
+		Curl:         buildLeadCurl(category, source, row),
 		Source:       source,
 		Timestamp:    strings.TrimSpace(asRawString(row["timestamp"])),
 	}

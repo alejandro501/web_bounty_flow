@@ -97,6 +97,11 @@ const aquatoneGalleryTitle = document.getElementById("aquatone-gallery-title");
 const aquatoneGallerySubtitle = document.getElementById("aquatone-gallery-subtitle");
 const aquatoneGalleryContent = document.getElementById("aquatone-gallery-content");
 const closeAquatoneGallery = document.getElementById("close-aquatone-gallery");
+const aquatoneImageModal = document.getElementById("aquatone-image-modal");
+const aquatoneImageTitle = document.getElementById("aquatone-image-title");
+const aquatoneImageSubtitle = document.getElementById("aquatone-image-subtitle");
+const aquatoneImagePreview = document.getElementById("aquatone-image-preview");
+const closeAquatoneImage = document.getElementById("close-aquatone-image");
 const aquatoneDashboardStatus = document.getElementById("aquatone-dashboard-status");
 const aquatoneDashboardSections = document.getElementById("aquatone-dashboard-sections");
 let activeViewName = document.body.dataset.activeView || "flow";
@@ -223,6 +228,11 @@ const scopeFilesFeature = initScopeFilesFeature({
   aquatoneGallerySubtitle,
   aquatoneGalleryContent,
   closeAquatoneGallery,
+  aquatoneImageModal,
+  aquatoneImageTitle,
+  aquatoneImageSubtitle,
+  aquatoneImagePreview,
+  closeAquatoneImage,
   aquatoneDashboardStatus,
   aquatoneDashboardSections,
 });
